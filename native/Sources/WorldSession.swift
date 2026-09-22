@@ -2953,6 +2953,8 @@ final class WorldSession {
     private var formspecFields: [Formspec.Field] = []                    // editable fields on a list-form (anvil rename, #229)
     private var formspecButtons: [Formspec.PositionedButton] = []        // tappable buttons on a list-form (#229)
     private var invWidgets: [(u: Float, v: Float, hw: Float, hh: Float, field: Formspec.Field?, button: Formspec.PositionedButton?)] = []   // laid-out tappable field/button boxes
+    private var formspecInfoTargets: [Formspec.InfoTarget] = []   // info-form tab/row tap regions in grid coords (#346)
+    private var infoTargets: [(u: Float, v: Float, hw: Float, hh: Float, field: String, value: String)] = []   // laid out in panel metres
     private var formspecImages: [Formspec.Image] = []                    // static image[] elements (furnace fire/arrow, #223)
     private var formspecBackgrounds: [Formspec.Background] = []          // background[]/background9[] panels (#244)
     private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool)] = []   // laid-out image quads (isItem: draw as an item icon)
@@ -3089,6 +3091,7 @@ final class WorldSession {
         invHeld = nil; invHover = nil; invCursor = nil
         formspecElements = []; formspecRings = []; formspecLabelsRaw = []; invLabels = []
         formspecFields = []; formspecButtons = []; invWidgets = []
+        formspecInfoTargets = []; infoTargets = []
         formspecImages = []; invImages = []; invBackgrounds = []; formspecTooltips = [:]; formspecBackgrounds = []
         formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
         // Tell the server the form was closed. A named show_formspec form (chests
@@ -3136,6 +3139,10 @@ final class WorldSession {
     /// form's quit like any other. Tab switching / row selection is a follow-up
     /// (the parsers already carry the field names) (#339).
     private func openInfoFormspec(spec: String, name: String) {
+        // A re-send of the SAME form (tab switch, row select echo) should keep
+        // the panel where it is instead of re-anchoring in front of the player
+        // on every tap (#346).
+        let reuse = formspecOpen && formspecName == name && invFrame != nil
         formspecContext = nil            // player form (show_formspec), not a node's meta form
         formspecElements = []
         formspecRings = []
@@ -3143,6 +3150,7 @@ final class WorldSession {
         formspecFields = []
         formspecButtons = []
         invWidgets = []
+        formspecInfoTargets = Formspec.infoTargets(spec)
         formspecImages = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
         formspecTooltips = [:]
         formspecBackgrounds = Formspec.parseBackgrounds(spec)
@@ -3150,9 +3158,9 @@ final class WorldSession {
         formspecName = name
         formspecOpen = true; inventoryOpen = true; formspecIsInventory = false
         invHeld = nil; invHover = nil; invCursor = nil
-        openInventoryPanel()
+        if reuse { layoutInventory() } else { openInventoryPanel() }
         refreshInventoryTiles()
-        print("[formspec] open info '\(name)' labels=\(formspecLabelsRaw.count) images=\(formspecImages.count)"); fflush(stdout)
+        print("[formspec] open info '\(name)' labels=\(formspecLabelsRaw.count) targets=\(formspecInfoTargets.count) reuse=\(reuse)"); fflush(stdout)
     }
 
     /// TOCLIENT_SHOW_FORMSPEC handler: an empty spec closes; otherwise parse the
@@ -3362,6 +3370,14 @@ final class WorldSession {
             invLabels = formspecLabelsRaw.map {
                 (u: $0.gx * p - cu, v: -$0.gy * p - cv, text: $0.text, color: $0.color)
             }
+            // Info-form tab/row tap boxes (achievements/Help): same grid->metre
+            // mapping as the labels, so a tap lands on the visible text. Invisible;
+            // hit-tested in handleInventoryInput to submit the tab index / textlist
+            // CHG event (#346). gy is the text's vertical centre, matching labels.
+            infoTargets = formspecInfoTargets.map {
+                (u: ($0.gx + $0.w * 0.5) * p - cu, v: -$0.gy * p - cv,
+                 hw: $0.w * 0.5 * p, hh: $0.h * 0.5 * p, field: $0.field, value: $0.value)
+            }
             // Tappable field/button boxes, centered on their grid rect (formspec
             // x,y is the box's top-left), recentered the same way as slots (#229).
             var widgets: [(u: Float, v: Float, hw: Float, hh: Float, field: Formspec.Field?, button: Formspec.PositionedButton?)] = []
@@ -3484,6 +3500,23 @@ final class WorldSession {
         let primary = gi.dig && !invPrevDig, secondary = gi.place && !invPrevPlace
         invPrevDig = gi.dig; invPrevPlace = gi.place
         guard primary || secondary else { return }
+        // Tap an info-form tab caption or textlist row (achievements/Help): submit
+        // the field so the server re-sends the form on that tab / with that entry
+        // selected (#346). A player form (no node context) submits via
+        // INVENTORY_FIELDS; a node info form via nodemeta. Doesn't close.
+        if primary, invHeld == nil, invHover == nil, let cur = invCursor, !infoTargets.isEmpty {
+            let rel = cur - fr.center
+            let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
+            if let t = infoTargets.first(where: { abs(u - $0.u) <= $0.hw && abs(v - $0.v) <= $0.hh }) {
+                if let ctx = formspecContext {
+                    client.sendNodeFields(pos: ctx, formname: formspecName, fields: [t.field: t.value])
+                } else {
+                    client.sendPlayerFields(formname: formspecName, fields: [t.field: t.value])
+                }
+                print("[formspec] info tap \(t.field)=\(t.value)"); fflush(stdout)
+                return
+            }
+        }
         // Tap a field/button box (anvil rename, etc.): a field opens the keyboard
         // and submits nodemeta fields; a button submits immediately (#229). Only
         // with an empty hand and no slot under the pointer, so item moves win.

@@ -515,6 +515,38 @@ public enum Formspec {
         parseTabHeader(spec) != nil || !parseTextlists(spec).isEmpty || !parseHypertexts(spec).isEmpty
     }
 
+    /// A tappable region on an info form: its grid rect (formspec units, same
+    /// coords infoFormLabels places its text at) plus the field name + value to
+    /// submit when tapped. Tabs submit the 1-based tab index; a textlist row
+    /// submits "CHG:<1-based index>", mirroring the engine's textlist event so
+    /// the server shows that entry (#346).
+    public struct InfoTarget: Equatable {
+        public let gx: Float, gy: Float, w: Float, h: Float
+        public let field: String, value: String
+    }
+
+    /// Hit regions for an info form, kept in lockstep with infoFormLabels'
+    /// placement so a tap lands on the visible text.
+    public static func infoTargets(_ spec: String) -> [InfoTarget] {
+        var out: [InfoTarget] = []
+        // gy matches infoFormLabels exactly (it draws each line with gy as the
+        // text's vertical CENTER), so the tap box lands on the visible text.
+        if let t = parseTabHeader(spec) {
+            for (i, cap) in t.captions.enumerated() {
+                out.append(InfoTarget(gx: 0.4 + Float(i) * 2.7, gy: 0.3, w: max(1.2, Float(cap.count) * 0.28 + 0.6), h: 0.7,
+                                      field: t.name, value: "\(i + 1)"))
+            }
+        }
+        let maxRows = 12
+        for tl in parseTextlists(spec) {
+            for i in 0..<min(tl.rows.count, maxRows) where !tl.rows[i].isEmpty {
+                out.append(InfoTarget(gx: tl.gx + 0.2, gy: tl.gy + 0.6 + Float(i) * 0.5, w: max(1.0, tl.w - 0.4), h: 0.5,
+                                      field: tl.name, value: "CHG:\(i + 1)"))
+            }
+        }
+        return out
+    }
+
     /// Split on commas that aren't backslash-escaped (`\,`), then drop the
     /// escaping backslash. Shared by textlist items and tabheader captions.
     static func splitUnescapedCommas(_ s: String) -> [String] {

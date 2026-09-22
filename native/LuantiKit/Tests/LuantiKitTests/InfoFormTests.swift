@@ -66,6 +66,21 @@ final class InfoFormTests: XCTestCase {
         XCTAssertTrue(texts.contains("Body line."))
     }
 
+    func testInfoTargetsFieldsAndValues() {
+        // Tab taps submit the 1-based index; textlist row taps submit CHG:<idx>.
+        let spec = "size[11,5]tabheader[0,0;tabs;Adv,Goals,Chal;1;false;false]" +
+                   "textlist[4.75,0;6,5;awards;One,Two,Three;1;false]"
+        let ts = Formspec.infoTargets(spec)
+        XCTAssertEqual(ts.filter { $0.field == "tabs" }.map { $0.value }, ["1", "2", "3"])
+        XCTAssertEqual(ts.filter { $0.field == "awards" }.map { $0.value }, ["CHG:1", "CHG:2", "CHG:3"])
+        // First row's gy must match infoFormLabels' first-row placement (tl.gy+0.6)
+        // so the invisible tap box sits on the drawn text.
+        XCTAssertEqual(ts.first { $0.field == "awards" }?.gy ?? -1, 0.6, accuracy: 0.001)
+        // Empty rows produce no target.
+        let ts2 = Formspec.infoTargets("textlist[0,1;6,5;l;A,,B;0;false]")
+        XCTAssertEqual(ts2.filter { $0.field == "l" }.map { $0.value }, ["CHG:1", "CHG:3"])
+    }
+
     func testTextlistCapsLongListWithMoreMarker() {
         let rows = (1...20).map { "Row\($0)" }.joined(separator: ",")
         let labels = Formspec.infoFormLabels("textlist[0,1;6,5;l;\(rows);1;false]")
