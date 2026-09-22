@@ -238,6 +238,7 @@ final class WorldSession {
     // pressing the inventory button submits it so you can get up. Without this a
     // sleep freeze (physics_override speed=0/jump=0) had no escape.
     private var noticeText: String? = nil
+    private var noticeExpiry: Double = 0          // uptime after which noticeText clears itself (0 = sticky)
     private var pendingButtonForm: (formname: String, button: String)? = nil
 
     /// Push the connection phase to the launcher (main actor). Also mirrors a
@@ -677,7 +678,7 @@ final class WorldSession {
             // override (speed restored) ends it.
             if speed == 0, jump == 0 {
                 self.pendingButtonForm = ("mcl_beds_form", "leave")
-                self.noticeText = "Press O to get up"
+                self.noticeText = "Press O to get up"; self.noticeExpiry = 0
             } else if self.pendingButtonForm?.formname == "mcl_beds_form" {
                 self.pendingButtonForm = nil; self.noticeText = nil
             }
@@ -2453,6 +2454,7 @@ final class WorldSession {
             fh.seekToEndOfFile(); try? fh.write(contentsOf: data); try? fh.close()
         } else { try? data.write(to: url) }
         noticeText = "Bug note saved"
+        noticeExpiry = ProcessInfo.processInfo.systemUptime + 2.5   // a quick confirmation, not a sticky banner
         print("[bugnote] \(context) -- \(body)"); fflush(stdout)
     }
 
@@ -2464,7 +2466,9 @@ final class WorldSession {
     /// is silent. The name is a sound group; resolveSound picks a variant.
     private func playDugSound(id: UInt16, at node: SIMD3<Int>) {
         playNodeSound(client.nodes.dugSound(id), at: node)
-        input.rumble(intensity: 0.5, sharpness: 0.7)   // a light tap when a block breaks (#357)
+        // A faint tick, not a buzz: at mining pace this fires every block, and
+        // 0.5 read as excessive on the Sense (bug note 2026-09-22).
+        input.rumble(intensity: 0.25, sharpness: 0.8)
     }
     /// Play a node sound group positionally at a node (dig loop / dug on break).
     private func playNodeSound(_ name: String?, at node: SIMD3<Int>) {
@@ -3212,7 +3216,7 @@ final class WorldSession {
             let buttons = Formspec.parseButtons(spec)
             if let b = buttons.first(where: { $0.name == "leave" }) ?? buttons.first {
                 pendingButtonForm = (name, b.name)
-                noticeText = "\(b.label.isEmpty ? "Get up" : b.label) — press O"
+                noticeText = "\(b.label.isEmpty ? "Get up" : b.label) — press O"; noticeExpiry = 0
                 print("[formspec] button dialog '\(name)' button=\(b.name)"); fflush(stdout)
             }
             return
@@ -5482,7 +5486,7 @@ final class WorldSession {
         let base = node(SIMD3(feet.x + bf.x * 3, feet.y, feet.z + bf.z * 3))
         let rx = Int(right.x.rounded()), rz = Int(right.z.rounded())
         // Carve the air above/around the row so it's visible from above at the
-        // busy spawn (look down with -vrdev.pitch -45 to see the bed TOP texture,
+        // busy spawn (look down with -vrdev.down 45 to see the bed TOP texture,
         // which is what the 64px atlas fix was for).
         for dx in -6...6 { for dz in -6...6 { for dy in 0...5 {
             client.world.setNode(SIMD3(base.x + dx, base.y + dy, base.z + dz), param0: WorldMap.CONTENT_AIR)
@@ -5552,7 +5556,7 @@ final class WorldSession {
     /// Sim aid (-vrdev.spawnRails 1): lay a straight run, an L-corner, a T and a
     /// cross of rails on a stone floor in a carved pit, so the raillike
     /// connection tiles + rotation (#140) can be eyeballed from above
-    /// (-vrdev.pitch -85). A corner should curve toward BOTH its neighbours; if
+    /// (-vrdev.down 85). A corner should curve toward BOTH its neighbours; if
     /// the curve bends the wrong way it's the Z-mirror flip to fix in railGeom.
     private func spawnSimRails() {
         let feet = player.snapshot().feet
@@ -6703,6 +6707,9 @@ final class WorldSession {
     private func appendStatusBanner(v: inout [Float], idx: inout [UInt32]) {
         // Crisp filled renderer, not renderTextRGBA at a small fontFrac -- the
         // load/connect banner was the last blurry text path (#175).
+        if noticeText != nil, noticeExpiry > 0, ProcessInfo.processInfo.systemUptime > noticeExpiry {
+            noticeText = nil; noticeExpiry = 0
+        }
         guard let msg = connProblem ?? noticeText ?? (terrainLoading ? "Loading terrain\u{2026}" : nil),
               highlightLayer >= 0,
               let t = formspecLabelLayer(String(msg.prefix(48))) else { return }
