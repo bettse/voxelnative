@@ -204,6 +204,10 @@ vertex ColorInOut entityVertex(Vertex in [[stage_in]],
 // pixel instead of a 64-texel stride). The node atlas carries a full mip
 // chain (MeshHandoff.makeAtlas); the model array does not and keeps nearest.
 constexpr sampler worldSampler(mag_filter::nearest, min_filter::linear, mip_filter::linear, max_anisotropy(4));
+// Liquid tops carry a per-cell UV translate (drawLiquidTop's tcoord_translate)
+// so the flow animation lines up across cells; that pushes UVs outside 0..1,
+// so this pass must wrap instead of clamping.
+constexpr sampler liquidSampler(mag_filter::nearest, min_filter::linear, mip_filter::linear, max_anisotropy(4), address::repeat);
 
 // Shared world shading: un-premultiply, biome tint, day/night light, saturation.
 static inline float4 worldLit(half4 c, ColorInOut in, constant Uniforms & uniforms)
@@ -287,7 +291,7 @@ fragment float4 liquidFragment(ColorInOut in [[stage_in]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                                texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
 {
-    half4 c = atlas.sample(worldSampler, in.uv, in.layer);
+    half4 c = atlas.sample(liquidSampler, in.uv, in.layer);
     half3 rgb = c.a > 0.0h ? c.rgb / c.a : c.rgb;   // un-premultiply
     rgb *= in.tint;                                 // biome palette tint (white = no change)
     // The mesher flags lava with a negative shade; it glows instead of being

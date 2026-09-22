@@ -543,7 +543,10 @@ actor Renderer {
     nonisolated static func simHeadOffset() -> simd_float4x4 {
         #if targetEnvironment(simulator)
         let d = UserDefaults.standard
-        let pitch = Float(d.double(forKey: "vrdev.pitch")) * .pi / 180
+        // -vrdev.down <deg> is the way to look down: UserDefaults reads a
+        // leading-dash value ("-vrdev.pitch -45") as the next flag, so
+        // negative pitches silently become 0.
+        let pitch = Float(d.double(forKey: "vrdev.pitch") - d.double(forKey: "vrdev.down")) * .pi / 180
         // -vrdev.spin <deg/sec>: a continuous auto-pan on top of the static yaw,
         // so a screen recording shows a smooth turn across the world for a demo
         // clip (no controller needed). Uses monotonic uptime so it's time-based.

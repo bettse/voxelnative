@@ -45,4 +45,30 @@ final class LiquidFlowUVTests: XCTestCase {
         // (1,0.5) is +0.5 along X from centre; a +Z turn sends it to +0.5 along Y.
         XCTAssertTrue(approx(WorldMesher.flowRotUV(SIMD2(1.0, 0.5), dir), SIMD2(0.5, 1.0)))
     }
+
+    /// The per-cell translate (#334) keeps the rotated texture continuous: a
+    /// point on the shared edge of two neighbouring cells must land on the same
+    /// texel (UVs equal modulo 1) whichever cell emits it, for any flow angle.
+    func testTranslateMakesNeighbouringCellsSeamless() {
+        // Our top face: u = local z, v = 1 - local x (see WorldMesher.faces/uv).
+        func cellUV(_ g: SIMD3<Int>, lx: Float, lz: Float, _ dir: SIMD2<Float>) -> SIMD2<Float> {
+            WorldMesher.flowRotUV(SIMD2(lz, 1 - lx), dir) + WorldMesher.flowTranslateUV(g, dir)
+        }
+        func sameTexel(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Bool {
+            let d = a - b
+            return abs(d.x - d.x.rounded()) < 1e-3 && abs(d.y - d.y.rounded()) < 1e-3
+        }
+        let dirs: [SIMD2<Float>] = [SIMD2(1, 0), SIMD2(0, 1), simd_normalize(SIMD2(1, 0.5)), simd_normalize(SIMD2(-0.3, -1))]
+        let g = SIMD3<Int>(37, 4, -12)
+        for dir in dirs {
+            // +X neighbour shares the x=1 edge of g with its own x=0 edge.
+            let a = cellUV(g, lx: 1, lz: 0.3, dir)
+            let b = cellUV(g &+ SIMD3(1, 0, 0), lx: 0, lz: 0.3, dir)
+            XCTAssertTrue(sameTexel(a, b), "x edge dir=\(dir) a=\(a) b=\(b)")
+            // +Z neighbour shares the z=1 edge.
+            let c = cellUV(g, lx: 0.7, lz: 1, dir)
+            let d = cellUV(g &+ SIMD3(0, 0, 1), lx: 0.7, lz: 0, dir)
+            XCTAssertTrue(sameTexel(c, d), "z edge dir=\(dir) c=\(c) d=\(d)")
+        }
+    }
 }

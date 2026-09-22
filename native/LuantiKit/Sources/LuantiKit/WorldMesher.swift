@@ -312,6 +312,17 @@ public enum WorldMesher {
         return SIMD2(dir.x * x - dir.y * y + 0.5, dir.y * x + dir.x * y + 0.5)
     }
 
+    /// Per-cell UV offset so the rotated flow texture continues seamlessly into
+    /// the next cell (drawLiquidTop's tcoord_translate). Our top face maps
+    /// u = local z and v = 1 - local x, so the cell's origin in that same UV
+    /// space is (g.z, -g.x); rotate it by the flow direction like the corners
+    /// and keep the fraction (whole-tile shifts vanish under repeat sampling).
+    static func flowTranslateUV(_ g: SIMD3<Int>, _ dir: SIMD2<Float>) -> SIMD2<Float> {
+        let bx = Float(g.z), by = Float(-g.x)
+        let r = SIMD2(dir.x * bx - dir.y * by, dir.y * bx + dir.x * by)
+        return r - r.rounded(.down)
+    }
+
     /// Source tile index to sample on world face `worldFace` (index into
     /// `faces`) for a plain cube under facedir `fd`: the source face whose local
     /// normal, rotated by `fd`, lands on this world face. fd==0 is the identity.
@@ -811,7 +822,8 @@ public enum WorldMesher {
                         var topUVs: [SIMD2<Float>]? = nil
                         if flowing, f.n.y > 0 {
                             let dir = WorldMesher.liquidFlowDir(h00: h00, h10: h10, h01: h01, h11: h11)
-                            for k in 0..<4 { ftopUV[k] = WorldMesher.flowRotUV(WorldMesher.uv[k], dir) }
+                            let tr = WorldMesher.flowTranslateUV(g, dir)
+                            for k in 0..<4 { ftopUV[k] = WorldMesher.flowRotUV(WorldMesher.uv[k], dir) + tr }
                             topUVs = ftopUV   // dead before the next top face mutates it (no COW copy)
                         }
                         emitQuad(corners, base: g, layer: layer, shade: lava ? -f.shade : f.shade,
