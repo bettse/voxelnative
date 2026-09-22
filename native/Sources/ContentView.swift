@@ -22,6 +22,10 @@ struct ContentView: View {
     // Editor fields for the selected/new server. editID is nil for an unsaved
     // one-off (typed in but not added to favorites).
     @State private var editID: UUID?
+    // Which saved server the Play button will launch. Its own source of truth,
+    // not editID (which only tracks what the editor sheet has open): tapping a
+    // row selects, Play connects (#353).
+    @State private var selectedID: UUID?
     @State private var label = ""
     @State private var host = ""
     @State private var portText = ""
@@ -69,8 +73,11 @@ struct ContentView: View {
     private var launcher: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("VoxeLibre").font(.largeTitle.bold())
-                Text("Choose a server").font(.headline).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("VoxelNative").font(.largeTitle.bold())
+                    Text("A Luanti client for Apple Vision Pro").font(.subheadline).foregroundStyle(.secondary)
+                }
+                Text("Choose a server").font(.headline).foregroundStyle(.secondary).padding(.top, 4)
 
                 favoritesList
                 statusRow
@@ -79,13 +86,26 @@ struct ContentView: View {
                 Divider()
                 soundSection
                 Divider()
-                testingSection
-
-                Text("Immersive: \(String(describing: appModel.immersiveSpaceState))")
-                    .font(.footnote).foregroundStyle(.secondary)
+                advancedSection
             }
             .padding(40)
+            .padding(.bottom, 40)   // room above the Play ornament
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // A persistent Play button on the glass edge is the obvious primary
+        // action; tapping a server row only selects it now (#353).
+        .ornament(attachmentAnchor: .scene(.bottom)) {
+            Button {
+                if let p = playTarget { connect(to: p) }
+            } label: {
+                Label(connecting ? phaseText : "Play", systemImage: "play.fill")
+                    .font(.title3).padding(.horizontal, 14).padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.extraLarge)
+            .disabled(connecting || !controllerGate || playTarget == nil)
+            .padding(12)
+            .glassBackgroundEffect(in: .capsule)
         }
         // Let the form fill the window width instead of capping at a fixed max:
         // the window is freely resizable, so a fixed content width left an empty
@@ -95,6 +115,7 @@ struct ContentView: View {
         .sheet(isPresented: $showEditor) { editorSheet }
         .onAppear {
             if editID == nil, let s = store.selected { loadFields(from: s) }
+            if selectedID == nil { selectedID = store.selected?.id ?? store.profiles.first?.id }   // Play needs a target (#353)
             // Automated loop only: auto-connect to the selected server so a
             // screenshot can be taken without tapping Connect.
             if !autoConnectStarted, UserDefaults.standard.bool(forKey: "vrdev.autoConnect") {
@@ -114,34 +135,53 @@ struct ContentView: View {
 
     private var favoritesList: some View {
         VStack(spacing: 6) {
-            // Triggering a favorite CONNECTS to it directly (no need to load the
-            // form then hit Connect). The pencil opens it in the editor below for
-            // editing without launching.
-            ForEach(store.profiles) { p in
-                HStack(spacing: 8) {
-                    Button { connect(to: p) } label: { serverRow(p) }
-                        .buttonStyle(.plain)
-                        .disabled(!controllerGate || connecting)
-                    Button { loadFields(from: p); showEditor = true } label: {
-                        Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
+            if store.profiles.isEmpty {
+                // First run / everything deleted: guide the one thing to do here.
+                ContentUnavailableView {
+                    Label("No servers yet", systemImage: "server.rack")
+                } description: {
+                    Text("Add a Luanti server to start playing.")
+                } actions: {
+                    Button { newServer(); showEditor = true } label: { Label("Add server", systemImage: "plus.circle") }
+                        .buttonStyle(.borderedProminent)
                 }
-                // Tapping a row does nothing until both controllers are on
-                // (controllerGate); dim the rows so that reads as gated, not
-                // broken (a bare disabled tap gave no feedback -- Eric hit this
-                // with the left Sense off). The statusRow says why.
-                .opacity(controllerGate ? 1 : 0.4)
+            } else {
+                // Tapping a row SELECTS it (drives the radio); the Play ornament
+                // launches the selected server. The pencil opens the editor sheet
+                // without launching (#353).
+                ForEach(store.profiles) { p in
+                    HStack(spacing: 8) {
+                        Button { select(p) } label: { serverRow(p) }
+                            .buttonStyle(.plain)
+                        Button { loadFields(from: p); showEditor = true } label: {
+                            Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.secondary)
+                                .padding(10).contentShape(Rectangle())   // bigger eye+pinch target (#355)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Button { newServer(); showEditor = true } label: {
+                    Label("Add server", systemImage: "plus.circle").frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain).foregroundStyle(.tint).padding(.top, 2)
             }
-            Button { newServer(); showEditor = true } label: {
-                Label("Add server", systemImage: "plus.circle").frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain).foregroundStyle(.tint).padding(.top, 2)
         }
     }
 
+    /// The saved server Play launches: the selected one, else the store's active
+    /// default, else the first. nil only when there are no servers at all (#353).
+    private var playTarget: ServerProfile? {
+        if let id = selectedID, let p = store.profiles.first(where: { $0.id == id }) { return p }
+        return store.selected ?? store.profiles.first
+    }
+
+    private func select(_ p: ServerProfile) {
+        selectedID = p.id
+        loadFields(from: p)   // keep editor + connect() state in sync with the pick
+    }
+
     private func serverRow(_ p: ServerProfile) -> some View {
-        let selected = p.id == editID
+        let selected = p.id == selectedID
         let subtitle = "\(p.host):\(String(p.port))  ·  \(p.playerName)"
         return HStack {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
@@ -321,17 +361,25 @@ struct ContentView: View {
 
     // MARK: - Testing mode (in-headset bug notes)
 
-    private var testingSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Testing").font(.headline).foregroundStyle(.secondary)
-            Toggle("Testing mode", isOn: $testingMode).toggleStyle(.switch).frame(maxWidth: 320)
-            if testingMode {
-                // Bug capture happens in-game (the Kogane menu's "Bug note"),
-                // where you can see the bug -- a launcher text field is useless
-                // mid-session, so it's gone (#239). This just enables that option.
-                Text("Adds a \u{201C}Bug note\u{201D} option to the in-game menu (captures your view + position with the logs).")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    // Testing mode + the immersive-state readout are dev affordances, not for a
+    // first-time player, so they live collapsed under "Advanced" (#354).
+    private var advancedSection: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Testing mode", isOn: $testingMode).toggleStyle(.switch).frame(maxWidth: 320)
+                if testingMode {
+                    // Bug capture happens in-game (the Kogane menu's "Bug note"),
+                    // where you can see the bug -- a launcher text field is useless
+                    // mid-session, so it's gone (#239). This just enables that option.
+                    Text("Adds a \u{201C}Bug note\u{201D} option to the in-game menu (captures your view + position with the logs).")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Immersive: \(String(describing: appModel.immersiveSpaceState))")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
+            .padding(.top, 6)
+        } label: {
+            Text("Advanced").font(.headline).foregroundStyle(.secondary)
         }
     }
 
@@ -339,16 +387,17 @@ struct ContentView: View {
 
     private var displaySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Display").font(.headline)
-            HStack {
-                Text("View distance").frame(width: 120, alignment: .leading)
-                Slider(value: $viewBlocks, in: Double(ViewSettings.minBlocks)...Double(ViewSettings.maxBlocks), step: 1)
-                Text("\(Int(viewBlocks))")
-                    .monospacedDigit().lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(width: 40, alignment: .trailing)
-                    .foregroundStyle(.secondary)
+            Text("Display").font(.headline).foregroundStyle(.secondary)
+            // A stepper, not a slider: view distance is a small integer and a
+            // pinch-drag slider is fiddly to land exactly in 3D space (#355).
+            Stepper(value: $viewBlocks, in: Double(ViewSettings.minBlocks)...Double(ViewSettings.maxBlocks), step: 1) {
+                HStack {
+                    Text("View distance")
+                    Spacer()
+                    Text("\(Int(viewBlocks)) blocks").monospacedDigit().foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: 360)
             Text("Lower = fewer blocks drawn (cooler/quieter, shorter view).")
                 .font(.footnote).foregroundStyle(.secondary)
         }
@@ -365,7 +414,7 @@ struct ContentView: View {
 
     private var soundSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Sound").font(.headline)
+            Text("Sound").font(.headline).foregroundStyle(.secondary)
             volumeSlider("Master", value: $volMaster) { VolumeSettings.shared.master = $0 }
             volumeSlider("Music", value: $volMusic) { VolumeSettings.shared.music = $0 }
             volumeSlider("Effects", value: $volSfx) { VolumeSettings.shared.sfx = $0 }

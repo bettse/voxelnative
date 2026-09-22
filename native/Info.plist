@@ -50,7 +50,7 @@
         <key>UIApplicationSupportsMultipleScenes</key><true/>
     </dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to the VoxeLibre game server on your local network.</string>
+	<string>Connect to a Luanti game server on your local network.</string>
 	<!-- Dictation on the in-game keyboard (bug notes, chat): the immersive
 	     Metal space has no UIKit text field, so the system keyboard can't
 	     appear there; the mic key transcribes speech instead. -->
