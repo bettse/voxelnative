@@ -8,6 +8,8 @@ It's built and tested against [VoxeLibre](https://git.minetest.land/VoxeLibre/Vo
 (the Minecraft-style flagship game), so that's where the UX polish is focused,
 but the protocol layer is game-agnostic and will connect to any Luanti server.
 
+🌐 **Website:** https://bettse.github.io/voxelnative/
+
 The client renders the real world in stereo with Compositor Services, streams
 and meshes live map blocks, and lets you walk around, dig, place, and poke at
 inventories using the PSVR2 Sense controllers (or a BLE keyboard and mouse).
