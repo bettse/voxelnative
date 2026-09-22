@@ -91,8 +91,6 @@ server and playing is real. 🛠️
 - `repos/` 📚 upstream repos cloned just for reading (not vendored): `luanti`
   (engine source, protocol in `src/network/`) and `miney` (a Python protocol
   client, proof the protocol works from outside the engine).
-- `client/` 🪦 leftovers from an earlier, abandoned Godot-based attempt. Kept for
-  history only. The native client above is the current work.
 
 ## 🏗️ Build and run
 
@@ -118,9 +116,8 @@ Handy helpers, all run from `native/`:
 
 Server-side, `tools/server.sh` runs a local VoxeLibre dev server (config in
 `tools/server.conf`) and `tools/media_server.py` serves media over HTTP. In the
-simulator the app connects to `127.0.0.1`; on device it uses the Mac's LAN IP.
-Server host/port are set on the launcher screen (or in
-`native/Sources/WorldSession.swift`).
+simulator the app connects to `127.0.0.1`; on device you enter your server's
+address on the launcher screen (there's no baked-in default).
 
 ## 🧪 Tests
 

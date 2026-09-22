@@ -39,8 +39,14 @@ GIT_HASH="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 # Crash symbolication: the dSYM is next to the app in
 # $DERIVED/Build/Products/Release-xros/ (atos -o VoxelNative.app.dSYM/...).
 CONFIG="${DEPLOY_CONFIG:-Release}"
+# Device signing needs an Apple Developer team, but that's personal and kept out
+# of the public repo (project.yml ships team-less). Put DEVELOPMENT_TEAM=... in a
+# local, gitignored native/.env and it's sourced here so your own builds sign;
+# without it, xcodebuild just tells you to pick a team.
+[ -f "$HERE/.env" ] && set -a && . "$HERE/.env" && set +a
+TEAM_ARG=(); [ -n "${DEVELOPMENT_TEAM:-}" ] && TEAM_ARG=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM")
 xcodebuild -project VoxelNative.xcodeproj -scheme VoxelNative -configuration "$CONFIG" \
-  -destination "id=$DEV" -derivedDataPath "$DERIVED" -allowProvisioningUpdates GIT_HASH="$GIT_HASH" build 2>&1 \
+  -destination "id=$DEV" -derivedDataPath "$DERIVED" -allowProvisioningUpdates "${TEAM_ARG[@]}" GIT_HASH="$GIT_HASH" build 2>&1 \
   | grep -E 'error:|BUILD' | grep -viE 'UsageDescription' | tee /tmp/voxel_deploy_build.txt || true
 # A failed build leaves the PREVIOUS app in Build/Products, and installing
 # that silently ships stale code: it did for most of a day when device-only
