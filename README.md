@@ -63,7 +63,7 @@ map, and renders it live in the headset. Highlights:
   sneaking, swimming, climbing ladders/climbables, and collision against real
   node collision boxes.
 - 🖐️ **Input**: PSVR2 Sense controllers (6DoF, sticks, triggers, grips,
-  buttons, basic rumble), with a BLE keyboard and BLE mouse/trackpad as
+  buttons, and haptic feedback on dig/hit/damage where the controller supports it), with a BLE keyboard and BLE mouse/trackpad as
   alternatives.
 
 Still a work in progress and rough in places, but the core loop of joining a
@@ -161,7 +161,7 @@ what streamed in. It's a separate package target and isn't part of the app.
 
 ## ⚠️ Gotchas
 
-- 🎮 On visionOS the PSVR2 gives 6DoF, buttons, sticks, and basic rumble.
+- 🎮 On visionOS the PSVR2 gives 6DoF, buttons, sticks, and haptics (where the controller exposes them).
   Precision haptics and adaptive triggers do not come through.
 - 🕳️ The depth buffer is used for reprojection, so a pixel at depth 0 gets
   dropped to black. The sky pass writes a tiny non-zero depth to avoid that.

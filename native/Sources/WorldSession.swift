@@ -549,6 +549,7 @@ final class WorldSession {
             // keyed off our own [fall] report.
             if hp < self.hp, self.hp > 0, damageEffect {
                 self.damageFlash = 0.35
+                self.input.rumble(intensity: 1.0, sharpness: 0.35, duration: 0.12)   // a solid hit buzz (#357)
                 let fall = self.recentFallDamage > 0
                 self.recentFallDamage = 0
                 self.queue.async {
@@ -2463,6 +2464,7 @@ final class WorldSession {
     /// is silent. The name is a sound group; resolveSound picks a variant.
     private func playDugSound(id: UInt16, at node: SIMD3<Int>) {
         playNodeSound(client.nodes.dugSound(id), at: node)
+        input.rumble(intensity: 0.5, sharpness: 0.7)   // a light tap when a block breaks (#357)
     }
     /// Play a node sound group positionally at a node (dig loop / dug on break).
     private func playNodeSound(_ name: String?, at node: SIMD3<Int>) {
@@ -2558,6 +2560,7 @@ final class WorldSession {
                 punchRepeat -= dt
                 if gi.dig && (!prevDig || punchRepeat <= 0) {
                     client.sendInteract(action: 0, objectId: obj.id)
+                    input.rumble(intensity: 0.7, sharpness: 0.6)   // hit feedback on a melee punch (#357)
                     client.objects.flash(obj.id, seconds: 0.25)   // immediate hit feedback (#149), not waiting on PUNCHED
                     punchRepeat = 0.2
                     print("[melee] punch object \(obj.id)"); fflush(stdout)

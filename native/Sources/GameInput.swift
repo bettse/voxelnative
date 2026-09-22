@@ -1,5 +1,6 @@
 import Foundation
 import GameController
+import CoreHaptics
 import simd
 
 /// Reads locomotion/action input from the PSVR2 Sense controllers via the Game
@@ -46,6 +47,12 @@ final class GameInput {
     private(set) var mousePresent = false       // a BLE mouse/trackpad turns + digs/places
     private var discoveryTimer: Timer?
 
+    // One CHHapticEngine per connected controller, made from GCController.haptics
+    // (the Game Controller framework's bridge to CoreHaptics). Empty if the Sense
+    // exposes no haptics on visionOS -- rumble() then no-ops, so callers never
+    // have to check (#357).
+    private var hapticEngines: [ObjectIdentifier: CHHapticEngine] = [:]
+
     // Mouse movement is delivered ONLY through a callback (no pollable delta), so
     // accumulate deltas off whatever queue fires them and drain once per poll.
     private let mouseLock = NSLock()
@@ -68,6 +75,7 @@ final class GameInput {
             print("[input] GCControllerDidConnect vendor=\(c?.vendorName ?? "?") cat=\(c?.productCategory ?? "?") ext=\(c?.extendedGamepad != nil)"); fflush(stdout)
             self?.assignPlayerIndices()
             self?.refresh()
+            c.map { self?.setupHaptics($0) }
             // A controller can pair while discovery has stopped; restart it so
             // the next one (e.g. the second Sense controller) is found too.
             GCController.startWirelessControllerDiscovery {}
@@ -75,6 +83,7 @@ final class GameInput {
         nc.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] note in
             let c = note.object as? GCController
             print("[input] GCControllerDidDisconnect vendor=\(c?.vendorName ?? "?")"); fflush(stdout)
+            if let c { self?.hapticEngines[ObjectIdentifier(c)]?.stop(); self?.hapticEngines[ObjectIdentifier(c)] = nil }
             self?.assignPlayerIndices()
             self?.refresh()
         }
@@ -82,6 +91,7 @@ final class GameInput {
         // pick up anything already paired at launch.
         GCController.startWirelessControllerDiscovery {}
         refresh()
+        GCController.controllers().forEach { setupHaptics($0) }   // haptics for anything paired at launch (#357)
         // Keep discovery alive: a second controller turned on well after the
         // first fired no connect in testing, and re-arming discovery gives it
         // (and any late pair) a fresh chance to surface.
@@ -110,6 +120,58 @@ final class GameInput {
             self.mouseLock.lock(); self.mouseAccumX += dx; self.mouseLock.unlock()
         }
         print("[input] mouse hooked vendor=\(m.vendorName ?? "?")"); fflush(stdout)
+    }
+
+    // MARK: - Haptics (#357)
+
+    /// Build (once) a CoreHaptics engine for a controller, if it exposes haptics.
+    /// The Sense may report no haptic locality through GameController on visionOS,
+    /// in which case we log that and stay silent (no engine stored).
+    private func setupHaptics(_ c: GCController) {
+        let key = ObjectIdentifier(c)
+        guard hapticEngines[key] == nil else { return }
+        guard let hap = c.haptics else {
+            print("[haptics] \(c.vendorName ?? "?"): no GCDeviceHaptics"); fflush(stdout); return
+        }
+        let localities = hap.supportedLocalities
+        guard let engine = hap.createEngine(withLocality: .default) else {
+            print("[haptics] \(c.vendorName ?? "?"): createEngine(.default) failed; localities=\(localities)"); fflush(stdout); return
+        }
+        // The engine can be stopped by the system (app backgrounded, route
+        // change); restart it so the next rumble still fires.
+        engine.stoppedHandler = { reason in print("[haptics] engine stopped: \(reason.rawValue)"); fflush(stdout) }
+        engine.resetHandler = { [weak engine] in try? engine?.start() }
+        do { try engine.start() } catch {
+            print("[haptics] engine start failed: \(error)"); fflush(stdout); return
+        }
+        hapticEngines[key] = engine
+        print("[haptics] engine ready for \(c.vendorName ?? "?") localities=\(localities)"); fflush(stdout)
+    }
+
+    /// Fire a short buzz on every connected controller. Safe to call from the
+    /// game loop: it no-ops when no engine exists (unsupported Sense / sim).
+    /// intensity/sharpness 0..1; a transient tap by default, a short continuous
+    /// buzz when duration is given.
+    func rumble(intensity: Float = 0.7, sharpness: Float = 0.5, duration: TimeInterval = 0) {
+        // Game events fire on the session queue; the engines are made/mutated on
+        // main (connect/disconnect), so hop to main to touch them safely.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.hapticEngines.isEmpty else { return }
+            let params = [CHHapticEventParameter(parameterID: .hapticIntensity, value: max(0, min(1, intensity))),
+                          CHHapticEventParameter(parameterID: .hapticSharpness, value: max(0, min(1, sharpness)))]
+            let event = duration > 0
+                ? CHHapticEvent(eventType: .hapticContinuous, parameters: params, relativeTime: 0, duration: duration)
+                : CHHapticEvent(eventType: .hapticTransient, parameters: params, relativeTime: 0)
+            guard let pattern = try? CHHapticPattern(events: [event], parameters: []) else { return }
+            for engine in self.hapticEngines.values {
+                do {
+                    let player = try engine.makePlayer(with: pattern)
+                    try player.start(atTime: CHHapticTimeImmediate)
+                } catch {
+                    try? engine.start()   // was stopped; re-arm for next time
+                }
+            }
+        }
     }
 
     /// Give every connected controller a distinct player index. Forcing them all
