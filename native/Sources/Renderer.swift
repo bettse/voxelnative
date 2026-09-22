@@ -544,7 +544,12 @@ actor Renderer {
         #if targetEnvironment(simulator)
         let d = UserDefaults.standard
         let pitch = Float(d.double(forKey: "vrdev.pitch")) * .pi / 180
+        // -vrdev.spin <deg/sec>: a continuous auto-pan on top of the static yaw,
+        // so a screen recording shows a smooth turn across the world for a demo
+        // clip (no controller needed). Uses monotonic uptime so it's time-based.
+        let spin = d.double(forKey: "vrdev.spin")
         let yaw = Float(d.double(forKey: "vrdev.yaw")) * .pi / 180
+                + (spin != 0 ? Float(ProcessInfo.processInfo.systemUptime * spin) * .pi / 180 : 0)
         if pitch == 0 && yaw == 0 { return matrix_identity_float4x4 }
         // Yaw about the world up axis, then pitch about the head's right axis;
         // +pitch tilts the forward (-Z) ray up toward +Y.
