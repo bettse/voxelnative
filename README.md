@@ -10,6 +10,14 @@ but the protocol layer is game-agnostic and will connect to any Luanti server.
 
 🌐 **Website:** https://bettse.github.io/voxelnative/
 
+> [!IMPORTANT]
+> **🤖 AI disclaimer.** This project was built largely with the help of an AI
+> coding assistant (an LLM). The code, comments, and this README may contain
+> mistakes, half-truths, or things that drifted out of date. Please read the
+> code and verify anything before you rely on it, and don't assume a described
+> feature works exactly as written until you've seen it yourself. Bug reports
+> and fixes are very welcome. 🙏
+
 The client renders the real world in stereo with Compositor Services, streams
 and meshes live map blocks, and lets you walk around, dig, place, and poke at
 inventories using the PSVR2 Sense controllers (or a BLE keyboard and mouse).
@@ -164,15 +172,6 @@ what streamed in. It's a separate package target and isn't part of the app.
   linear.
 - 👀 The server frustum-culls block streaming toward your reported look
   direction, so the client sends head yaw/pitch in PLAYERPOS.
-
-## 🤖 LLM disclaimer
-
-This project was built largely with the help of an AI coding assistant (an LLM).
-That means the code, comments, and this very README may contain mistakes,
-half-truths, or things that drifted out of date. Please read the code and verify
-anything before you rely on it, and do not assume a described feature works
-exactly as written until you have seen it yourself. Bug reports and fixes are
-very welcome. 🙏
 
 ## 📜 License
 
