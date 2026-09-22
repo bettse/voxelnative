@@ -1,0 +1,102 @@
+import XCTest
+@testable import LuantiKit
+
+/// Client-side inventory prediction: the pure apply* helpers mirror the server's
+/// Move/Drop/MoveSomewhere merge/swap/clamp rules so the panel can update
+/// instantly (the server echo reconciles). #224.
+final class InventoryPredictionTests: XCTestCase {
+    typealias Stack = Client.ItemStack
+    // Most items stack to 64 in VoxeLibre; a couple of overrides to exercise clamp.
+    private let sm: (String) -> Int = { $0 == "mcl_core:snowball" ? 16 : 64 }
+
+    private func stack(_ name: String, _ count: Int, _ wear: Int = 0) -> Stack { Stack(name: name, count: count, wear: wear) }
+
+    func testMoveIntoEmpty() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10), nil]]
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 0, stackMax: sm)
+        XCTAssertNil(lists["main"]![0])
+        XCTAssertEqual(lists["main"]![1]?.count, 10)
+        XCTAssertEqual(lists["main"]![1]?.name, "dirt")
+    }
+
+    func testMovePartialIntoEmpty() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10), nil]]
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 3, stackMax: sm)
+        XCTAssertEqual(lists["main"]![0]?.count, 7)
+        XCTAssertEqual(lists["main"]![1]?.count, 3)
+    }
+
+    func testMergeClampsToStackMax() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 40), stack("dirt", 50)]]
+        // 40 onto 50 (max 64): 14 fit, 26 stay behind.
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 0, stackMax: sm)
+        XCTAssertEqual(lists["main"]![1]?.count, 64)
+        XCTAssertEqual(lists["main"]![0]?.count, 26)
+    }
+
+    func testMergeRespectsSmallStackMax() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("mcl_core:snowball", 10), stack("mcl_core:snowball", 12)]]
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 0, stackMax: sm)
+        XCTAssertEqual(lists["main"]![1]?.count, 16)   // clamped to 16
+        XCTAssertEqual(lists["main"]![0]?.count, 6)
+    }
+
+    func testWholeStackSwapsDifferentItems() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10), stack("cobble", 5)]]
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 0, stackMax: sm)
+        XCTAssertEqual(lists["main"]![0]?.name, "cobble")
+        XCTAssertEqual(lists["main"]![0]?.count, 5)
+        XCTAssertEqual(lists["main"]![1]?.name, "dirt")
+        XCTAssertEqual(lists["main"]![1]?.count, 10)
+    }
+
+    func testPartialMoveOntoDifferentItemIsNoop() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10), stack("cobble", 5)]]
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 3, stackMax: sm)
+        XCTAssertEqual(lists["main"]![0]?.count, 10)   // unchanged
+        XCTAssertEqual(lists["main"]![1]?.name, "cobble")
+    }
+
+    func testMoveAcrossLists() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10)], "craft": [nil]]
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "craft", toIdx: 0, count: 4, stackMax: sm)
+        XCTAssertEqual(lists["main"]![0]?.count, 6)
+        XCTAssertEqual(lists["craft"]![0]?.count, 4)
+    }
+
+    func testDropRemoves() {
+        var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10)]]
+        Client.applyDrop(&lists, fromList: "main", fromIdx: 0, count: 3)
+        XCTAssertEqual(lists["main"]![0]?.count, 7)
+        Client.applyDrop(&lists, fromList: "main", fromIdx: 0, count: 0)   // whole stack
+        XCTAssertNil(lists["main"]![0])
+    }
+
+    func testMoveSomewhereFillsThenSpills() {
+        // Send 30 dirt somewhere in a list that has a 60-stack (4 space) and 2 empties.
+        var lists: [String: [Client.ItemStack?]] = [
+            "src": [stack("dirt", 30)],
+            "dst": [stack("dirt", 60), nil, nil],
+        ]
+        Client.applyMoveSomewhere(&lists, fromList: "src", fromIdx: 0, toList: "dst", count: 0, stackMax: sm)
+        XCTAssertEqual(lists["dst"]![0]?.count, 64)   // topped up (4)
+        XCTAssertEqual(lists["dst"]![1]?.count, 26)   // remaining 26 into the first empty
+        XCTAssertNil(lists["src"]![0])                // source drained
+    }
+
+    func testPredictParsesMoveString() {
+        let c = Client(name: "t", password: "")
+        c.debugSetInventory(["main": [stack("dirt", 10), nil]])
+        c.predictInventoryAction("Move 0 current_player main 0 current_player main 1")
+        XCTAssertNil(c.inventory["main"]![0])
+        XCTAssertEqual(c.inventory["main"]![1]?.count, 10)
+    }
+
+    func testPredictIgnoresNonPlayerLocations() {
+        let c = Client(name: "t", password: "")
+        c.debugSetInventory(["main": [stack("dirt", 10)]])
+        // A move into a chest (nodemeta) isn't predicted (server echo owns it).
+        c.predictInventoryAction("Move 0 current_player main 0 nodemeta:1,2,3 main 0")
+        XCTAssertEqual(c.inventory["main"]![0]?.count, 10)   // untouched
+    }
+}

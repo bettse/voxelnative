@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxelNative — a native Luanti client for Apple Vision Pro</title>
+<meta name="description" content="Play Luanti / Minetest voxel games in full stereo immersion on Apple Vision Pro. A native Swift + Metal client that speaks the Luanti protocol directly.">
+<meta property="og:title" content="VoxelNative — Luanti on Apple Vision Pro">
+<meta property="og:description" content="A native Swift + Metal client that speaks the Luanti UDP protocol, so an unmodified server hands you the whole game in full stereo immersion.">
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #262d38;
+    --text: #e6edf3; --dim: #9aa7b4; --accent: #5ac8fa; --accent2: #7ee787;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+  .btn {
+    display: inline-block; padding: 12px 22px; border-radius: 10px;
+    background: var(--accent); color: #04121b; font-weight: 700; text-decoration: none;
+    border: 1px solid transparent;
+  }
+  .btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+  .btn + .btn { margin-left: 10px; }
+
+  header.hero {
+    text-align: center; padding: 84px 20px 60px;
+    background:
+      radial-gradient(1200px 500px at 50% -10%, rgba(90,200,250,.18), transparent 70%),
+      linear-gradient(180deg, #0e1116, #0e1116);
+    border-bottom: 1px solid var(--line);
+  }
+  .hero .eyebrow { color: var(--accent2); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+  .hero h1 { font-size: clamp(30px, 6vw, 54px); line-height: 1.1; margin: 12px 0 8px; }
+  .hero p.lead { color: var(--dim); font-size: clamp(16px, 2.4vw, 20px); max-width: 640px; margin: 0 auto 26px; }
+  .hero .cta { margin-top: 8px; }
+
+  section { padding: 56px 0; border-bottom: 1px solid var(--line); }
+  section h2 { font-size: clamp(22px, 3.4vw, 30px); margin: 0 0 6px; }
+  section .sub { color: var(--dim); margin: 0 0 30px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--dim); font-size: 15px; }
+
+  .shots { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  figure img { display: block; width: 100%; height: auto; }
+  figcaption { padding: 10px 14px; color: var(--dim); font-size: 14px; }
+
+  pre {
+    background: #0b0f14; border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; overflow-x: auto; font-size: 13.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #cdd9e5;
+  }
+  ul.plain { padding-left: 20px; color: var(--dim); }
+  ul.plain li { margin: 6px 0; }
+  footer { padding: 40px 20px 60px; text-align: center; color: var(--dim); font-size: 14px; }
+  .note { font-size: 13px; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">🕶️🧱 Apple Vision Pro</div>
+    <h1>VoxelNative</h1>
+    <p class="lead">A native Luanti client for Apple Vision Pro. Play Luanti /
+      Minetest voxel games in full stereo immersion — no PC streaming, no server
+      mods, just the whole game rendered live in the headset.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/bettse/voxelnative">View on GitHub</a>
+      <a class="btn ghost" href="#build">How to build</a>
+    </div>
+    <p class="note" style="margin-top:22px">Built and tested against
+      <a href="https://git.minetest.land/VoxeLibre/VoxeLibre">VoxeLibre</a>,
+      the Minecraft-style flagship game — but the protocol layer is game-agnostic.</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2>What it is</h2>
+    <p class="sub">A from-scratch Swift + Metal reimplementation of the Luanti network client.</p>
+    <p style="max-width:720px;color:var(--dim)">
+      VoxelNative speaks the Luanti UDP protocol directly — SRP login, zstd map-block
+      streaming, node and item definitions, media download, entities, formspecs, HUD.
+      An unmodified Luanti server sees it as just another client and hands over the
+      entire game. The world is rendered in true stereo with Compositor Services,
+      meshed live as blocks stream in, and you walk around, dig, place, and open
+      inventories with the PSVR2 Sense controllers (or a Bluetooth keyboard and mouse).
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Features</h2>
+    <p class="sub">A real client, not a viewer.</p>
+    <div class="grid">
+      <div class="card"><h3>🌍 Live world streaming</h3><p>Real map blocks stream from the server and mesh on the fly, with all the Luanti drawtypes — nodeboxes, plants, meshes, rails, liquids, glass.</p></div>
+      <div class="card"><h3>👓 True stereo immersion</h3><p>Rendered per-eye with Metal + Compositor Services and reprojection, not a flat window floating in space.</p></div>
+      <div class="card"><h3>🎮 PSVR2 Sense controllers</h3><p>Locomotion, look, dig, place, and a spatial inventory / formspec UI you point at and tap.</p></div>
+      <div class="card"><h3>⛏️ Dig, place, craft</h3><p>Full interaction: tool caps and wear, crafting, chests, furnaces, anvils, and other station formspecs.</p></div>
+      <div class="card"><h3>🔊 Positional audio</h3><p>Server sounds play as real 3D sources with HRTF and true pitch, matching Luanti's OpenAL model.</p></div>
+      <div class="card"><h3>🧩 Protocol-complete</h3><p>Entities, particles, weather, day/night sky, damage, XP, armor, status effects — the wire protocol is broadly covered.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Screenshots</h2>
+    <p class="sub">Captured in-headset.</p>
+    <div class="shots">
+      <figure><img src="img/furnace.png" alt="A lit furnace and its inventory panel, underground"><figcaption>Smelting at a furnace, deep underground.</figcaption></figure>
+      <figure><img src="img/advancement.png" alt="An advancement toast popup"><figcaption>An advancement toast, matching desktop VoxeLibre.</figcaption></figure>
+      <figure><img src="img/achievements.png" alt="The achievements list panel"><figcaption>The achievements panel rendered in the spatial UI.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section id="build">
+  <div class="wrap">
+    <h2>Build it yourself</h2>
+    <p class="sub">Xcode + a Luanti server. You'll need your own Apple Developer team for device signing.</p>
+    <pre>git clone https://github.com/bettse/voxelnative
+cd voxelnative/native
+
+# generate the Xcode project (uses XcodeGen)
+xcodegen
+
+# open and run on an Apple Vision Pro (or the simulator)
+open VoxelNative.xcodeproj</pre>
+    <p class="note">Point it at any reachable Luanti server in the launcher (a local
+      dev server works great). Set your own <code>DEVELOPMENT_TEAM</code> in
+      <code>native/project.yml</code> before a device build.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>VoxelNative is licensed <strong>LGPL-2.1-or-later</strong>, matching the
+      Luanti engine whose protocol it reimplements. It bundles no game content;
+      textures, sounds, and models stream from the server you connect to and stay
+      under their own licenses.</p>
+    <p>Not affiliated with or endorsed by the Luanti or VoxeLibre projects.
+      <a href="https://github.com/bettse/voxelnative">Source on GitHub</a> ·
+      <a href="https://www.luanti.org/">Luanti</a> ·
+      <a href="https://git.minetest.land/VoxeLibre/VoxeLibre">VoxeLibre</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

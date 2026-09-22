@@ -1,0 +1,4 @@
+module CSTBVorbis {
+    header "cstbvorbis.h"
+    export *
+}

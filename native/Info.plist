@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>en</string>
+    <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+    <!-- Short git commit, passed by sim.sh/deploy.sh as a build setting and
+         logged at connect, so a device log identifies its build. -->
+    <key>GitHash</key><string>$(GIT_HASH)</string>
+    <key>CFBundleSupportedPlatforms</key><array><string>XROS</string></array>
+    <key>MinimumOSVersion</key><string>26.0</string>
+    <key>UIDeviceFamily</key><array><integer>7</integer></array>
+    <key>NSWorldSensingUsageDescription</key>
+    <string>Tracks your head pose to render the world from your viewpoint.</string>
+    <key>NSHandsTrackingUsageDescription</key>
+    <string>Tracks your hands so your controllers appear in the world.</string>
+    <!-- Required for ARKit spatial-accessory (Sense controller) 6DoF tracking.
+         Without it, Accessory(device:) hangs waiting on an ungrantable
+         authorization, so held controllers never get a pose (no "hands"). -->
+    <key>NSAccessoryTrackingUsageDescription</key>
+    <string>Tracks your controllers so they appear as your hands in the world.</string>
+    <!-- Declare the controller profiles we accept. visionOS 26 only surfaces
+         PSVR2 Sense controllers to the app when SpatialGamepad is listed here;
+         ExtendedGamepad covers the case where both hands fuse into one MFi
+         gamepad (both on before launch). Without this, a Sense controller can
+         chirp/pair at the OS level yet never reach GameController. -->
+    <key>GCSupportedGameControllers</key>
+    <array>
+        <dict>
+            <key>ProfileName</key><string>SpatialGamepad</string>
+        </dict>
+        <dict>
+            <key>ProfileName</key><string>ExtendedGamepad</string>
+        </dict>
+    </array>
+    <key>GCSupportsControllerUserInteraction</key><true/>
+    <!-- Boot into the 2D window (the launcher / login), not the immersive
+         space. The immersive world opens only when the app calls
+         openImmersiveSpace after Connect; its style is set in App.swift. -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationPreferredDefaultSceneSessionRole</key>
+        <string>UIWindowSceneSessionRoleApplication</string>
+        <key>UIApplicationSupportsMultipleScenes</key><true/>
+    </dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to the VoxeLibre game server on your local network.</string>
+	<!-- Dictation on the in-game keyboard (bug notes, chat): the immersive
+	     Metal space has no UIKit text field, so the system keyboard can't
+	     appear there; the mic key transcribes speech instead. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Dictate text into the in-game keyboard with your voice.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Transcribe your speech into the in-game keyboard.</string>
+</dict>
+</plist>

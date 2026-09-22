@@ -1,0 +1,24 @@
+# upstream clones for reading only
+repos/
+# Godot
+client/.godot/
+client/export/
+*.import.tmp
+# local
+.DS_Store
+tools/__pycache__/
+tools/*.log
+tools/packet-dumps/
+!client/export/.gdignore
+tools/device-logs/
+tools/server.log*
+
+# Claude Code local scaffolding
+.claude/
+
+# never commit secrets / local data
+*.sqlite
+.env
+
+# local dev-server config (contains a LAN IP); keep out of the public repo
+tools/server.conf

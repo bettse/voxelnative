@@ -1,0 +1,31 @@
+name: VoxelNative
+options:
+  deploymentTarget:
+    visionOS: "26.0"
+  createIntermediateGroups: true
+packages:
+  LuantiKit:
+    path: LuantiKit
+targets:
+  VoxelNative:
+    type: application
+    platform: visionOS
+    sources:
+      - path: Sources
+    dependencies:
+      - package: LuantiKit
+        product: LuantiKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.ericbetts.voxelnative
+        PRODUCT_NAME: VoxelNative
+        DEVELOPMENT_TEAM: ""   # set your own Apple Developer team for signing
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/BridgingHeader.h
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "7"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
