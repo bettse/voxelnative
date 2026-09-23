@@ -1515,13 +1515,21 @@ final class WorldSession {
                 simDigPhase = 2; simDigTimer = 0
             case 2 where simDigTimer > 1.5:
                 client.sendChat("/effect absorption 60 1 NOPART")
+                simDigPhase = 6; simDigTimer = 0
+            case 6 where simDigTimer > 3:        // health boost: hp_max above 20
+                simEatStartCount = client.absorption   // record before the boost/heal disturb it
+                client.sendChat("/effect health_boost 60 2 NOPART")
+                simDigPhase = 7; simDigTimer = 0
+            case 7 where simDigTimer > 1.5:
+                client.sendChat("/effect heal 40")
                 simDigPhase = 3; simDigTimer = 0
             case 3 where simDigTimer > 3:
                 let icon = client.healthIcon ?? "nil"
                 let poisoned = icon.contains("poison"), hasLayer = atlas.statusIconPairs[icon] != nil
-                let absorb = client.absorption, gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] != nil
+                let absorb = simEatStartCount, gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] != nil
                 print("[statustest] healthIcon=\(icon) layer=\(hasLayer) absorption=\(absorb) goldLayer=\(gold)"); fflush(stdout)
-                print("[statustest] RESULT pass=\(poisoned && hasLayer && absorb > 0 && gold)"); fflush(stdout)
+                print("[statustest] hp=\(hp) (above 20 draws extra heart rows)"); fflush(stdout)
+                print("[statustest] RESULT pass=\(poisoned && hasLayer && absorb > 0 && gold && hp > 20)"); fflush(stdout)
                 simDigPhase = 4
             default: break
             }
@@ -5471,14 +5479,25 @@ final class WorldSession {
         // Follow the heart statbar's icon (poison green, wither black, frost
         // blue, regeneration) like vl_hudbars; plain red until one is known.
         let pair = client.healthIcon.flatMap { atlas.statusIconPairs[$0] }
-        appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: hp,   // low row, left of centre (HUD B)
-                         full: pair?.full ?? atlas.healthFullLayer, half: pair?.half ?? atlas.healthHalfLayer,
-                         empty: atlas.healthEmptyLayer, into: &billboards)
-        // Absorption (golden apple): gold hearts in a row just above, only as
-        // many as there are, like vl_hudbars' absorption part.
+        let full = pair?.full ?? atlas.healthFullLayer, half = pair?.half ?? atlas.healthHalfLayer
+        appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: min(hp, 20),   // low row, left of centre (HUD B)
+                         full: full, half: half, empty: atlas.healthEmptyLayer, into: &billboards)
+        // HP above 20 (health boost) stacks extra rows above, 20 HP each, the
+        // way vl_hudbars layers its bar; without them losing health above 20
+        // showed no change at all.
+        var rowElev: Float = 0
+        var rest = hp - 20
+        while rest > 0 && rowElev < 0.2 {
+            rowElev += 0.05   // a full icon apart, like vl_hudbars' first (unsquished) layers
+            appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: min(rest, 20),
+                             full: full, half: half, empty: -1, elevOffset: rowElev, into: &billboards)
+            rest -= 20
+        }
+        // Absorption (golden apple): gold hearts in a row above the rest, only
+        // as many as there are, like vl_hudbars' absorption part.
         if client.absorption > 0, let gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] {
             appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: client.absorption,
-                             full: gold.full, half: gold.half, empty: -1, elevOffset: 0.045, into: &billboards)
+                             full: gold.full, half: gold.half, empty: -1, elevOffset: rowElev + 0.045, into: &billboards)
         }
     }
 

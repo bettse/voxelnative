@@ -1158,9 +1158,13 @@ public final class Client {
         statbars[id] = (text: text, number: number)
         refreshHealthParts()
         print("[hud] statbar add id=\(id) icon=\(text) number=\(number) item=\(item) dir=\(dir)"); fflush(stdout)
-        // The hunger bar's icon is hbhunger_icon.png (mcl_hunger swaps it to a
-        // poison/regen variant, all prefixed "hbhunger"), so match by prefix.
-        if text.hasPrefix("hbhunger") {
+        // The hunger bar: its background icon is hbhunger_bgicon.png. Matching
+        // the icon by an "hbhunger" prefix also caught the HEART bar while
+        // poisoned (its icon becomes hbhunger_icon_health_poison.png), and the
+        // hunger row then showed HP. Fall back to the plain icon name when a
+        // server sends no text2.
+        let bg = hudElements[id]?.text2 ?? ""
+        if bg == "hbhunger_bgicon.png" || (bg.isEmpty && text == "hbhunger_icon.png") {
             hungerStatbarId = id
             hunger = number
             print("[hud] hunger statbar id=\(id) icon=\(text) value=\(number)"); fflush(stdout)
@@ -1254,7 +1258,8 @@ public final class Client {
         }
         if let newText = textVal {
             statbars[id]?.text = newText
-            if newText.hasPrefix("hbhunger") { hungerStatbarId = id }
+            // (No hunger re-identification by icon here: the heart bar's
+            // poison icon is also "hbhunger_..."; the id set on add stands.)
             if newText.hasPrefix("hudbars_icon_breath") { breathStatbarId = id }
             if newText.hasPrefix("hbarmor") { armorStatbarId = id }
         }
