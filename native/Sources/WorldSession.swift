@@ -280,6 +280,7 @@ final class WorldSession {
     // stream isn't regrown from zero (repeated reallocs) every tick (#162).
     private var lastModelVerts = 0
     private var lastModelIdx = 0
+    private var lastOverlayVerts = 0, lastOverlayIdx = 0, lastBlendVerts = 0, lastBlendIdx = 0
     private var seenEntityTiles: Set<String> = []   // entity texture strings already offered to the atlas
     // Gate for ensureModelTextures' entity scan (#251): only walk all entities'
     // textures when a new one appeared (objects.tiles is a monotonic "seen" set,
@@ -1839,10 +1840,13 @@ final class WorldSession {
             simInvTimer += Double(dt)
             switch simInvPhase {
             case 0 where simInvTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 40")
+                // Pad first: the scene before (fly) can leave the player
+                // airborne on 1 HP, and the fall killed it, dropping the cobble.
+                client.sendChat("/grantme all"); simTeleportToPad()
+                client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 40")
                 print("[invpick] gave cobble"); fflush(stdout)
                 simInvPhase = 1; simInvTimer = 0
-            case 1 where simInvTimer > 4:   // three paced chat commands
+            case 1 where simInvTimer > 6:   // five paced chat commands
                 if !inventoryOpen { toggleInventory() }
                 print("[invpick] opened inventory, slots=\(invSlots.count)"); fflush(stdout)
                 simInvPhase = 2; simInvTimer = 0
@@ -4683,6 +4687,24 @@ final class WorldSession {
     /// sized by texture px * scale (negative scale = percent of screen) and
     /// anchored by align (-1..1), text in its `number` colour, waypoints at the
     /// projected world position. Sorted by z_index so vignettes go underneath.
+    /// Server HUD elements we replace or deliberately leave out.
+    static func hudAlwaysSkipped(_ e: Client.HudElement) -> Bool {
+        // VoxeLibre adds its own crosshair image; we deliberately draw no
+        // reticle (#48: the pointed-node outline is the cue, and a reticle
+        // at a guessed depth reads badly in stereo).
+        if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { return true }
+        // VoxeLibre also draws its hotbar background (mcl_inventory_hotbar.png)
+        // as an image element; ours is wrist-anchored (#57), so a strip of
+        // empty slots floating at the bottom of view is just noise.
+        if e.type == 0, e.text.range(of: "hotbar", options: .caseInsensitive) != nil { return true }
+        // mcl_offhand's slot frame and item: drawn head-locked above the
+        // hearts instead (appendOffhandHUD), so it moves with the view like
+        // the vitals and doesn't sit on top of the heart row.
+        if e.type == 0, e.text.hasPrefix("mcl_offhand_slot") { return true }
+        if e.type == 3, e.text == "offhand" { return true }
+        return false
+    }
+
     private func appendServerHUD(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
                                  v: inout [Float], idx: inout [UInt32]) {
         // Sorted view cached by hudGeneration: the server keeps ~80 pre-created
@@ -4690,7 +4712,10 @@ final class WorldSession {
         // (#249). COW keeps `var elems = sortedHud` alloc-free unless a sim path
         // appends to it below.
         if client.hudGeneration != sortedHudGen {
-            sortedHud = client.hudElements.map { ($0.key, $0.value) }.sorted { $0.1.zIndex < $1.1.zIndex }
+            // Elements we never draw are dropped here, once per HUD change,
+            // instead of string-matching all ~80 of them every tick.
+            sortedHud = client.hudElements.filter { !Self.hudAlwaysSkipped($0.value) }
+                .map { ($0.key, $0.value) }.sorted { $0.1.zIndex < $1.1.zIndex }
             sortedHudGen = client.hudGeneration
         }
         var elems = sortedHud
@@ -4775,19 +4800,6 @@ final class WorldSession {
             // size+number guess mistook for a toast icon (#289).
             let awardIcon = e.type == 2 && (e.name == "award_icon" || (e.text2.isEmpty && e.number == 2 && e.size.x >= 32))
             guard e.type == 0 || e.type == 1 || e.type == 3 || e.type == 4 || e.type == 5 || awardIcon else { continue }
-            // VoxeLibre adds its own crosshair image; we deliberately draw no
-            // reticle (#48: the pointed-node outline is the cue, and a reticle
-            // at a guessed depth reads badly in stereo).
-            if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { continue }
-            // VoxeLibre also draws its hotbar background (mcl_inventory_hotbar.png)
-            // as an image element; ours is wrist-anchored (#57), so a strip of
-            // empty slots floating at the bottom of view is just noise.
-            if e.type == 0, e.text.range(of: "hotbar", options: .caseInsensitive) != nil { continue }
-            // mcl_offhand's slot frame and item: drawn head-locked above the
-            // hearts instead (appendOffhandHUD), so it moves with the view like
-            // the vitals and doesn't sit on top of the heart row.
-            if e.type == 0, e.text.hasPrefix("mcl_offhand_slot") { continue }
-            if e.type == 3, e.text == "offhand" { continue }
             // Pixel offsets scale with the size boost so a mod's layout (a title
             // over its bar, a label over its timer) stays proportional; only the
             // normalised position stays pinned to the screen edge.
@@ -5254,9 +5266,11 @@ final class WorldSession {
         let eye = player.origin()   // origin-space (0,0,0) in node coords: the floor under you on device, the nominal eye in the sim
         let cy = cos(s.yaw), sy = sin(s.yaw)
         var billboards: [EntityInstance] = []
+        billboards.reserveCapacity(ents.count + particles.count + 64)   // weather alone is ~300 particles
         var mv: [Float] = []; var mi: [UInt32] = []
         mv.reserveCapacity(lastModelVerts); mi.reserveCapacity(lastModelIdx)
         var bv: [Float] = []; var bi: [UInt32] = []   // use_texture_alpha mobs (blended pass)
+        bv.reserveCapacity(lastBlendVerts); bi.reserveCapacity(lastBlendIdx)
         // Nametags to draw this frame (emitted into the overlay stream below,
         // which is declared after this loop).
         var nametagJobs: [(pos: SIMD3<Float>, text: String, color: UInt32)] = []
@@ -5583,6 +5597,7 @@ final class WorldSession {
         // Modal UI goes into a SEPARATE overlay stream drawn on top of the world
         // (no depth test), so nearby terrain can't bury the keyboard/panel/menu.
         var ov: [Float] = []; var oi: [UInt32] = []
+        ov.reserveCapacity(lastOverlayVerts); oi.reserveCapacity(lastOverlayIdx)
         if dead, deathTextLayer >= 0 {
             appendDeathText(layer: deathTextLayer, gaze: aimDir, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         }
@@ -5635,6 +5650,8 @@ final class WorldSession {
         entityHandoff.post(world: worldB, hud: hudB)
         postHandHud()
         lastModelVerts = mv.count; lastModelIdx = mi.count   // seed next tick's reserve (#162)
+        lastOverlayVerts = ov.count; lastOverlayIdx = oi.count
+        lastBlendVerts = bv.count; lastBlendIdx = bi.count
         modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi)
         if !doorDebugDone, !client.nodes.allNames().isEmpty {
             doorDebugDone = true
@@ -8059,7 +8076,11 @@ final class WorldSession {
     /// seconds (Luanti's ParticleSpawner), then drop the spawner when done.
     private func stepSpawners(_ dt: Float) {
         guard !activeSpawners.isEmpty else { return }
-        for (id, var sp) in activeSpawners {
+        // Iterate a key list, not the dictionary itself: writing back into a
+        // dictionary being iterated copies the whole thing on the first write,
+        // every tick (weather keeps dozens of spawners alive).
+        for id in Array(activeSpawners.keys) {
+            guard var sp = activeSpawners[id] else { continue }
             // An attached spawner whose object is gone: give it a grace period
             // (the object may just be out of range), then drop it so infinite
             // spawners don't leak.

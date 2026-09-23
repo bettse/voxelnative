@@ -16,9 +16,11 @@ final class ModelHandoff {
     // after the opaque models, blended, without writing depth.
     private var bv: [Float] = []
     private var bi: [UInt32] = []
-    // Bumped on every post so the renderer (which runs at 90Hz vs the ~62.5Hz
-    // producer) can skip re-uploading unchanged geometry (#163).
-    private var gen = 0
+    // One generation per stream, bumped only when that stream's bytes change,
+    // so the renderer (90Hz vs the ~62.5Hz producer) skips re-uploading
+    // unchanged geometry (#163). Separate counters: a walking mob used to
+    // force the open inventory panel's overlay to re-upload every tick.
+    private var gen = 0, ogen = 0, bgen = 0
     func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = [],
               blendVerts: [Float] = [], blendIndices: [UInt32] = []) {
         lock.lock()
@@ -33,15 +35,14 @@ final class ModelHandoff {
             a.count == b.count && (a.isEmpty || a.withUnsafeBytes { pa in b.withUnsafeBytes { pb in
                 memcmp(pa.baseAddress!, pb.baseAddress!, pa.count) == 0 } })
         }
-        if !same(verts, v) || !same(indices, i) || !same(overlayVerts, ov) || !same(overlayIndices, oi)
-            || !same(blendVerts, bv) || !same(blendIndices, bi) {
-            v = verts; i = indices; ov = overlayVerts; oi = overlayIndices; bv = blendVerts; bi = blendIndices; gen &+= 1
-        }
+        if !same(verts, v) || !same(indices, i) { v = verts; i = indices; gen &+= 1 }
+        if !same(overlayVerts, ov) || !same(overlayIndices, oi) { ov = overlayVerts; oi = overlayIndices; ogen &+= 1 }
+        if !same(blendVerts, bv) || !same(blendIndices, bi) { bv = blendVerts; bi = blendIndices; bgen &+= 1 }
         lock.unlock()
     }
     func read() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, v, i) }
-    func readOverlay() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, ov, oi) }
-    func readBlend() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, bv, bi) }
+    func readOverlay() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (ogen, ov, oi) }
+    func readBlend() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (bgen, bv, bi) }
 }
 
 /// One full-res model texture, placed into a fixed-size layer of a texture

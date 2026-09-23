@@ -122,6 +122,9 @@ actor Renderer {
     private var visibleBlocks: [(dist: Float, idx: Int)] = []
     // buildHandHud scratch (kept between frames, see there) + wield mesh extents.
     private var handV: [Float] = [], handIdx: [UInt32] = [], handVt: [Float] = [], handIdxt: [UInt32] = []
+    // World billboards (particles, sprite mobs, drops) rebuilt each frame: kept
+    // storage so ~300 weather quads don't malloc at 90 Hz.
+    private var entV: [Float] = [], entIdx: [UInt32] = []
     private var wieldMeshExtent: [Int: Float] = [:]
     // Dev frustum-cull kill switch, read once (it's set at launch), not per frame.
     private lazy var noCull = UserDefaults.standard.bool(forKey: "vrdev.noCull")
@@ -215,6 +218,7 @@ actor Renderer {
     // re-uploading the model/overlay streams the ~62.5Hz producer hasn't changed.
     private var lastModelGen = -1
     private var lastOverlayGen = -1
+    private var lastBlendGen = -1
     var modelTextureArray: MTLTexture?
     // SET_SKY "skybox" cube (the End). A 1x1 black cube stays bound when
     // there is none so skyFragment always has a texture at its slot (#290).
@@ -1418,8 +1422,11 @@ actor Renderer {
         let eye = rs.origin
         let scale = PlayerState.scale
         let c = cos(snap.yaw), sn = sin(snap.yaw)
-        var v: [Float] = []; v.reserveCapacity(ents.count * 32)
-        var idx: [UInt32] = []; idx.reserveCapacity(ents.count * 6)
+        entV.removeAll(keepingCapacity: true); entIdx.removeAll(keepingCapacity: true)
+        var v = entV, idx = entIdx
+        entV = []; entIdx = []   // keep the storage uniquely owned by the locals
+        defer { entV = v; entIdx = idx }
+        v.reserveCapacity(ents.count * 36); idx.reserveCapacity(ents.count * 6)
         for e in ents {
             // entity feet in origin space: R(-yaw) * (entityNode - eye) * scale
             let rx = (e.pos.x - eye.x) * scale, ry = (e.pos.y - eye.y) * scale, rz = (e.pos.z - eye.z) * scale
@@ -1562,16 +1569,19 @@ actor Renderer {
     }
 
     private func consumeModelHandoff() {
+        let (bgen, bv, bi) = appModel.modelHandoff.readBlend()
+        if bgen != lastBlendGen {
+            lastBlendGen = bgen
+            modelBlendIndexCount = 0
+            if !bi.isEmpty {
+                upload(bv, into: &modelBlendVertexBuffer)
+                upload(bi, into: &modelBlendIndexBuffer)
+                modelBlendIndexCount = bi.count
+            }
+        }
         let (gen, v, idx) = appModel.modelHandoff.read()
         if gen == lastModelGen { return }   // producer hasn't posted new geometry; keep the buffers
         lastModelGen = gen
-        let (_, bv, bi) = appModel.modelHandoff.readBlend()
-        modelBlendIndexCount = 0
-        if !bi.isEmpty {
-            upload(bv, into: &modelBlendVertexBuffer)
-            upload(bi, into: &modelBlendIndexBuffer)
-            modelBlendIndexCount = bi.count
-        }
         guard !idx.isEmpty else { modelIndexCount = 0; return }
         upload(v, into: &modelVertexBuffer)
         upload(idx, into: &modelIndexBuffer)
@@ -1878,6 +1888,8 @@ actor Renderer {
             handHudVertexBuffer, handHudIndexBuffer,
             handHudTextVertexBuffer, handHudTextIndexBuffer,
             overlayVertexBuffer, overlayIndexBuffer,
+            modelBlendVertexBuffer, modelBlendIndexBuffer,
+            pointerVertexBuffer, pointerIndexBuffer,
         ]
         if let tex = textureArray { perFrame.append(tex) }
         if let mtex = modelTextureArray { perFrame.append(mtex) }

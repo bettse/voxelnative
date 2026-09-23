@@ -614,7 +614,9 @@ public enum WorldMesher {
             }
             var day: Float = 0, night: Float = 0, count = 0, ao = 0
             var loDay: UInt8 = 15, hiDay: UInt8 = 0, loId = WorldMap.CONTENT_AIR, loPos = np, loLight: UInt8 = 0
-            for sp in [np, np &+ o1, np &+ o2, np &+ o1 &+ o2] {
+            let zero = SIMD3<Int>(0, 0, 0)
+            for k in 0..<4 {   // np, np+o1, np+o2, np+o1+o2 (no array literal: this runs per vertex corner)
+                let sp = np &+ (k & 1 != 0 ? o1 : zero) &+ (k & 2 != 0 ? o2 : zero)
                 let id = cNodeId(sp)
                 if id == WorldMap.CONTENT_IGNORE { continue }
                 if occludesLight(id) { ao += 1; continue }
