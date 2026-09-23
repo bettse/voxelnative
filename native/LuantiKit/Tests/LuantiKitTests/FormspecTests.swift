@@ -266,7 +266,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertFalse(Formspec.parseCheckboxes("checkbox[0,0;c;Label;]").first?.selected ?? true)
     }
 
-    // #244: background9[] (always fill) + background[...;auto_clip] (fill), vs a
+    // #244: background9[...;true] (auto_clip fill) + background[...;auto_clip] (fill), vs a
     // plain background[] (positioned art).
     func testParsesBackgrounds() {
         let spec = "background9[1,1;1,1;mcl_base_textures_background9.png;true;7]" +
@@ -274,10 +274,22 @@ final class FormspecLabelTests: XCTestCase {
         let bgs = Formspec.parseBackgrounds(spec)
         XCTAssertEqual(bgs.count, 2)
         XCTAssertEqual(bgs[0].texture, "mcl_base_textures_background9.png")
-        XCTAssertTrue(bgs[0].fill)                       // background9 always fills
+        XCTAssertTrue(bgs[0].fill)                       // auto_clip true -> fill
         XCTAssertEqual(bgs[1].texture, "mcl_brewing_inventory.png")
         XCTAssertFalse(bgs[1].fill)                      // plain background at coords
         XCTAssertEqual(bgs[1].gx, -0.19, accuracy: 1e-4)
+    }
+    // #372: background9's 4th field is auto_clip, not draw_border. The creative
+    // inventory's own panel leaves it empty and sits at its coordinates.
+    func testPositionedBackground9DoesNotFill() {
+        let bgs = Formspec.parseBackgrounds("background9[0,1.34;13,8.75;mcl_base_textures_background9.png;;7]")
+        XCTAssertEqual(bgs.count, 1)
+        XCTAssertFalse(bgs[0].fill)
+        XCTAssertEqual(bgs[0].gy, 1.34, accuracy: 1e-4)
+    }
+    func testNoPrependOptsOut() {
+        XCTAssertFalse(Formspec.wantsPrepend("formspec_version[6]no_prepend[]size[13,8.75]"))
+        XCTAssertTrue(Formspec.wantsPrepend("formspec_version[4]size[11.75,10.425]"))
     }
     func testBackgroundAutoClipFills() {
         let bgs = Formspec.parseBackgrounds("background[0,0;10,10;bg.png;true]")

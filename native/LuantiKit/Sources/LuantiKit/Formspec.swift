@@ -40,6 +40,10 @@ public enum Formspec {
         return out
     }
 
+    /// A form with no_prepend[] (VoxeLibre's creative inventory and books) opts
+    /// out of the server's formspec prepend, stone panel included.
+    public static func wantsPrepend(_ body: String) -> Bool { !body.contains("no_prepend[") }
+
     /// Parse the `listring[]` chain that drives shift-click quick-move order.
     /// Two forms, in document order (bare form refers to earlier list[] elements):
     ///   listring[<loc>;<list>]  appends that list to the ring.
@@ -185,14 +189,14 @@ public enum Formspec {
         public let fill: Bool
     }
 
-    /// Parse `background[x,y;w,h;tex{;auto_clip}]` and `background9[x,y;w,h;tex;draw_border{;middle}]`.
+    /// Parse `background[x,y;w,h;tex{;auto_clip}]` and `background9[x,y;w,h;tex;auto_clip;middle]`.
     public static func parseBackgrounds(_ spec: String) -> [Background] {
         var out: [Background] = []
         for chunk in spec.split(separator: "]") {
             let c = String(chunk)
-            let nine: Bool, params: String
-            if let r = c.range(of: "background9[") { nine = true; params = String(c[r.upperBound...]) }
-            else if let r = c.range(of: "background[") { nine = false; params = String(c[r.upperBound...]) }
+            let params: String
+            if let r = c.range(of: "background9[") { params = String(c[r.upperBound...]) }
+            else if let r = c.range(of: "background[") { params = String(c[r.upperBound...]) }
             else { continue }
             let f = params.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
             guard f.count >= 3 else { continue }
@@ -201,9 +205,11 @@ public enum Formspec {
                   let gx = Float(xy[0]), let gy = Float(xy[1]),
                   let w = Float(wh[0]), let h = Float(wh[1]) else { continue }
             let tex = f[2]
-            // background9 always fills; a plain background fills when its auto_clip
-            // (5th) field is true (that's how the prepend requests a full backdrop).
-            let fill = nine || (f.count >= 4 && f[3] == "true")
+            // Either kind fills the whole form only when auto_clip (the 4th field)
+            // is true, which is how the prepend's stone panel asks for it. The
+            // creative inventory's own background9[0,1.34;13,8.75;..;;7] is
+            // positioned; treating every background9 as fill stretched it.
+            let fill = f.count >= 4 && f[3] == "true"
             if !tex.isEmpty { out.append(Background(gx: gx, gy: gy, w: w, h: h, texture: tex, fill: fill)) }
         }
         return out

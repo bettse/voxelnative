@@ -3636,7 +3636,7 @@ final class WorldSession {
     /// held stack, hover and cursor are left untouched.
     private func refreshOpenNodeFormspec() {
         guard formspecOpen, let ctx = formspecContext, let fs = client.world.nodeFormspec(ctx) else { return }
-        let spec = Formspec.flattenContainers(client.formspecPrepend + fs)
+        let spec = Formspec.flattenContainers((Formspec.wantsPrepend(fs) ? client.formspecPrepend : "") + fs)
         formspecImages = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
         formspecBackgrounds = Formspec.parseBackgrounds(spec)
         formspecLabelsRaw = Formspec.parseLabels(spec)
@@ -3697,7 +3697,7 @@ final class WorldSession {
         // The server's per-player formspec prepend carries the global stone
         // background9 panel + styles; Luanti prepends it to every formspec, so we
         // do too before parsing (#244).
-        let rawSpec = client.formspecPrepend + rawSpec0
+        let rawSpec = (Formspec.wantsPrepend(rawSpec0) ? client.formspecPrepend : "") + rawSpec0
         // Log the raw spec (prepend + body) so a device capture shows the exact
         // slot/label/background coords the server sent -- needed to pin the
         // chest-panel misalignment and stray label fragment (#254). Truncated so
