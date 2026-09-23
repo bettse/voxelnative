@@ -11,6 +11,9 @@ public enum Formspec {
         public let gx: Float, gy: Float
         public let cols: Int, rows: Int
         public let start: Int
+        /// Slot-to-slot distance in form units: 1.25 in real coordinates;
+        /// a legacy form's rows sit closer (15/13), see Legacy.
+        public var pitch = SIMD2<Float>(1.25, 1.25)
     }
 
     /// Parse `list[<loc>;<name>;<x>,<y>;<w>,<h>{;<start>}]`. `context` resolves
@@ -212,6 +215,7 @@ public enum Formspec {
         public let gx: Float, gy: Float, w: Float, h: Float
         public let texture: String
         public let isItem: Bool   // true: `texture` is an item name to draw as an icon (item_image[])
+        public var count = 1      // item_image[]'s stack count, drawn like a slot's when > 1
     }
 
     /// Parse `image[x,y;w,h;texture]`. The texture field is taken whole (it may
@@ -246,8 +250,20 @@ public enum Formspec {
             guard xy.count == 2, wh.count == 2,
                   let gx = Float(xy[0]), let gy = Float(xy[1]),
                   let w = Float(wh[0]), let h = Float(wh[1]) else { continue }
-            let tex = f[2]
-            if !tex.isEmpty { out.append(Image(gx: gx, gy: gy, w: w, h: h, texture: tex, isItem: isItem)) }
+            // item_image[] takes an itemstring ("mcl_wool:white 18"): the name
+            // alone resolves the icon; with the count attached, block icons
+            // found nothing (the villager's wanted wool never drew).
+            var tex = f[2], count = 1
+            if isItem {
+                let parts = tex.split(separator: " ")
+                tex = parts.first.map(String.init) ?? ""
+                if parts.count > 1, let n = Int(parts[1]) { count = n }
+            }
+            if !tex.isEmpty {
+                var im = Image(gx: gx, gy: gy, w: w, h: h, texture: tex, isItem: isItem)
+                im.count = count
+                out.append(im)
+            }
         }
         return out
     }
@@ -291,6 +307,7 @@ public enum Formspec {
         public var texture: String = ""   // image_button[]'s icon texture (drawn instead of a plain plate, #233)
         public var itemName: String = ""  // item_image_button[]'s item, drawn as an icon (stonecutter recipes, #235)
         public var color: Float? = nil    // packed tint from a leading \x1b(c@#rgb) label color, nil for white (#254)
+        public var h: Float = 1           // only the legacy-coordinate conversion needs it
     }
 
     /// Parse positioned buttons (`button[x,y;w,h;name;label]` and the
@@ -319,7 +336,8 @@ public enum Formspec {
             let (label, color) = cleanColored(f.last ?? "", caller: "button-label"), name = f[f.count - 2]
             // image_button[pos;size;texture;name;label]: the texture sits at f[2].
             let texture = image && f.count >= 5 ? f[2] : ""
-            if !name.isEmpty { out.append(PositionedButton(gx: gx, gy: gy, w: w, name: name, label: label, exit: exit, texture: texture, color: color)) }
+            let h = (wh.count == 2 ? Float(wh[1]) : nil) ?? 1
+            if !name.isEmpty { out.append(PositionedButton(gx: gx, gy: gy, w: w, name: name, label: label, exit: exit, texture: texture, color: color, h: h)) }
         }
         return out
     }
@@ -336,9 +354,10 @@ public enum Formspec {
             let xy = f[0].split(separator: ","), wh = f[1].split(separator: ",")
             guard xy.count == 2, let gx = Float(xy[0]), let gy = Float(xy[1]) else { continue }
             let w = (wh.first.flatMap { Float($0) }) ?? 1
-            let item = f[2], name = f[3]
+            let item = f[2].split(separator: " ").first.map(String.init) ?? "", name = f[3]   // itemstring: name only
             let (label, color) = cleanColored(f[4], caller: "item-image-button-label")
-            if !name.isEmpty { out.append(PositionedButton(gx: gx, gy: gy, w: w, name: name, label: label, exit: false, texture: "", itemName: item, color: color)) }
+            let h = (wh.count == 2 ? Float(wh[1]) : nil) ?? 1
+            if !name.isEmpty { out.append(PositionedButton(gx: gx, gy: gy, w: w, name: name, label: label, exit: false, texture: "", itemName: item, color: color, h: h)) }
         }
         return out
     }
@@ -636,5 +655,75 @@ public enum Formspec {
             if !name.isEmpty { out.append((name, label)) }
         }
         return out
+    }
+
+    /// Luanti's old coordinate system, used by any form that doesn't open with
+    /// formspec_version[2+] or set real_coordinates[true] (VoxeLibre's villager
+    /// trade and brewing stand). Everything else here assumes real coordinates
+    /// (1 unit = one slot image), so a legacy form is converted into those
+    /// units once, after parsing. The rules follow guiFormSpecMenu.cpp's
+    /// !real_coordinates paths: a position is padding + pos * spacing, list
+    /// slots step by spacing, images are geom * imgsize, and backgrounds are
+    /// geom * spacing shifted back by half the gap.
+    public enum Legacy {
+        public static let spacing = SIMD2<Float>(1.25, 15.0 / 13.0)
+        public static let padding: Float = 0.375
+
+        /// True when the form body (not the server prepend) uses legacy coordinates.
+        public static func applies(to body: String) -> Bool {
+            if body.contains("real_coordinates[true]") { return false }
+            guard let r = body.range(of: "formspec_version[") else { return true }
+            let digits = body[r.upperBound...].prefix { $0.isNumber }
+            return (Int(digits) ?? 1) < 2
+        }
+
+        static func x(_ v: Float) -> Float { padding + v * spacing.x }
+        static func y(_ v: Float) -> Float { padding + v * spacing.y }
+        /// A width given in legacy units, for elements drawn edge to edge
+        /// (buttons, fields): n cells minus the trailing gap.
+        static func span(_ w: Float) -> Float { w * spacing.x - (spacing.x - 1) }
+
+        public static func convert(_ l: List) -> List {
+            var o = List(loc: l.loc, list: l.list, gx: x(l.gx), gy: y(l.gy), cols: l.cols, rows: l.rows, start: l.start)
+            o.pitch = spacing
+            return o
+        }
+        public static func convert(_ i: Image) -> Image {
+            var o = Image(gx: x(i.gx), gy: y(i.gy), w: i.w, h: i.h, texture: i.texture, isItem: i.isItem)
+            o.count = i.count
+            return o
+        }
+        public static func convert(_ b: Background) -> Background {
+            if b.fill { return b }
+            return Background(gx: x(b.gx) - (spacing.x - 1) / 2, gy: y(b.gy) - (spacing.y - 1) / 2,
+                              w: b.w * spacing.x, h: b.h * spacing.y, texture: b.texture, fill: b.fill)
+        }
+        /// Label y becomes the text's vertical center, like real-coordinate labels.
+        public static func convert(_ l: Label) -> Label {
+            Label(gx: x(l.gx), gy: padding + (l.gy + 7.0 / 30.0) * spacing.y, text: l.text, color: l.color)
+        }
+        /// The layout centers a button on gy + 0.5, so fold its legacy height
+        /// into gy. Image buttons span their cells like images; plain buttons
+        /// are centered in h image-heights.
+        public static func convert(_ b: PositionedButton) -> PositionedButton {
+            var o = b
+            let image = !b.texture.isEmpty || !b.itemName.isEmpty
+            let hh = image ? b.h * spacing.y - (spacing.y - 1) : b.h
+            o = PositionedButton(gx: x(b.gx), gy: y(b.gy) + hh / 2 - 0.5, w: span(b.w), name: b.name, label: b.label,
+                                 exit: b.exit, texture: b.texture, itemName: b.itemName, color: b.color, h: hh)
+            return o
+        }
+        /// Legacy fields subtract the padding back out (getElementBasePos then
+        /// pos -= padding) and center in their h; Field has no h, so assume one
+        /// row, which puts the center at gy * spacing.y + 0.5 like the layout expects.
+        public static func convert(_ f: Field) -> Field {
+            Field(gx: f.gx * spacing.x, gy: f.gy * spacing.y, w: span(f.w), name: f.name, value: f.value)
+        }
+        /// Checkbox gy is the box center in real coordinates.
+        public static func convert(_ c: Checkbox) -> Checkbox {
+            var o = Checkbox(gx: x(c.gx), gy: y(c.gy) + 0.5, name: c.name, label: c.label, selected: c.selected)
+            o.color = c.color
+            return o
+        }
     }
 }

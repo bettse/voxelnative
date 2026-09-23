@@ -2157,6 +2157,21 @@ final class WorldSession {
                        "list[current_player;main;0.375,5.1;9,3;9]list[current_player;main;0.375,9.05;9,1;]"
             openFormspec(spec, ""); simSceneTimer = -1e9
         }
+        // Sim-only: -vrdev.fakeTrade 1 opens VoxeLibre's villager trade form as
+        // mobs_mc/villager.lua builds it (legacy coordinates: no formspec_version)
+        // so the grid-vs-background fit can be screenshotted headless.
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeTrade"), atlasBuilt {
+            formspecContext = SIMD3(0, 0, 0)
+            seedFakePlayerInventory()
+            let t = "detached:mobs_mc:trade_sim"
+            let spec = "size[9,8.75]background[-0.19,-0.25;9.41,9.49;mobs_mc_trading_formspec_bg.png]" +
+                       "label[3,0;Shepherd - Novice]" +
+                       "list[current_player;main;0,4.5;9,3;9]list[current_player;main;0,7.74;9,1;]" +
+                       "button[7.26,1;0.5,1;next_trade;>]" +
+                       "item_image[2,1;1,1;mcl_wool:white 18]item_image[5.76,1;1,1;mcl_core:emerald 1]" +
+                       "list[\(t);input;2,2.5;2,1;]list[\(t);output;5.76,2.55;1,1;]"
+            openFormspec(spec, "mobs_mc:trade_sim"); simSceneTimer = -1e9
+        }
         // Sim-only: -vrdev.fakeBrewing 1 opens the brewing form with its full-panel
         // background[] art (mcl_brewing_inventory.png) to screenshot #245 headless.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBrewing"), atlasBuilt {
@@ -2166,10 +2181,18 @@ final class WorldSession {
                 [Client.ItemStack(name: "mcl_mobitems:blaze_powder", count: 4, wear: 0)])
             client.world.setNodeInventoryForTest(SIMD3(0, 0, 0), list: "input",
                 [Client.ItemStack(name: "mcl_potions:river_water", count: 1, wear: 0)])
+            // mcl_brewing's idle form verbatim, minus the per-slot image[]
+            // backgrounds (legacy coordinates, like the villager trade).
             let spec = "size[9,8.75]background[-0.19,-0.25;9.5,9.5;mcl_brewing_inventory.png]" +
-                       "list[context;fuel;0.5,1.75;1,1;]list[context;input;2.5,0.5;1,1;]" +
-                       "list[context;output;4.1,1.42;1,1;]list[context;output;5.05,0.75;1,1;]list[context;output;6.0,1.42;1,1;]" +
-                       "list[current_player;main;0,4.75;9,3;9]list[current_player;main;0,8.0;9,1;]"
+                       "label[4,0;Brewing Stand]label[0,4.0;Inventory]" +
+                       "list[current_player;main;0,4.5;9,3;9]list[current_player;main;0,7.75;9,1;]" +
+                       "list[context;fuel;0.5,1.75;1,1;]image[0.5,1.75;1,1;mcl_brewing_fuel_bg.png]" +
+                       "list[context;input;2.75,0.5;1,1;]" +
+                       "list[context;stand;4.5,2.5;1,1;]image[4.5,2.5;1,1;mcl_brewing_bottle_bg.png]" +
+                       "list[context;stand;6,2.8;1,1;1]image[6,2.8;1,1;mcl_brewing_bottle_bg.png]" +
+                       "list[context;stand;7.5,2.5;1,1;2]image[7.5,2.5;1,1;mcl_brewing_bottle_bg.png]" +
+                       "image[2.7,3.33;1.28,0.41;mcl_brewing_burner.png^[transformR270]" +
+                       "image[2.76,1.4;1,2.15;mcl_brewing_bubbles.png]"
             openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeRain 1 feeds the exact mcl_weather rain spawner
@@ -3446,7 +3469,7 @@ final class WorldSession {
     private var infoTargets: [(u: Float, v: Float, hw: Float, hh: Float, field: String, value: String)] = []   // laid out in panel metres
     private var formspecImages: [Formspec.Image] = []                    // static image[] elements (furnace fire/arrow, #223)
     private var formspecBackgrounds: [Formspec.Background] = []          // background[]/background9[] panels (#244)
-    private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool)] = []   // laid-out image quads (isItem: draw as an item icon)
+    private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool, count: Int)] = []   // laid-out image quads (isItem: draw as an item icon)
     private var invBackgrounds: [(u: Float, v: Float, hw: Float, hh: Float, texture: String)] = []   // laid-out background[] station art at its own coords (#245)
     private var formspecTooltips: [String: (text: String, color: Float?)] = [:]  // element name -> hover text + color (enchant cost, #236)
     private var formspecCheckboxes: [Formspec.Checkbox] = []             // checkbox[] toggles (#237)
@@ -3617,6 +3640,14 @@ final class WorldSession {
         formspecImages = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
         formspecBackgrounds = Formspec.parseBackgrounds(spec)
         formspecLabelsRaw = Formspec.parseLabels(spec)
+        // Same conversion as openFormspec: the brewing stand re-sends its
+        // legacy-coordinate form every brew tick, and without this its art
+        // and icons snapped back to raw units on the first update.
+        if Formspec.Legacy.applies(to: fs) {
+            formspecImages = formspecImages.map(Formspec.Legacy.convert)
+            formspecBackgrounds = formspecBackgrounds.map(Formspec.Legacy.convert)
+            formspecLabelsRaw = formspecLabelsRaw.map(Formspec.Legacy.convert)
+        }
         layoutInventory()
     }
 
@@ -3711,6 +3742,7 @@ final class WorldSession {
         }
         formspecElements = lists
         formspecRings = Formspec.parseListrings(spec, context: formspecContext)   // shift-click order (#208)
+        let legacy = Formspec.Legacy.applies(to: rawSpec0)
         formspecLabelsRaw = Formspec.parseLabels(spec)   // station name + slot captions (#176)
         // A list-form can also carry an editable field (anvil rename) or a button;
         // surface them as tappable boxes in the panel instead of dropping them (#229).
@@ -3723,6 +3755,18 @@ final class WorldSession {
         formspecBackgrounds = Formspec.parseBackgrounds(spec)   // stone panel + station art (#244)
         formspecCheckboxes = Formspec.parseCheckboxes(spec)   // toggles (#237)
         checkboxState = Dictionary(formspecCheckboxes.map { ($0.name, $0.selected) }, uniquingKeysWith: { a, _ in a })
+        // Old-coordinate forms (villager trade, brewing stand) go into the
+        // real-coordinate units the layout below assumes; left alone, their
+        // item grid spilled past the background art.
+        if legacy {
+            formspecElements = formspecElements.map(Formspec.Legacy.convert)
+            formspecLabelsRaw = formspecLabelsRaw.map(Formspec.Legacy.convert)
+            formspecFields = formspecFields.map(Formspec.Legacy.convert)
+            formspecButtons = formspecButtons.map(Formspec.Legacy.convert)
+            formspecImages = formspecImages.map(Formspec.Legacy.convert)
+            formspecBackgrounds = formspecBackgrounds.map(Formspec.Legacy.convert)
+            formspecCheckboxes = formspecCheckboxes.map(Formspec.Legacy.convert)
+        }
         formspecName = name              // remembered so close sends the named-form quit (#130)
         formspecOpen = true; inventoryOpen = true
         invHeld = nil; invHover = nil; invCursor = nil
@@ -3830,13 +3874,14 @@ final class WorldSession {
             for e in formspecElements {
                 for i in 0..<(e.cols * e.rows) {
                     let col = i % e.cols, row = i / e.cols
-                    // formspec_version[4] spaces slots 1.25 units apart, and the
-                    // slot's CENTER is +0.5 from its top-left x,y. Match that so the
-                    // interactive slots line up with the slot-background images the
-                    // stations emit (get_itemslot_bg_v4), which we now draw (#241).
+                    // formspec_version[4] spaces slots 1.25 units apart (a legacy
+                    // form's rows a little closer, e.pitch), and the slot's CENTER
+                    // is +0.5 from its top-left x,y. Match that so the interactive
+                    // slots line up with the slot-background images the stations
+                    // emit (get_itemslot_bg_v4), which we now draw (#241).
                     slots.append(InvSlot(loc: e.loc, list: e.list, index: e.start + i,
-                                         u: (e.gx + Float(col) * 1.25 + 0.5) * p,
-                                         v: -(e.gy + Float(row) * 1.25 + 0.5) * p))
+                                         u: (e.gx + Float(col) * e.pitch.x + 0.5) * p,
+                                         v: -(e.gy + Float(row) * e.pitch.y + 0.5) * p))
                 }
             }
             var cu: Float = 0, cv: Float = 0
@@ -3889,7 +3934,7 @@ final class WorldSession {
             // their grid rect the same way as slots/widgets (#223).
             invImages = formspecImages.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
-                 hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture, isItem: $0.isItem)
+                 hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture, isItem: $0.isItem, count: $0.count)
             }
             // Non-fill background[] art (brewing/trading/book panels): each draws
             // at its own grid rect, unlike the prepend's stone panel that fills
@@ -3959,6 +4004,18 @@ final class WorldSession {
         let p = Self.invPitch
         var uMin: Float = -5 * p, uMax: Float = 5 * p, vMin: Float = -2.5 * p, vMax: Float = 2.2 * p
         for s in invSlots { uMin = min(uMin, s.u - p); uMax = max(uMax, s.u + p); vMin = min(vMin, s.v - p); vMax = max(vMax, s.v + p) }
+        // A form's art, images and buttons can sit outside its slot grid (the
+        // villager trade's wanted/offered row is above the input slots); sized
+        // to the slots alone, the stone panel covered them.
+        func grow(_ u: Float, _ v: Float, _ hw: Float, _ hh: Float) {
+            uMin = min(uMin, u - hw); uMax = max(uMax, u + hw); vMin = min(vMin, v - hh); vMax = max(vMax, v + hh)
+        }
+        if formspecOpen {
+            for b in invBackgrounds { grow(b.u, b.v, b.hw, b.hh) }
+            for i in invImages { grow(i.u, i.v, i.hw, i.hh) }
+            for w in invWidgets { grow(w.u, w.v, w.hw, w.hh) }
+            for l in invLabels { grow(l.u, l.v, 0, p * 0.5) }
+        }
         return (uMin, uMax, vMin, vMax)
     }
 
@@ -5078,6 +5135,11 @@ final class WorldSession {
                 // flat inventory_image) so beacon payment rows / trade hints show
                 // what item is meant (#232).
                 let sz = min(im.hw, im.hh) * 1.4
+                if im.count > 1, let cl = invCountLayer(im.count) {
+                    let cc = c + fr.right * (im.hw * 0.56) - fr.up * (im.hh * 0.56) - toward * 0.008
+                    appendQuad(center: toOrigin(cc), right: oRight, up: oUp, hw: im.hw * 0.48, hh: im.hh * 0.48,
+                               layer: cl, tint: 16777215, v: &v, idx: &idx)
+                }
                 if nodeIcon3D(im.texture, center: toOrigin(c - toward * 0.006), oRight: oRight, oUp: oUp,
                               oToward: toOriginDir(toward), size: sz, v: &v, idx: &idx) { continue }
                 if let flat = client.items.image(for: im.texture), let hi = hudImage(flat) {
