@@ -4245,6 +4245,7 @@ final class WorldSession {
     // against a nominal 1920x1080 screen mapped onto a +-0.42 x +-0.32 rad
     // window 1.2 m ahead. Statbars and the XP pair have their own paths.
     private var hudTextLayers: [Int: (layer: Int, text: String, aspect: Float)] = [:]
+    private var hudTextBlocks: [Int: (layer: Int, text: String, aspect: Float, lines: Int, lineToCap: Float)] = [:]
     private var hudElementsLogged = false          // sim: one-shot dump of the server's HUD elements
     private static let hudScreen = SIMD2<Float>(1920, 1080)
     // Horizontal half-angle kept under the peripheral stat columns (hearts /
@@ -4281,6 +4282,23 @@ final class WorldSession {
     /// a constant-height quad: server text carries translation/colour escapes
     /// (`show_wielded_item` pushes the item description on wield switch) which we
     /// strip here, matching the inventory name path.
+    /// Like hudTextLayer, but for server HUD *text elements*: multi-line and
+    /// sized by line metrics (renderTextBlock). Separate cache; same layer cap.
+    private func hudTextBlockLayer(id: Int, text: String) -> (layer: Int, aspect: Float, lines: Int, lineToCap: Float)? {
+        if let cur = hudTextBlocks[id], cur.text == text { return (cur.layer, cur.aspect, cur.lines, cur.lineToCap) }
+        let clean = ItemRegistry.stripEscapes(text)
+        guard let r = Self.renderTextBlock(clean, canvas: ModelTextureHandoff.size) else { return nil }
+        if let cur = hudTextBlocks[id] {
+            updateModelLayer(cur.layer, r.px)
+            hudTextBlocks[id] = (cur.layer, text, r.aspect, r.lines, r.lineToCap)
+            return (cur.layer, r.aspect, r.lines, r.lineToCap)
+        }
+        guard hudTextLayers.count + hudTextBlocks.count < 96 else { return nil }
+        let l = registerRGBALayer("#hudblock\(id)", r.px)
+        hudTextBlocks[id] = (l, text, r.aspect, r.lines, r.lineToCap); modelTexturesDirty = true
+        return (l, r.aspect, r.lines, r.lineToCap)
+    }
+
     private func hudTextLayer(id: Int, text: String) -> (layer: Int, aspect: Float)? {
         // Cache hit first: it keys on the raw text, so the escape strip (a
         // per-character scan, per HUD text element per tick) only runs on a miss.
@@ -4512,7 +4530,7 @@ final class WorldSession {
             let anchor = e.pos * Self.hudScreen + e.offset * Self.hudSizeBoost
             switch e.type {
             case 1:                                              // text
-                guard !e.text.isEmpty, let t = hudTextLayer(id: id, text: e.text) else { continue }
+                guard !e.text.isEmpty, let t = hudTextBlockLayer(id: id, text: e.text) else { continue }
                 let mul = (e.size.x > 0 ? e.size.x : 1) * Self.hudSizeBoost
                 // Constant glyph HEIGHT, width follows the text's aspect, so a
                 // long subtitle (death banner, wield name) reads at the same size
@@ -4523,7 +4541,9 @@ final class WorldSession {
                 // (longer) achievement name spilled past it. Match desktop
                 // proportions for just those two lines so the title fits (#222).
                 let isAwardText = e.name == "award_au" || e.name == "award_title"
-                var th = (isAwardText ? 16 : 26) * mul, tw = th * max(0.4, t.aspect)
+                // Size constants are cap heights; the block's rows are line
+                // boxes, so scale by row count and line/cap to keep capitals put.
+                var th = (isAwardText ? 16 : 26) * mul * Float(t.lines) * t.lineToCap, tw = th * max(0.4, t.aspect)
                 // Our glyphs run wider than desktop's, so the longest toast line
                 // ("Secret Advancement Made!") overran the box. Shrink an award
                 // line only as far as it takes to stay inside the background.
@@ -6623,6 +6643,52 @@ final class WorldSession {
         var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
         px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
         return (px, aspect)
+    }
+
+    /// Server HUD text elements (hud.cpp drawText): one row per '\n', each row
+    /// sized by the font's line metrics rather than its own ink, so "one" and
+    /// "Speed" come out at the same glyph size (ink-bound sizing scaled an
+    /// all-lowercase string up to the full height). Rows are centred in the
+    /// block. Returns the block aspect (width/height), the row count, and
+    /// lineToCap = line height / cap height, so a caller that sizes text by cap
+    /// height can scale the quad to keep capitals where they were.
+    static func renderTextBlock(_ text: String, canvas: Int) -> (px: [UInt8], aspect: Float, lines: Int, lineToCap: Float)? {
+        let rows = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .prefix(16).map { String($0.prefix(80)) }
+        guard rows.contains(where: { !$0.isEmpty }) else { return nil }
+        let ref: CGFloat = 64
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, ref, nil)
+        let asc = CTFontGetAscent(font), desc = CTFontGetDescent(font)
+        let lineH = asc + desc, capH = max(1, CTFontGetCapHeight(font))
+        func line(_ s: String, _ c: CGColor) -> CTLine {
+            CTLineCreateWithAttributedString(NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: c]))
+        }
+        let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1), black = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
+        let widths = rows.map { CGFloat(CTLineGetTypographicBounds(line($0, white), nil, nil, nil)) }
+        let w = max(1, widths.max() ?? 1), h = lineH * CGFloat(rows.count)
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
+                                  bytesPerRow: canvas * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
+        let margin = CGFloat(canvas) * 0.06
+        let sx = (CGFloat(canvas) - 2 * margin) / w, sy = (CGFloat(canvas) - 2 * margin) / h
+        let o = max(1.0, ref * 0.05)
+        for (i, row) in rows.enumerated() where !row.isEmpty {
+            let x = (w - widths[i]) / 2, y = h - CGFloat(i + 1) * lineH + desc   // CG origin is bottom-left
+            for (c, offs) in [(black, [(-o, -o), (-o, 0), (-o, o), (0, -o), (0, o), (o, -o), (o, 0), (o, o)]), (white, [(0, 0)])] {
+                let l = line(row, c)
+                for (dx, dy) in offs {
+                    ctx.saveGState(); ctx.scaleBy(x: sx, y: sy)
+                    ctx.textPosition = CGPoint(x: margin / sx + x + dx, y: margin / sy + y + dy)
+                    CTLineDraw(l, ctx); ctx.restoreGState()
+                }
+            }
+        }
+        guard let base = ctx.data else { return nil }
+        var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
+        px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
+        return (px, Float(w / h), rows.count, Float(lineH / capH))
     }
 
     /// Word-wrapped multi-line text at a CONSTANT glyph height, for chat (#157):
