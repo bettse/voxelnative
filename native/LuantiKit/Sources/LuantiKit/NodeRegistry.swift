@@ -64,6 +64,7 @@ public final class NodeRegistry {
     // Biome-palette tinting: param_type_2 (8=color, 9=colorfacedir, ...) and the
     // palette image name, per content id. param2 indexes the palette.
     private var paramType2s: [UInt16: Int] = [:]
+    private var lightParamIds: Set<UInt16> = []   // ids with param_type == CPT_LIGHT
     // plantlike_rooted only: the plant texture (special_tiles[0]) drawn above the
     // solid base. Kept separate from faceTiles since only this drawtype uses it.
     private var specialTiles: [UInt16: String] = [:]
@@ -411,6 +412,12 @@ public final class NodeRegistry {
         @inline(__always) public func gl(_ id: UInt16) -> Bool { Int(id) < glass.count && glass[Int(id)] }
         @inline(__always) public func lit(_ id: UInt16) -> Bool { Int(id) < emissive.count && emissive[Int(id)] }
         public let pt2: [Int]                // param_type_2 per id (facedir/4dir/color/etc)
+        // param_type == CPT_LIGHT: the node's param1 holds a light value. Smooth
+        // lighting may only average such nodes; anything else (and any solid
+        // drawtype) counts as an occluder, as mapblock_mesh.cpp getSmoothLightCombined
+        // does, or a chest/rooted-plant's meaningless param1 = 0 darkens its neighbours.
+        public let lightParam: [Bool]
+        @inline(__always) public func cpt(_ id: UInt16) -> Bool { Int(id) < lightParam.count && lightParam[Int(id)] }
         public let clip: [Bool]              // clip cubes stay in the alpha-discard pass, not early-Z
         @inline(__always) public func ov(_ id: UInt16) -> [String]? { Int(id) < overlay.count ? overlay[Int(id)] : nil }
         @inline(__always) public func kc(_ id: UInt16) -> [Bool]? { Int(id) < keepColor.count ? keepColor[Int(id)] : nil }
@@ -446,7 +453,9 @@ public final class NodeRegistry {
             for (id, v) in paramType2s where Int(id) <= maxId { p2[Int(id)] = v }
             var cl = [Bool](repeating: false, count: maxId + 1)
             for id in clip where Int(id) <= maxId { cl[Int(id)] = true }
-            let snap = MeshSnapshot(kind: k, occludes: o, blended: b, glass: g, emissive: em, overlay: ov, keepColor: kc, pt2: p2, clip: cl)
+            var lp = [Bool](repeating: false, count: maxId + 1)
+            for id in lightParamIds where Int(id) <= maxId { lp[Int(id)] = true }
+            let snap = MeshSnapshot(kind: k, occludes: o, blended: b, glass: g, emissive: em, overlay: ov, keepColor: kc, pt2: p2, lightParam: lp, clip: cl)
             meshSnapCache = (defsVersion, snap)
             return snap
         }
@@ -470,7 +479,7 @@ public final class NodeRegistry {
         names[id] = name
         idByName[name] = id
         nodeGroups[id] = parseGroups(r)
-        _ = r.u8()                               // param_type
+        if r.u8() == 1 { lightParamIds.insert(id) } else { lightParamIds.remove(id) }   // param_type == CPT_LIGHT
         let pt2 = r.u8()                         // param_type_2
         paramType2s[id] = pt2
         let dt = r.u8()                          // drawtype

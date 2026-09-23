@@ -280,6 +280,11 @@ public enum WorldMesher {
     // dir_i for our six faces (order matches `faces`): +Y -Y +Z -Z +X -X.
     static let faceDirI: [Int] = [2, 6, 3, 5, 1, 7]
 
+    /// -vrdev.lightDiag / testing mode: log which node feeds an unexplained dark
+    /// smooth-light sample (see smoothLightDiag). Off by default: it's per-corner work.
+    nonisolated(unsafe) public static var lightDiag = false
+    nonisolated(unsafe) static var lightDiagSeen: Set<String> = []
+
     /// Rotate a tile UV by R90/180/270 (content_mapblock applies this to the
     /// cuboid tcoords). rot 0 = identity.
     @inline(__always)
@@ -519,7 +524,47 @@ public enum WorldMesher {
         // and darken by how many of the four are opaque (Luanti's ao_gamma 1.8
         // table). Returns the packed day + night*16 value for the vertex (#273).
         let aoAmount: [Float] = [1, 0.85, 0.68, 0.46, 0.46]
+        // A sample that occludes light instead of carrying it: opaque cubes, any
+        // solid drawtype (plantlike_rooted is a full base cube), and any node
+        // without param_type light, whose param1 is not a light value at all
+        // (getSmoothLightCombined: `f.param_type == CPT_LIGHT && solidness != 2`).
+        @inline(__always) func occludesLight(_ id: UInt16) -> Bool {
+            id != WorldMap.CONTENT_AIR && (ms.occ(id) || ms.k(id) == .rooted || !ms.cpt(id))
+        }
         func smoothLight(np: SIMD3<Int>, normal: SIMD3<Int>, corner: SIMD3<Float>) -> Float {
+            if WorldMesher.lightDiag { return smoothLightDiag(np: np, normal: normal, corner: corner) }
+            return smoothLightFast(np: np, normal: normal, corner: corner)
+        }
+        // Diagnostic twin of smoothLightFast (device bug: soft dark blobs on open
+        // snow, #359): when one of a corner's four samples is far darker than the
+        // rest with no opaque neighbour to explain it, name the node once so the
+        // log says WHICH node carried the dark light value.
+        func smoothLightDiag(np: SIMD3<Int>, normal: SIMD3<Int>, corner: SIMD3<Float>) -> Float {
+            let v = smoothLightFast(np: np, normal: normal, corner: corner)
+            var o1 = SIMD3<Int>(0, 0, 0), o2 = SIMD3<Int>(0, 0, 0)
+            if normal.x != 0 { o1.y = corner.y < 0.5 ? -1 : 1; o2.z = corner.z < 0.5 ? -1 : 1 }
+            else if normal.y != 0 { o1.x = corner.x < 0.5 ? -1 : 1; o2.z = corner.z < 0.5 ? -1 : 1 }
+            else { o1.x = corner.x < 0.5 ? -1 : 1; o2.y = corner.y < 0.5 ? -1 : 1 }
+            var samples: [(SIMD3<Int>, UInt16, UInt8)] = []
+            for sp in [np, np &+ o1, np &+ o2, np &+ o1 &+ o2] {
+                let id = cNodeId(sp)
+                if id == WorldMap.CONTENT_IGNORE { continue }
+                if occludesLight(id) { return v }   // AO explains any darkening
+                samples.append((sp, id, cNodeLight(sp)))
+            }
+            guard samples.count >= 2 else { return v }
+            let days = samples.map { Int($0.2 & 0x0F) }
+            guard let hi = days.max(), let lo = days.min(), hi - lo >= 6 else { return v }
+            for (sp, id, l) in samples where Int(l & 0x0F) == lo {
+                let key = "\(nodes.name(id))"
+                if WorldMesher.lightDiagSeen.count < 40, !WorldMesher.lightDiagSeen.contains(key) {
+                    WorldMesher.lightDiagSeen.insert(key)
+                    print("[lightdiag] dark sample node=\(key) id=\(id) param1=\(l) at \(sp) day=\(l & 0x0F) vs max \(hi) (face of \(np &- normal), normal \(normal))"); fflush(stdout)
+                }
+            }
+            return v
+        }
+        func smoothLightFast(np: SIMD3<Int>, normal: SIMD3<Int>, corner: SIMD3<Float>) -> Float {
             var o1 = SIMD3<Int>(0, 0, 0), o2 = SIMD3<Int>(0, 0, 0)
             if normal.x != 0 {
                 o1.y = corner.y < 0.5 ? -1 : 1; o2.z = corner.z < 0.5 ? -1 : 1
@@ -532,7 +577,7 @@ public enum WorldMesher {
             for sp in [np, np &+ o1, np &+ o2, np &+ o1 &+ o2] {
                 let id = cNodeId(sp)
                 if id == WorldMap.CONTENT_IGNORE { continue }
-                if id != WorldMap.CONTENT_AIR, ms.occ(id) { ao += 1; continue }
+                if occludesLight(id) { ao += 1; continue }
                 let l = cNodeLight(sp)
                 day += Float(l & 0x0F); night += Float(l >> 4); count += 1
             }
@@ -562,7 +607,7 @@ public enum WorldMesher {
                 let sp = SIMD3(g.x + (i & 1 != 0 ? sx : 0), g.y + (i & 2 != 0 ? sy : 0), g.z + (i & 4 != 0 ? sz : 0))
                 let id = cNodeId(sp)
                 if id == WorldMap.CONTENT_IGNORE { continue }
-                if id != WorldMap.CONTENT_AIR, ms.occ(id) { ao += 1; continue }
+                if occludesLight(id) { ao += 1; continue }
                 let l = cNodeLight(sp)
                 day += Float(l & 0x0F); night += Float(l >> 4); count += 1
             }
