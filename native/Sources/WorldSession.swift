@@ -474,6 +474,15 @@ final class WorldSession {
     private var simFallMaxY: Float = 0
     #endif
 
+    #if targetEnvironment(simulator)
+    /// Sim scenes start on the spawn pad at (0, 121, 0). Two hops, because a
+    /// MOVE_PLAYER under 6 nodes is not applied (see onSpawn): a scene that
+    /// starts near the pad would otherwise begin wherever the last one ended.
+    private func simTeleportToPad() {
+        client.sendChat("/teleport 0 140 0"); client.sendChat("/teleport 0 121 0")
+    }
+    #endif
+
     init(handoff: MeshHandoff, entityHandoff: EntityHandoff,
          modelHandoff: ModelHandoff, modelTextureHandoff: ModelTextureHandoff,
          handHudHandoff: HandHudHandoff, skyboxHandoff: SkyboxHandoff,
@@ -949,7 +958,7 @@ final class WorldSession {
             if simMobPhase == 0 {
                 // The 5x5 stone platform at y=120 sits in open sky; y=150 used to
                 // drop the player 29 nodes onto it, fatal now that fall damage is real.
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")
+                client.sendChat("/grantme all"); simTeleportToPad()
                 print("[spawnMob] teleporting to the sky platform for a clean facing shot"); fflush(stdout)
                 simMobPhase = 1; simMobTimer = 0
             } else if simMobPhase == 1, simMobTimer > 4 {
@@ -1141,7 +1150,7 @@ final class WorldSession {
             simDigTimer += Double(dt)
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")   // known open platform
+                client.sendChat("/grantme all"); simTeleportToPad()   // known open platform
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded && player.physics().feet.y > 100:
                 let f = player.physics().feet
@@ -1217,7 +1226,7 @@ final class WorldSession {
             simDigTimer += Double(dt)
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")   // known open platform
+                client.sendChat("/grantme all"); simTeleportToPad()   // known open platform
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded && player.physics().feet.y > 100:
                 guard let ladder = client.nodes.id(for: "mcl_core:ladder"),
@@ -1278,7 +1287,7 @@ final class WorldSession {
                 // Earlier harness runs can leave the sim player anywhere (a bounce
                 // test walked it off the sky platform into a cave): start on the
                 // known open platform.
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")
+                client.sendChat("/grantme all"); simTeleportToPad()
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded && f.y > 100:
                 if let ice = client.nodes.id(for: "mcl_core:ice") {
@@ -1362,7 +1371,7 @@ final class WorldSession {
         // it can be spotted. Local debug print of already-received map data, no network.
         if UserDefaults.standard.bool(forKey: "vrdev.probe"), client.objects.localPlayerId != 0, atlasBuilt, simDigPhase == 0 {
             simDigTimer += Double(dt)
-            if simDigTimer > 2, simDigTimer < 2.2 { client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0") }
+            if simDigTimer > 2, simDigTimer < 2.2 { client.sendChat("/grantme all"); simTeleportToPad() }
             if simDigTimer > 9 {
                 simDigPhase = 99
                 for z in -3...3 {
@@ -1400,10 +1409,17 @@ final class WorldSession {
         }
         // -vrdev.torchTest 1: client-side relight with the real NODEDEF (#278).
         // Drop a torch into the local world 2 nodes ahead on the platform and
-        // read the night light around it; then dig it and read again.
-        if UserDefaults.standard.bool(forKey: "vrdev.torchTest"), client.objects.localPlayerId != 0, atlasBuilt, simDigPhase == 0 {
+        // read the night light around it; then dig it and read again. Starts
+        // from the spawn pad like the other scenes: wherever the previous scene
+        // left the player may have walls or terrain in the torch's light path.
+        if UserDefaults.standard.bool(forKey: "vrdev.torchTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
-            if simDigTimer > 6 {
+            if simDigPhase == 0, simDigTimer > 2 {
+                // Two hops: a MOVE_PLAYER under 6 nodes is not applied (see onSpawn).
+                client.sendChat("/teleport 0 140 0"); simDigPhase = 5; simDigTimer = 0
+            } else if simDigPhase == 5, simDigTimer > 1 {
+                client.sendChat("/teleport 0 121 0"); simDigPhase = 6; simDigTimer = 0
+            } else if simDigPhase == 6, simDigTimer > 5, player.physics().grounded {
                 simDigPhase = 99
                 let f = player.physics().feet
                 let p = SIMD3(Int(floor(f.x)) + 2, Int(floor(f.y)), Int(floor(f.z)))
@@ -1471,7 +1487,7 @@ final class WorldSession {
             let stations = ["mcl_grindstone:grindstone", "mcl_chests:violet_shulker_box"]
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")
+                client.sendChat("/grantme all"); simTeleportToPad()
                 simDigPhase = 1; simDigTimer = 0
             case 1 where simDigTimer > 6 && player.physics().grounded:
                 let feet = player.physics().feet, bf = player.bodyForward()
@@ -1735,10 +1751,10 @@ final class WorldSession {
             simInvTimer += Double(dt)
             switch simInvPhase {
             case 0 where simInvTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/giveme mcl_core:cobble 40")
+                client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 40")
                 print("[invpick] gave cobble"); fflush(stdout)
                 simInvPhase = 1; simInvTimer = 0
-            case 1 where simInvTimer > 3:
+            case 1 where simInvTimer > 4:   // three paced chat commands
                 if !inventoryOpen { toggleInventory() }
                 print("[invpick] opened inventory, slots=\(invSlots.count)"); fflush(stdout)
                 simInvPhase = 2; simInvTimer = 0
@@ -1819,7 +1835,11 @@ final class WorldSession {
             let f = player.physics().feet
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")
+                // Two hops: a MOVE_PLAYER under 6 nodes is not applied (see onSpawn).
+                client.sendChat("/grantme all"); client.sendChat("/teleport 0 140 0")
+                simDigPhase = 11; simDigTimer = 0
+            case 11 where simDigTimer > 1:
+                client.sendChat("/teleport 0 121 0")
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded:
                 simDigPhase = 1; simDigTimer = 0; simFallMinHp = Int(f.y * 100)

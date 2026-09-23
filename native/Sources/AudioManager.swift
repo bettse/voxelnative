@@ -179,6 +179,9 @@ final class AudioManager: NSObject {
         engine.attach(flat)
         engine.connect(env, to: engine.mainMixerNode, format: stereo)
         engine.connect(flat, to: engine.mainMixerNode, format: stereo)
+        // Sim runs pipe game sound to the Mac speakers: -vrdev.mute silences the
+        // final mix too, not just the per-sound gain, so no path leaks through.
+        if UserDefaults.standard.bool(forKey: "vrdev.mute") { engine.mainMixerNode.outputVolume = 0 }
         do {
             try engine.start()
             engineStarted = true
