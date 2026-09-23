@@ -1526,6 +1526,38 @@ final class WorldSession {
             default: break
             }
         }
+        // -vrdev.stepTest 1: footstep cadence follows speed like the engine's
+        // view bobbing: walk 3 s, then sneak-walk 3 s on the open stone flat at
+        // 0,78,0 (the spawn pad is too small to walk on); sneaking must step far
+        // less often (parity review 2026-09-23 #7).
+        if UserDefaults.standard.bool(forKey: "vrdev.stepTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            let prevT = simDigTimer
+            simDigTimer += Double(dt)
+            if (simDigPhase == 1 || simDigPhase == 2), Int(simDigTimer * 2) != Int(prevT * 2) {
+                let ph = player.physics()
+                print("[steptest] t=\(String(format: "%.1f", simDigTimer)) phase=\(simDigPhase) feet=\(ph.feet) grounded=\(ph.grounded) steps=\(simStepCount)"); fflush(stdout)
+            }
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                client.sendChat("/grantme all"); client.sendChat("/teleport 0 78 0")
+                simDigPhase = 5; simDigTimer = 0
+            case 5 where simDigTimer > 6 && player.physics().grounded:
+                simStepCount = 0; simBobSteps = 0; simAutoWalk = true; simAutoSneak = false
+                simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 3:
+                simEatStartCount = simBobSteps
+                simStepCount = 0; simBobSteps = 0; simAutoSneak = true
+                simDigPhase = 2; simDigTimer = 0
+            case 2 where simDigTimer > 3:
+                simAutoWalk = false; simAutoSneak = false
+                // Cadence steps only: landings (stepping down the slope here)
+                // play too, like PLAYER_REGAIN_GROUND, but aren't the cadence.
+                let walk = simEatStartCount, sneak = simBobSteps
+                print("[steptest] RESULT walkBobSteps=\(walk) sneakBobSteps=\(sneak) landingsInSneak=\(simStepCount - sneak) pass=\(walk >= 2 && sneak * 2 < walk)"); fflush(stdout)
+                simDigPhase = 3
+            default: break
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -2388,20 +2420,37 @@ final class WorldSession {
                                     life: 1.0, texture: "mcl_particles_smoke.png")
             }
         }
-        // Footstep sounds (#178): while walking on solid ground, play the node's
-        // sound_footstep at a step cadence (Luanti plays these client-side). Reset
-        // the gate when stopped/airborne so the first step after moving is prompt.
-        footstepTimer -= dt
+        // Footstep sounds, timed like the engine's view bobbing (camera.cpp):
+        // the bob advances by dt * speed * 0.03 (speed in BS, capped at 70) and
+        // a step plays at each half cycle, so cadence follows speed (~0.4 s
+        // walking, ~0.3 s sprinting, ~1.3 s sneaking). Bobbing runs while
+        // walking on ground, swimming, or climbing; a landing also plays a step
+        // (PLAYER_REGAIN_GROUND). The node probed is getFootstepNodePos's:
+        // feet node in liquid, 0.05 below the feet on ground, 0.5 below in air.
         let ph = player.physics()
-        if ph.grounded, !inLiquid, simd_length(move) > 0.1 {
-            if footstepTimer <= 0 {
-                footstepTimer = 0.38
-                let below = SIMD3(Int(floor(ph.feet.x)), Int(floor(ph.feet.y - 0.1)), Int(floor(ph.feet.z)))
-                playNodeSound(client.nodes.footstepSound(client.world.nodeId(below)), at: below)
-            }
-        } else if footstepTimer > 0 {
-            footstepTimer = 0
+        let dFeet = ph.feet - stepLastFeet
+        stepLastFeet = ph.feet
+        let spd = dt > 0 ? simd_length(dFeet) / dt : 0                     // nodes/s
+        let hspd = dt > 0 ? simd_length(SIMD2(dFeet.x, dFeet.z)) / dt : 0
+        let vspd = dt > 0 ? abs(dFeet.y) / dt : 0
+        let teleported = spd > 40
+        let climbingNow = overlapsClimbable(feet: ph.feet)
+        let bobbing = !teleported && !flying
+            && ((hspd > 1 && ph.grounded) || ((hspd > 1 || vspd > 1) && inLiquid) || (vspd > 1 && climbingNow))
+        func stepNode() -> SIMD3<Int> {
+            let dy: Float = inLiquid ? 0 : ph.grounded ? 0.05 : 0.5
+            return SIMD3(Int(floor(ph.feet.x)), Int(floor(ph.feet.y - dy)), Int(floor(ph.feet.z)))
         }
+        func playStep() { let n = stepNode(); simStepCount += 1; playNodeSound(client.nodes.footstepSound(client.world.nodeId(n)), at: n) }
+        if bobbing {
+            let was = stepPhase
+            stepPhase = (stepPhase + dt * min(spd * 10, 70) * 0.03).truncatingRemainder(dividingBy: 1)
+            if was == 0 || (was < 0.5 && stepPhase >= 0.5) || (was > 0.5 && stepPhase <= 0.5) { simBobSteps += 1; playStep() }
+        } else {
+            stepPhase = 0
+        }
+        if ph.grounded && !stepWasGrounded && !teleported && !inLiquid { playStep() }   // landing
+        stepWasGrounded = ph.grounded
         var s = player.snapshot()
         // Diagnostics only (the [clip]/heartbeat logs). Scan just a few nodes
         // under the feet, not the whole 300-deep column: this runs every tick and
@@ -2670,7 +2719,11 @@ final class WorldSession {
                             objectId: 0, loop: false, fade: 0, pitch: g.pitch, ephemeral: true))
     }
     private var digSoundTimer: Float = 0
-    private var footstepTimer: Float = 0   // cadence gate for footstep sounds (#178)
+    private var stepPhase: Float = 0          // view-bobbing phase that times footsteps (camera.cpp)
+    private var stepLastFeet = SIMD3<Float>(0, 0, 0)
+    private var stepWasGrounded = true
+    private var simStepCount = 0              // -vrdev.stepTest: footsteps played
+    private var simBobSteps = 0               // -vrdev.stepTest: of those, cadence (not landing) steps
     private var climbLogTick = 0            // rate-limit the [climb] diagnostic
     private var climbColumnLogged = false         // one-shot [climbmap] node-column dump (#331)
     private lazy var climbLogEnabled = UserDefaults.standard.bool(forKey: "vrdev.climbLog")   // opt-in ladder diagnostic (read once)
