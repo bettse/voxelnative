@@ -310,6 +310,8 @@ final class WorldSession {
     private var simEatStartCount = 0
     private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
     private var simDigTimer: Double = 0
+    private var simDropTarget: SIMD3<Int>? = nil        // -vrdev.dropTest: the node we place then dig
+    private var simDropCmds: [String] = []               // -vrdev.dropTest: setblocks still to send (chat-rate paced)
     private var simFallMinHp = Int.max                  // -vrdev.fallTest low-water mark
     private var simInvPhase = 0                         // -vrdev.invPickTest state machine (#81)
     private var simInvCyclePhase = 0                    // -vrdev.invCycle (#296)
@@ -1412,6 +1414,78 @@ final class WorldSession {
         // node is already air post-call (no server round-trip) and remeshCooldown
         // is 0 (remesh scheduled for the next tick, not the 0.4 s coalesce), the
         // block change is immediate. A before/after screenshot shows the hole.
+        // -vrdev.dropTest 1: the thing that hovers after you mine a block. Put a
+        // deepslate node four nodes ahead at eye level (past VoxeLibre's item
+        // magnet, so the drop stays put instead of flying into the inventory),
+        // dig it, and 1.5 s later check the __builtin:item entity is there AND
+        // has a resolved icon layer, i.e. it would actually draw. Bug note
+        // 2026-09-22 "I don't see mined blocks" (#358).
+        if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                client.sendChat("/grantme all"); client.sendChat("/giveme mcl_tools:pick_diamond")
+                client.sendChat("/teleport 0 140 0")
+                simDigPhase = 5; simDigTimer = 0
+            case 5 where simDigTimer > 1:
+                client.sendChat("/teleport 0 121 0")
+                simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 6 && player.physics().grounded:
+                let feet = player.physics().feet, bf = player.bodyForward()
+                // Target two above the feet, floor one above them: the floor
+                // replaces the spawn pad's tall grass (which hid the drop in every
+                // shot) and the drop lands at eye height, four nodes ahead.
+                let t = SIMD3<Int>(Int((feet.x + bf.x * 4).rounded(.down)), Int((feet.y + 2.2).rounded(.down)),
+                                   Int((feet.z + bf.z * 4).rounded(.down)))
+                simDropTarget = t
+                // The sim spawn is a small floating pad, so lay a 3x3 floor two
+                // below the target first or the drop just rolls off into the void.
+                for dx in -1...1 { for dz in -1...1 {
+                    simDropCmds.append("/setblock \(t.x + dx),\(t.y - 2),\(t.z + dz) mcl_core:snowblock")   // light floor: dark drop stands out
+                } }
+                simDropCmds.append("/setblock \(t.x),\(t.y),\(t.z) mcl_deepslate:deepslate")
+                print("[droptest] target \(t) feet=\(feet) bf=\(bf); laying floor + target (\(simDropCmds.count) setblocks)"); fflush(stdout)
+                simDigPhase = 6; simDigTimer = 2
+            case 6 where simDigTimer > 1.3:   // one chat command per 1.3 s (server allows 8 per 10 s)
+                simDigTimer = 0
+                if simDropCmds.isEmpty { simDigPhase = 2 } else { client.sendChat(simDropCmds.removeFirst()) }
+            case 2 where simDigTimer > 3:
+                guard let t = simDropTarget else { simDigPhase = 99; break }
+                let id = client.world.nodeId(t)
+                if id == WorldMap.CONTENT_AIR || id == WorldMap.CONTENT_IGNORE {
+                    if simDigTimer > 12 { print("[droptest] RESULT placed node never streamed in pass=false"); fflush(stdout); simDigPhase = 99 }
+                    break
+                }
+                let centre = SIMD3<Float>(Float(t.x) + 0.5, Float(t.y) + 0.5, Float(t.z) + 0.5)
+                performDig(dir: simd_normalize(centre - player.rayOrigin()))
+                print("[droptest] dug \(t) (id \(id))"); fflush(stdout)
+                simDigPhase = 3; simDigTimer = 0
+            case 3 where simDigTimer > 1.5:
+                let feet = player.physics().feet
+                let drops = client.objects.snapshot().filter { $0.name == "__builtin:item" && simd_distance($0.pos, feet) < 24 }
+                var drawable = 0, sunk = 0
+                for d in drops {
+                    let spec = d.textures.first.flatMap(droppedItemSpec)
+                    let layer = spec.flatMap { modelTexLayer[$0] }
+                    print("[droptest] drop id=\(d.id) item=\(d.textures.first ?? "") pos=\(d.pos) dist=\(simd_distance(d.pos, feet)) spec=\(spec ?? "nil") layer=\(layer.map(String.init) ?? "nil") vel=\(d.vel) acc=\(d.acc) physical=\(d.physical)"); fflush(stdout)
+                    if layer != nil { drawable += 1 }
+                    // Ground under the drop, so a drop that "fell into a hole" is
+                    // distinguishable from one that fell through the world.
+                    let dx = Int(d.pos.x.rounded(.down)), dz = Int(d.pos.z.rounded(.down))
+                    var top = Int.min
+                    for y in stride(from: Int(feet.y) + 3, through: Int(feet.y) - 20, by: -1) {
+                        let nid = client.world.nodeId(SIMD3(dx, y, dz))
+                        if nid != WorldMap.CONTENT_AIR, nid != WorldMap.CONTENT_IGNORE, client.nodes.isSolidCube(nid) { top = y; break }
+                    }
+                    // Sunk = the item's collisionbox bottom is below the floor it should rest on.
+                    if top != Int.min, d.pos.y + d.cbMin.y < Float(top + 1) - 0.05 { sunk += 1 }
+                    print("[droptest] ground under drop column x=\(dx) z=\(dz): highest solid y=\(top) (drop y=\(d.pos.y) cbMin.y=\(d.cbMin.y))"); fflush(stdout)
+                }
+                print("[droptest] RESULT drops=\(drops.count) drawable=\(drawable) sunk=\(sunk) pass=\(drawable > 0 && sunk == 0)"); fflush(stdout)
+                simDigPhase = 4
+            default: break
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.digTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -4816,18 +4890,36 @@ final class WorldSession {
                     let modelSz: Float = isDrop ? 0.4 : vs
                     let nid = client.nodes.id(for: ItemRegistry.baseName(itemStr))
                     let kind = nid.map { client.nodes.kind($0) }
+                    // One line per drop so a "can't see my mined block" report can
+                    // be matched against what we actually emitted for it (#358).
+                    if isDrop, !loggedMobIds.contains(-e.id) {
+                        loggedMobIds.insert(-e.id)
+                        let path = (nid != nil && kind == .mesh) ? "model" : (nid != nil && kind == .cube) ? "cube"
+                            : (droppedItemSpec(itemStr).flatMap { modelTexLayer[$0] } != nil ? "card" : "NONE (no layer yet)")
+                        print("[drop] draw id=\(e.id) item=\(itemStr) path=\(path) pos=\(e.pos) light=\(light)"); fflush(stdout)
+                    }
+                    // These go into the model stream, which the renderer samples
+                    // from the MODEL texture array, so node faces must be the
+                    // upscaled model-layer copies (iconLayerForTile, like the 3D
+                    // inventory icons), not node-atlas indices: an atlas index in
+                    // this stream picks an unrelated skin/icon layer or falls
+                    // off the end, and the drop draws as nothing (#358).
+                    let topTile = nid.flatMap { client.nodes.faceTile($0, 0) }
                     if let nid, nid != WorldMap.CONTENT_AIR, kind == .mesh,
-                       let model = nodeMeshModel(for: nid) {
+                       let model = nodeMeshModel(for: nid), let layer = topTile.flatMap(iconLayerForTile) {
                         // A mesh-drawtype node (chest etc): its real model (#191).
-                        appendItemModel(model, pos: e.pos, layer: Int(atlas.layer(id: nid, face: 0)),
+                        appendItemModel(model, pos: e.pos, layer: layer,
                                         eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw,
                                         light: light, size: modelSz, v: &mv, idx: &mi)
                     } else if let nid, nid != WorldMap.CONTENT_AIR, kind == .cube {
                         // A cube node: a small spinning cube like Minecraft for drops,
                         // a still full-size block for falling sand/gravel (#191 sibling).
-                        appendItemCube(faceLayers: (0..<6).map { Int(atlas.layer(id: nid, face: $0)) }, pos: e.pos,
-                                       eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
-                                       size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
+                        let layers = (0..<6).map { (client.nodes.faceTile(nid, $0) ?? topTile).flatMap(iconLayerForTile) ?? -1 }
+                        if !layers.contains(-1) {
+                            appendItemCube(faceLayers: layers, pos: e.pos,
+                                           eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
+                                           size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
+                        }
                     } else if let spec = droppedItemSpec(itemStr), let layer = modelTexLayer[spec] {
                         // Tools/craftitems (and non-cube/non-mesh nodes): flat card.
                         appendItemQuads(pos: e.pos, layer: layer, uv: modelTexUV[spec] ?? SIMD2(1, 1),

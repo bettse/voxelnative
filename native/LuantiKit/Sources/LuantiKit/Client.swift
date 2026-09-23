@@ -647,6 +647,12 @@ public final class Client {
         timeOfDay = (timeOfDay + timeSpeed * Float(delta) * (24000.0 / 86400.0)).truncatingRemainder(dividingBy: 24000)
         if timeOfDay < 0 { timeOfDay += 24000 }
         updateDaylight()
+        if objects.isSolidNode == nil {
+            objects.isSolidNode = { [world, nodes] p in
+                let id = world.nodeId(p)
+                return id != WorldMap.CONTENT_AIR && id != WorldMap.CONTENT_IGNORE && nodes.isSolidCube(id)
+            }
+        }
         objects.step(Float(delta))
         // Fetch textures for newly-seen entities (only after the initial node-tile
         // media finishes, so entity requests don't stall that batch's completion).

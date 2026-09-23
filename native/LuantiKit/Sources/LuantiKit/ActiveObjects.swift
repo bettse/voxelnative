@@ -70,6 +70,7 @@ public final class ActiveObjects {
         /// with THIS, not with rotation.x (#305).
         public var roll: Float = 0
         public var acc: SIMD3<Float> = .zero   // acceleration (nodes/s^2), integrated each step like GenericCAO
+        public var physical = false            // ObjectProperties physical: collides with the world (items, mobs)
         // rot_translator state: yaw eases from yawOld toward yawTarget over
         // animTime (the server's update_interval), shortest way round.
         public var yawOld: Float = 0
@@ -180,6 +181,9 @@ public final class ActiveObjects {
     /// (swimming: 0.8-tall box + 0.6 eye so you fit through 1-node gaps;
     /// sneaking: 1.45 eye) and the client is expected to move with them (#272).
     public var onLocalProperties: ((_ cbMin: SIMD3<Float>, _ cbMax: SIMD3<Float>, _ stepHeight: Float, _ eyeHeight: Float) -> Void)?
+    /// Is this node a full solid cube? Set by the client so step() can keep
+    /// physical entities on the floor (see step). nil = no floor check.
+    public var isSolidNode: ((SIMD3<Int>) -> Bool)?
 
     private func v3f(_ r: PacketReader) -> SIMD3<Float> { SIMD3(r.f32(), r.f32(), r.f32()) }
 
@@ -403,7 +407,7 @@ public final class ActiveObjects {
     private func parseProperties(_ r: PacketReader, into o: inout Entity) {
         guard r.u8() == 4 else { return }
         _ = r.u16()                       // hp_max
-        _ = r.u8()                        // physical
+        o.physical = r.u8() != 0
         _ = r.u32()                       // weight (removed)
         o.cbMin = v3f(r); o.cbMax = v3f(r) // collisionbox (node units) for sizing
         o.selMin = v3f(r); o.selMax = v3f(r)  // selectionbox: the pointable region
@@ -456,9 +460,13 @@ public final class ActiveObjects {
     /// pos_translator's per-frame update+translate with the 0.8 damping).
     /// Rotation follows rot_translator: approach the target heading the short
     /// way round by (diff * 0.8 * counter/anim_time) per frame, never past it.
-    /// The engine also runs client-side collision for physical objects; we
-    /// don't, so a mob's reckoned target can lead into a wall for at most one
-    /// update interval before the next packet corrects it.
+    /// The engine also runs client-side collision for physical objects
+    /// (collisionMoveSimple). We only do the part that matters for things at
+    /// rest: a dropped item's last server update has velocity 0 but gravity
+    /// still in `acc`, and no further update ever comes, so integrating it
+    /// blindly sank every drop through the floor within a second of landing
+    /// ("I don't see mined blocks", #358). Walls can still lead a mob's
+    /// reckoned target astray for one update interval; the next packet fixes it.
     public func step(_ dt: Float) {
         // `for (id, var o) in objects { ...; objects[id] = o }` iterated a copy
         // of the dictionary while writing back into it, so every tick paid a
@@ -474,6 +482,16 @@ public final class ActiveObjects {
             if o.attachParent == 0 {
                 o.target += o.vel * dt + o.acc * (0.5 * dt * dt)
                 o.vel += o.acc * dt
+                // Floor clamp: if the collisionbox bottom has entered a solid
+                // node while moving down, sit on that node's top and stop.
+                if o.physical, o.vel.y <= 0, let solid = isSolidNode {
+                    let feetY = o.target.y + o.cbMin.y
+                    let n = SIMD3(Int(o.target.x.rounded(.down)), Int(feetY.rounded(.down)), Int(o.target.z.rounded(.down)))
+                    if solid(n) {
+                        o.target.y = Float(n.y + 1) - o.cbMin.y
+                        o.vel.y = 0
+                    }
+                }
                 o.pos += (o.target - o.pos) * a
                 // rot_translator: wrappedApproachShortest toward yawTarget.
                 var diff = o.yawTarget - o.yawOld
