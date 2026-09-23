@@ -238,14 +238,10 @@ fragment float4 fragmentShader(ColorInOut in [[stage_in]],
 // non-white tint BLENDS toward the colour instead of multiplying: a hit-flash or
 // a hot-pink creeper reads as that colour even on a dark skin, where a multiply
 // would just darken it. White tint (the common case) blends at 0 = unchanged.
-fragment float4 entityFragment(ColorInOut in [[stage_in]],
-                               constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+// Shared by the cut-out and blended entity fragments: unpremultiplied texel
+// colour -> tinted, lit, saturated, fogged.
+static float3 shadeEntity(half3 rgb, ColorInOut in, constant Uniforms & uniforms)
 {
-    constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-    half4 c = atlas.sample(s, in.uv, in.layer);
-    if (c.a < 0.5h) { discard_fragment(); }
-    half3 rgb = c.a > 0.0h ? c.rgb / c.a : c.rgb;
     half3 tintRGB = in.tint;
     // A grey tint is a SHADE (the inventory cube icons darken their side faces
     // with 184/140 greys): multiply, or the sides wash out toward light grey.
@@ -256,7 +252,18 @@ fragment float4 entityFragment(ColorInOut in [[stage_in]],
     float3 lit = float3(rgb) * in.shade * in.lit;
     float luma = dot(lit, float3(0.213, 0.715, 0.072));
     lit = mix(float3(luma), lit, uniforms.saturation);
-    return float4(applyFog(lit, in.fogDist, uniforms), 1.0);
+    return applyFog(lit, in.fogDist, uniforms);
+}
+
+fragment float4 entityFragment(ColorInOut in [[stage_in]],
+                               constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
+                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+{
+    constexpr sampler s(mag_filter::nearest, min_filter::nearest);
+    half4 c = atlas.sample(s, in.uv, in.layer);
+    if (c.a < 0.5h) { discard_fragment(); }
+    half3 rgb = c.a > 0.0h ? c.rgb / c.a : c.rgb;
+    return float4(shadeEntity(rgb, in, uniforms), 1.0);
 }
 
 // use_texture_alpha entities (slimes): entityFragment's lighting and tint, but
@@ -268,15 +275,7 @@ fragment float4 entityBlendFragment(ColorInOut in [[stage_in]],
     constexpr sampler s(mag_filter::nearest, min_filter::nearest);
     half4 c = atlas.sample(s, in.uv, in.layer);
     if (c.a < 0.02h) { discard_fragment(); }
-    half3 rgb = c.rgb / c.a;
-    half3 tintRGB = in.tint;
-    bool grey = abs(tintRGB.r - tintRGB.g) < 0.02h && abs(tintRGB.g - tintRGB.b) < 0.02h;
-    half str = (grey || all(tintRGB > half3(0.99h))) ? 0.0h : 0.7h;
-    rgb = grey ? rgb * tintRGB : mix(rgb, tintRGB, str);
-    float3 lit = float3(rgb) * in.shade * in.lit;
-    float luma = dot(lit, float3(0.213, 0.715, 0.072));
-    lit = mix(float3(luma), lit, uniforms.saturation);
-    return float4(applyFog(lit, in.fogDist, uniforms), float(c.a));
+    return float4(shadeEntity(c.rgb / c.a, in, uniforms), float(c.a));
 }
 
 // Glass backing plate behind the head-locked vitals (HUD layout B, P4): a soft-

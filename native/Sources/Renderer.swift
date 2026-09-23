@@ -370,13 +370,14 @@ actor Renderer {
                                                                mtlVertexDescriptor: mtlVertexDescriptor)
         } catch { fatalError("Unable to compile entity pipeline: \(error)") }
         do {
-            entityBlendPipelineState = try Self.buildGlassPipeline(device: device, layerRenderer: layerRenderer,
+            entityBlendPipelineState = try Self.buildBlendedEntityPipeline(device: device, layerRenderer: layerRenderer,
                                                                    mtlVertexDescriptor: mtlVertexDescriptor,
                                                                    fragment: "entityBlendFragment", label: "EntityBlendPipeline")
         } catch { fatalError("Unable to compile entity blend pipeline: \(error)") }
         do {
-            hudGlassPipelineState = try Self.buildGlassPipeline(device: device, layerRenderer: layerRenderer,
-                                                               mtlVertexDescriptor: mtlVertexDescriptor)
+            hudGlassPipelineState = try Self.buildBlendedEntityPipeline(device: device, layerRenderer: layerRenderer,
+                                                               mtlVertexDescriptor: mtlVertexDescriptor,
+                                                               fragment: "glassFragment", label: "GlassPipeline")
         } catch { fatalError("Unable to compile glass pipeline: \(error)") }
         do {
             handPipelineState = try Self.buildHandPipeline(device: device, layerRenderer: layerRenderer,
@@ -1156,13 +1157,12 @@ actor Renderer {
         return try device.makeRenderPipelineState(descriptor: desc)
     }
 
-    // The vitals glass backing: entityVertex (head-locked quad) + glassFragment,
-    // alpha-blended so the panel is translucent over the world (HUD layout B).
-    // Also the translucent entity pass (entityBlendFragment): same vertex
-    // stage and blend state, different fragment.
-    static func buildGlassPipeline(device: MTLDevice, layerRenderer: LayerRenderer,
+    // entityVertex + an alpha-blended fragment. Two users: the vitals glass
+    // backing (glassFragment, translucent over the world, HUD layout B) and the
+    // use_texture_alpha mob pass (entityBlendFragment, slimes).
+    static func buildBlendedEntityPipeline(device: MTLDevice, layerRenderer: LayerRenderer,
                                    mtlVertexDescriptor: MTLVertexDescriptor,
-                                   fragment: String = "glassFragment", label: String = "GlassPipeline") throws -> MTLRenderPipelineState {
+                                   fragment: String, label: String) throws -> MTLRenderPipelineState {
         let library = device.makeDefaultLibrary()
         let desc = MTLRenderPipelineDescriptor()
         desc.label = label

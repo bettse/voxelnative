@@ -12,8 +12,9 @@ import simd
 ///
 /// Mapping: left stick = walk (x strafe, y forward), right stick x = turn,
 /// left trigger = jump, left grip = sprint, left stick click = sneak,
-/// right trigger = dig, right grip = place, both together = drop the wielded
-/// stack (WorldSession.gateDropChord), menu = exit, both grips = screenshot.
+/// right trigger = dig, right grip = place, right trigger + right grip together
+/// = drop the wielded stack (WorldSession.gateDropChord), menu = exit, both
+/// grips (left + right) = screenshot.
 ///
 /// A BLE keyboard is an alternative to the controllers (gaze aims): WASD/arrows
 /// move, Left/Right arrows turn, Space jump, Left-Shift sneak, Left-Ctrl sprint,

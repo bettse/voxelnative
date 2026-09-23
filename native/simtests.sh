@@ -42,8 +42,9 @@ SCENES=(
   bugnote "bugNoteTest:bugnotetest"
   ladder  "ladderTest:laddertest"
 )
-# Scenes that walk the player away from the platform origin (ice, sneak) or
-# teleport it elsewhere (igloo) go last, so the others start from a known spot.
+# Every scene teleports to its own start (simTeleportToPad or a fixed spot) and
+# clears the blocks it places, so order shouldn't matter; the walkers and the
+# igloo trip still go last as a safety margin.
 order=(fall bounce place eat bow dig drop award station status step torch fly invpick chord bugnote ladder ice igloo sneak)
 want=("$@"); [[ ${#want} -eq 0 ]] && want=("${order[@]}")
 
@@ -72,6 +73,8 @@ for name in "${want[@]}"; do
     echo "PASS  $name  $((SECONDS - start))s"
   else
     echo "FAIL  $name  ${line:-(no RESULT within ${TIMEOUT}s)}"
+    # The next scene's launch overwrites native.log, so keep this one.
+    keep="${TMPDIR:-/tmp}/simtest-$name.log"; cp "$LOG" "$keep" 2>/dev/null && echo "      log: $keep"
     fail=1
   fi
 done

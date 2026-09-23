@@ -265,7 +265,7 @@ final class WorldSession {
     private var remeshCooldown: Double = 0
     private var playersSeen: Set<String> = []
     private var creepersNear: Set<Int> = []   // creeper object ids within hiss range (#gag: hot-pink creepers)
-    private var loggedMobIds: Set<Int> = []   // one-time per-mob identity log (diagnosing why the pink creeper tint isn't applying)
+    private var loggedDropIds: Set<Int> = []  // dropped items already reported by the one-shot [drop] draw log (#358)
     private var creeperCache: [Int: Bool] = [:]   // per-entity creeper flag; mesh/name are stable, so don't re-lowercase every frame (#247)
     private var bgMissLogged: Set<String> = []    // one-time log for a missing fill-background texture (#254)
     private var skinCache: [Int: (mesh: String, frame: Float, bones: Int, positions: [SIMD3<Float>])] = [:]   // entity id -> last skin
@@ -311,18 +311,21 @@ final class WorldSession {
     private var simEatPhase = 0                         // -vrdev.eatTest state machine
     private var simGripOverride: Bool? = nil            // -vrdev.bowTest: stands in for the controller grip
     private var simEatTimer: Double = 0
-    private var simEatStartCount = 0
+    // Per-scene scratch for the -vrdev.*Test harness: only one scene runs per
+    // launch, so these mean whatever the running scene sets them to (a count,
+    // a low-water mark, a target node, a paced chat queue).
+    private var simScratchCount = 0
     private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
     private var simDigTimer: Double = 0
-    private var simDropTarget: SIMD3<Int>? = nil        // -vrdev.dropTest: the node we place then dig
+    private var simTarget: SIMD3<Int>? = nil        // per-scene scratch: the node the scene works on
     private var audioResolveLogged = Set<String>()       // sound names already logged by [audio] resolve
     private var lastHotbarLog = ""
     private var loggedMobNames = Set<String>()           // [mob] identity line, once per entity name
     private var simDropResult = ""                       // -vrdev.dropTest: RESULT line, printed after cleanup
-    private var simDropCmds: [String] = []               // -vrdev.dropTest: setblocks still to send (chat-rate paced)
+    private var simChatQueue: [String] = []               // per-scene scratch: commands/items still to process (chat-rate paced)
     private var awardBox: (lo: SIMD2<Float>, hi: SIMD2<Float>)? = nil   // this frame's toast background (nominal px), to fit its text
     private var simAwardRects: [String: (lo: SIMD2<Float>, hi: SIMD2<Float>)] = [:]   // -vrdev.awardTest: drawn toast rects (nominal px)
-    private var simFallMinHp = Int.max                  // -vrdev.fallTest low-water mark
+    private var simScratchInt = Int.max                  // per-scene scratch: a low-water mark or a start value x100
     private var simInvPhase = 0                         // -vrdev.invPickTest state machine (#81)
     private var simInvCyclePhase = 0                    // -vrdev.invCycle (#296)
     private var simInvTimer: Double = 0
@@ -361,7 +364,7 @@ final class WorldSession {
     private var digInstantly = false                    // last break was an instant dig (game.cpp dig_instantly)
     private var prevFeet: SIMD3<Float>? = nil           // last tick's feet, for the PLAYERPOS velocity
     private var slipVel = SIMD2<Float>(0, 0)            // eased horizontal velocity while on a slippery node (#269)
-    // Hold-to-place repeat (#178): armed only while the wield is a placeable node.
+    // Hold-to-place repeat (#178): armed while performPlace keeps returning true (see its doc).
     private static let placeRepeatTime: Float = 0.25   // Luanti repeat_place_time
     private var placeRepeatArmed = false
     private var placeRepeatTimer: Float = 0
@@ -480,7 +483,8 @@ final class WorldSession {
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
     private var simChordPreIds: Set<Int> = []           // item entities that existed before the chord
-    private var simChordLeak = 0, simPostGatePlace = 0  // frames dig/place got past the chord gate
+    private var simChordLeak = 0                        // frames the chord was held but dig/place leaked past the gate
+    private var simPostGatePlace = 0                    // place frames after the gate (tap-replay check)
     #if targetEnvironment(simulator)
     private var simSneakMark = SIMD3<Float>(0, 0, 0)   // -vrdev.sneakTest: feet at t=4s
     private var simDigPredictedAir = false              // -vrdev.digTest
@@ -1040,8 +1044,8 @@ final class WorldSession {
                 let names = (client.inventory["main"] ?? []).map { $0?.name ?? "nil" }
                 print("[eattest] main=\(names)"); fflush(stdout)
                 if let m = client.inventory["main"], let slot = m.firstIndex(where: { $0?.name == "mcl_core:apple_gold" }) {
-                    client.setWieldIndex(slot); simEatStartCount = appleGoldCount()
-                    print("[eattest] wield slot \(slot), count \(simEatStartCount), holding place..."); fflush(stdout)
+                    client.setWieldIndex(slot); simScratchCount = appleGoldCount()
+                    print("[eattest] wield slot \(slot), count \(simScratchCount), holding place..."); fflush(stdout)
                     simEatPhase = 2; simEatTimer = 0
                 } else { print("[eattest] no golden apple in inventory"); fflush(stdout); simEatPhase = 99 }
             case 2:
@@ -1052,7 +1056,7 @@ final class WorldSession {
                 if simEatTimer > 4 {
                     client.placeHeld = false
                     let now = appleGoldCount()
-                    print("[eattest] RESULT start=\(simEatStartCount) now=\(now) eaten=\(simEatStartCount - now) pass=\(simEatStartCount - now >= 1)"); fflush(stdout)
+                    print("[eattest] RESULT start=\(simScratchCount) now=\(now) eaten=\(simScratchCount - now) pass=\(simScratchCount - now >= 1)"); fflush(stdout)
                     simEatPhase = 99
                 }
             default: break
@@ -1093,17 +1097,17 @@ final class WorldSession {
                 // spawns an mcl_bows:arrow_entity. Count arrow AOs before/after.
                 simGripOverride = true
                 if simEatTimer > 1.5 {
-                    simEatStartCount = client.objects.snapshot().filter { $0.name.contains("arrow") }.count
+                    simScratchCount = client.objects.snapshot().filter { $0.name.contains("arrow") }.count
                     simGripOverride = false   // release -> register_on_release -> shoot
                     if let m = client.inventory["main"], let bow = m.first(where: { $0?.name.hasPrefix("mcl_bows:bow") == true }) ?? nil {
                         print("[bowtest] bow stack \(bow.name) meta=\(bow.meta) hotbarIcon=\(hotbarIcons.first ?? nil ?? "nil")"); fflush(stdout)
                     }
-                    print("[bowtest] released after \(simEatTimer)s, arrows before=\(simEatStartCount)"); fflush(stdout)
+                    print("[bowtest] released after \(simEatTimer)s, arrows before=\(simScratchCount)"); fflush(stdout)
                     simEatPhase = 3; simEatTimer = 0
                 }
             case 3 where simEatTimer > 1.5:
                 let now = client.objects.snapshot().filter { $0.name.contains("arrow") }.count
-                print("[bowtest] RESULT arrows before=\(simEatStartCount) after=\(now) fired=\(now > simEatStartCount) pass=\(now > simEatStartCount)"); fflush(stdout)
+                print("[bowtest] RESULT arrows before=\(simScratchCount) after=\(now) fired=\(now > simScratchCount) pass=\(now > simScratchCount)"); fflush(stdout)
                 simEatPhase = 99
             default: break
             }
@@ -1117,7 +1121,7 @@ final class WorldSession {
             simDigTimer += Double(dt)
             switch simDigPhase {
             case 0 where simDigTimer > 8 && player.physics().grounded:
-                simEatStartCount = hp
+                simScratchCount = hp
                 let f = player.physics().feet
                 player.setPhysics(feet: f + SIMD3(0, 12, 0), vy: 0, grounded: false)
                 print("[falltest] hp=\(hp), lifted feet from \(f) by 12 nodes"); fflush(stdout)
@@ -1125,9 +1129,9 @@ final class WorldSession {
             case 1:
                 // Track the low-water mark: full saturation regens ~1 hp/0.5 s, so
                 // by the time we report, hp may already be back to where it was.
-                simFallMinHp = min(simFallMinHp, hp)
+                simScratchInt = min(simScratchInt, hp)
                 if simDigTimer > 4 {
-                    print("[falltest] RESULT hp before=\(simEatStartCount) min=\(simFallMinHp) damaged=\(simFallMinHp < simEatStartCount) pass=\(simFallMinHp < simEatStartCount)"); fflush(stdout)
+                    print("[falltest] RESULT hp before=\(simScratchCount) min=\(simScratchInt) damaged=\(simScratchInt < simScratchCount) pass=\(simScratchInt < simScratchCount)"); fflush(stdout)
                     simDigPhase = 2
                 }
             default: break
@@ -1172,15 +1176,15 @@ final class WorldSession {
                 if let slime = client.nodes.id(for: "mcl_core:slimeblock") {
                     client.world.setNode(under, param0: slime, param2: 0); markNodeDirty(under)
                     player.setPhysics(feet: f + SIMD3(0, 8, 0), vy: 0, grounded: false)
-                    simFallMinHp = 0   // reused as "max vy seen after the landing"
+                    simScratchInt = 0   // reused as "max vy seen after the landing"
                     print("[bouncetest] slime at \(under) (groups=\(client.nodes.groups(slime))), lifted 8"); fflush(stdout)
                     simDigPhase = 1; simDigTimer = 0
                 } else { print("[bouncetest] no slimeblock def"); fflush(stdout); simDigPhase = 99 }
             case 1:
                 let ph = player.physics()
-                if ph.vy > 0.5 && simDigTimer > 0.3 { simFallMinHp = max(simFallMinHp, Int(ph.vy * 100)) }
+                if ph.vy > 0.5 && simDigTimer > 0.3 { simScratchInt = max(simScratchInt, Int(ph.vy * 100)) }
                 if simDigTimer > 4 {
-                    print("[bouncetest] RESULT maxUpwardVyAfterDrop=\(Float(simFallMinHp) / 100) bounced=\(simFallMinHp > 100) pass=\(simFallMinHp > 100)"); fflush(stdout)
+                    print("[bouncetest] RESULT maxUpwardVyAfterDrop=\(Float(simScratchInt) / 100) bounced=\(simScratchInt > 100) pass=\(simScratchInt > 100)"); fflush(stdout)
                     simDigPhase = 2
                 }
             default: break
@@ -1199,7 +1203,7 @@ final class WorldSession {
                 client.sendChat("/grantme all"); client.sendChat("/teleport -113.08 -9.5 -104.94")   // the #303 repro spot in the developer's own dev world, in server coords (ours - 0.5)
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 8:
-                simFallMinHp = Int(f.y * 100); simFallMaxY = f.y
+                simScratchInt = Int(f.y * 100); simFallMaxY = f.y
                 // Print the node column around the #303 repro coordinates so the client's decoded map can
                 // be compared with what his device log saw.
                 for y in stride(from: -4, through: -12, by: -1) {
@@ -1220,7 +1224,7 @@ final class WorldSession {
                 }
                 if simDigTimer > 10 {
                     simAutoWalk = false
-                    let rose = simFallMaxY - Float(simFallMinHp) / 100
+                    let rose = simFallMaxY - Float(simScratchInt) / 100
                     print("[igloo] RESULT rose=\(rose) pass=\(rose < 1.5)"); fflush(stdout)
                     simDigPhase = 2
                 }
@@ -1341,16 +1345,10 @@ final class WorldSession {
             let f = player.physics().feet
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                // Two hops: a MOVE_PLAYER under 6 nodes is not applied (see
-                // onSpawn), and an earlier harness run may have left the player
-                // right next to the origin.
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 140 0")
-                simDigPhase = 5; simDigTimer = 0
-            case 5 where simDigTimer > 1:
-                client.sendChat("/teleport 0 121 0")
+                client.sendChat("/grantme all"); simTeleportToPad()
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded && f.y > 100:
-                simFallMaxY = f.y; simFallMinHp = Int(f.y * 100)
+                simFallMaxY = f.y; simScratchInt = Int(f.y * 100)
                 // Face a fixed heading: the yaw otherwise carries over from
                 // whatever the last scene left, and toward +X/+Z the pad is
                 // wider than the 4 s walk.
@@ -1368,7 +1366,7 @@ final class WorldSession {
                 simFallMaxY = min(simFallMaxY, f.y)
                 if simDigTimer > 6 {
                     simAutoWalk = false; simAutoSneak = false
-                    let start = Float(simFallMinHp) / 100
+                    let start = Float(simScratchInt) / 100
                     let moved = simd_length(SIMD2(f.x - simSneakMark.x, f.z - simSneakMark.z))
                     let fell = simFallMaxY < start - 0.5
                     let sn = sneakNode.map { "\($0.pos)" } ?? "nil"
@@ -1433,10 +1431,7 @@ final class WorldSession {
         if UserDefaults.standard.bool(forKey: "vrdev.torchTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             if simDigPhase == 0, simDigTimer > 2 {
-                // Two hops: a MOVE_PLAYER under 6 nodes is not applied (see onSpawn).
-                client.sendChat("/teleport 0 140 0"); simDigPhase = 5; simDigTimer = 0
-            } else if simDigPhase == 5, simDigTimer > 1 {
-                client.sendChat("/teleport 0 121 0"); simDigPhase = 6; simDigTimer = 0
+                simTeleportToPad(); simDigPhase = 6; simDigTimer = 0
             } else if simDigPhase == 6, simDigTimer > 5, player.physics().grounded {
                 simDigPhase = 99
                 let f = player.physics().feet
@@ -1456,18 +1451,6 @@ final class WorldSession {
                 } else { print("[torchtest] no torch def"); fflush(stdout) }
             }
         }
-        // -vrdev.digTest 1: prove dig prediction is synchronous (#179). Teleports
-        // onto open ground, then digs the block underfoot and logs the target's
-        // node id right before and right after performDig IN THE SAME TICK: if the
-        // node is already air post-call (no server round-trip) and remeshCooldown
-        // is 0 (remesh scheduled for the next tick, not the 0.4 s coalesce), the
-        // block change is immediate. A before/after screenshot shows the hole.
-        // -vrdev.dropTest 1: the thing that hovers after you mine a block. Put a
-        // deepslate node four nodes ahead at eye level (past VoxeLibre's item
-        // magnet, so the drop stays put instead of flying into the inventory),
-        // dig it, and 1.5 s later check the __builtin:item entity is there AND
-        // has a resolved icon layer, i.e. it would actually draw. Bug note
-        // 2026-09-22 "I don't see mined blocks" (#358).
         // -vrdev.awardTest 1 (with -vrdev.fakeAward 1): the advancement toast's
         // title, header and icon must all land inside its background box, and
         // the two text lines must not overlap. Uses a long real title by
@@ -1509,31 +1492,31 @@ final class WorldSession {
                 simDigPhase = 1; simDigTimer = 0
             case 1 where simDigTimer > 6 && player.physics().grounded:
                 let feet = player.physics().feet, bf = player.bodyForward()
-                simDropTarget = SIMD3<Int>(Int((feet.x + bf.x * 3).rounded(.down)), Int((feet.y + 1.2).rounded(.down)),
+                simTarget = SIMD3<Int>(Int((feet.x + bf.x * 3).rounded(.down)), Int((feet.y + 1.2).rounded(.down)),
                                            Int((feet.z + bf.z * 3).rounded(.down)))
-                simDropCmds = stations
-                simEatStartCount = 0
+                simChatQueue = stations
+                simScratchCount = 0
                 simDigPhase = 2; simDigTimer = 2
             case 2 where simDigTimer > 1.5:     // place the next station (chat-rate paced)
-                guard let t = simDropTarget, let name = simDropCmds.first else { simDigPhase = 9; break }
+                guard let t = simTarget, let name = simChatQueue.first else { simDigPhase = 9; break }
                 client.sendChat("/setblock \(t.x),\(t.y),\(t.z) \(name)")
                 simDigPhase = 3; simDigTimer = 0
             case 3 where simDigTimer > 3:       // rightclick it
-                guard let t = simDropTarget, let name = simDropCmds.first else { simDigPhase = 9; break }
+                guard let t = simTarget, let name = simChatQueue.first else { simDigPhase = 9; break }
                 let centre = SIMD3<Float>(Float(t.x) + 0.5, Float(t.y) + 0.5, Float(t.z) + 0.5)
                 let hasMetaForm = client.world.nodeFormspec(t) != nil
                 _ = performPlace(aim: simd_normalize(centre - player.rayOrigin()))
                 let ok = formspecOpen
                 print("[stationtest] \(name) node=\(client.nodes.name(client.world.nodeId(t))) metaForm=\(hasMetaForm) opened=\(ok)"); fflush(stdout)
-                if ok { simEatStartCount += 1 }
+                if ok { simScratchCount += 1 }
                 closeFormspec()
-                simDropCmds.removeFirst()
-                simDigPhase = simDropCmds.isEmpty ? 9 : 2; simDigTimer = 0
+                simChatQueue.removeFirst()
+                simDigPhase = simChatQueue.isEmpty ? 9 : 2; simDigTimer = 0
             case 9:
-                print("[stationtest] RESULT opened=\(simEatStartCount)/\(stations.count) pass=\(simEatStartCount == stations.count)"); fflush(stdout)
+                print("[stationtest] RESULT opened=\(simScratchCount)/\(stations.count) pass=\(simScratchCount == stations.count)"); fflush(stdout)
                 // Leave the shared spawn pad as we found it: a station left at
                 // head height walls off the sneak test's edge.
-                if let t = simDropTarget { client.sendChat("/setblock \(t.x),\(t.y),\(t.z) air") }
+                if let t = simTarget { client.sendChat("/setblock \(t.x),\(t.y),\(t.z) air") }
                 simDigPhase = 10
             default: break
             }
@@ -1555,7 +1538,7 @@ final class WorldSession {
                 client.sendChat("/effect absorption 60 1 NOPART")
                 simDigPhase = 6; simDigTimer = 0
             case 6 where simDigTimer > 3:        // health boost: hp_max above 20
-                simEatStartCount = client.absorption   // record before the boost/heal disturb it
+                simScratchCount = client.absorption   // record before the boost/heal disturb it
                 client.sendChat("/effect health_boost 60 2 NOPART")
                 simDigPhase = 7; simDigTimer = 0
             case 7 where simDigTimer > 1.5:
@@ -1564,7 +1547,7 @@ final class WorldSession {
             case 3 where simDigTimer > 3:
                 let icon = client.healthIcon ?? "nil"
                 let poisoned = icon.contains("poison"), hasLayer = atlas.statusIconPairs[icon] != nil
-                let absorb = simEatStartCount, gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] != nil
+                let absorb = simScratchCount, gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] != nil
                 print("[statustest] healthIcon=\(icon) layer=\(hasLayer) absorption=\(absorb) goldLayer=\(gold)"); fflush(stdout)
                 print("[statustest] hp=\(hp) (above 20 draws extra heart rows)"); fflush(stdout)
                 print("[statustest] RESULT pass=\(poisoned && hasLayer && absorb > 0 && gold && hp > 20)"); fflush(stdout)
@@ -1581,25 +1564,25 @@ final class WorldSession {
             simDigTimer += Double(dt)
             if (simDigPhase == 1 || simDigPhase == 2), Int(simDigTimer * 2) != Int(prevT * 2) {
                 let ph = player.physics()
-                print("[steptest] t=\(String(format: "%.1f", simDigTimer)) phase=\(simDigPhase) feet=\(ph.feet) grounded=\(ph.grounded) steps=\(simStepCount)"); fflush(stdout)
+                print("[steptest] t=\(String(format: "%.1f", simDigTimer)) phase=\(simDigPhase) feet=\(ph.feet) grounded=\(ph.grounded) steps=\(stepCount)"); fflush(stdout)
             }
             switch simDigPhase {
             case 0 where simDigTimer > 2:
                 client.sendChat("/grantme all"); client.sendChat("/teleport 0 78 0")
                 simDigPhase = 5; simDigTimer = 0
             case 5 where simDigTimer > 6 && player.physics().grounded:
-                simStepCount = 0; simBobSteps = 0; simAutoWalk = true; simAutoSneak = false
+                stepCount = 0; cadenceStepCount = 0; simAutoWalk = true; simAutoSneak = false
                 simDigPhase = 1; simDigTimer = 0
             case 1 where simDigTimer > 3:
-                simEatStartCount = simBobSteps
-                simStepCount = 0; simBobSteps = 0; simAutoSneak = true
+                simScratchCount = cadenceStepCount
+                stepCount = 0; cadenceStepCount = 0; simAutoSneak = true
                 simDigPhase = 2; simDigTimer = 0
             case 2 where simDigTimer > 3:
                 simAutoWalk = false; simAutoSneak = false
                 // Cadence steps only: landings (stepping down the slope here)
                 // play too, like PLAYER_REGAIN_GROUND, but aren't the cadence.
-                let walk = simEatStartCount, sneak = simBobSteps
-                print("[steptest] RESULT walkBobSteps=\(walk) sneakBobSteps=\(sneak) landingsInSneak=\(simStepCount - sneak) pass=\(walk >= 2 && sneak * 2 < walk)"); fflush(stdout)
+                let walk = simScratchCount, sneak = cadenceStepCount
+                print("[steptest] RESULT walkBobSteps=\(walk) sneakBobSteps=\(sneak) landingsInSneak=\(stepCount - sneak) pass=\(walk >= 2 && sneak * 2 < walk)"); fflush(stdout)
                 simDigPhase = 3
             default: break
             }
@@ -1635,6 +1618,12 @@ final class WorldSession {
             default: break
             }
         }
+        // -vrdev.dropTest 1: the thing that hovers after you mine a block. Put a
+        // deepslate node four nodes ahead at eye level (past VoxeLibre's item
+        // magnet, so the drop stays put instead of flying into the inventory),
+        // dig it, and 1.5 s later check the __builtin:item entity is there AND
+        // has a resolved icon layer, i.e. it would actually draw. Bug note
+        // 2026-09-22 "I don't see mined blocks" (#358).
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -1643,10 +1632,7 @@ final class WorldSession {
                 // first: the pick must land in hotbar slot 0 (the wielded one) or
                 // the server rejects the instant dig as "completed digging too fast".
                 client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_tools:pick_diamond")
-                client.sendChat("/teleport 0 140 0")
-                simDigPhase = 5; simDigTimer = 0
-            case 5 where simDigTimer > 1:
-                client.sendChat("/teleport 0 121 0")
+                simTeleportToPad()
                 simDigPhase = 1; simDigTimer = 0
             case 1 where simDigTimer > 6 && player.physics().grounded:
                 let feet = player.physics().feet, bf = player.bodyForward()
@@ -1655,20 +1641,20 @@ final class WorldSession {
                 // shot) and the drop lands at eye height, four nodes ahead.
                 let t = SIMD3<Int>(Int((feet.x + bf.x * 4).rounded(.down)), Int((feet.y + 2.2).rounded(.down)),
                                    Int((feet.z + bf.z * 4).rounded(.down)))
-                simDropTarget = t
+                simTarget = t
                 // The sim spawn is a small floating pad, so lay a 3x3 floor two
                 // below the target first or the drop just rolls off into the void.
                 for dx in -1...1 { for dz in -1...1 {
-                    simDropCmds.append("/setblock \(t.x + dx),\(t.y - 2),\(t.z + dz) mcl_core:snowblock")   // light floor: dark drop stands out
+                    simChatQueue.append("/setblock \(t.x + dx),\(t.y - 2),\(t.z + dz) mcl_core:snowblock")   // light floor: dark drop stands out
                 } }
-                simDropCmds.append("/setblock \(t.x),\(t.y),\(t.z) mcl_deepslate:deepslate")
-                print("[droptest] target \(t) feet=\(feet) bf=\(bf); laying floor + target (\(simDropCmds.count) setblocks)"); fflush(stdout)
+                simChatQueue.append("/setblock \(t.x),\(t.y),\(t.z) mcl_deepslate:deepslate")
+                print("[droptest] target \(t) feet=\(feet) bf=\(bf); laying floor + target (\(simChatQueue.count) setblocks)"); fflush(stdout)
                 simDigPhase = 6; simDigTimer = 2
             case 6 where simDigTimer > 1.3:   // one chat command per 1.3 s (server allows 8 per 10 s)
                 simDigTimer = 0
-                if simDropCmds.isEmpty { simDigPhase = 2 } else { client.sendChat(simDropCmds.removeFirst()) }
+                if simChatQueue.isEmpty { simDigPhase = 2 } else { client.sendChat(simChatQueue.removeFirst()) }
             case 2 where simDigTimer > 3:
-                guard let t = simDropTarget else { simDigPhase = 99; break }
+                guard let t = simTarget else { simDigPhase = 99; break }
                 let id = client.world.nodeId(t)
                 if id == WorldMap.CONTENT_AIR || id == WorldMap.CONTENT_IGNORE {
                     if simDigTimer > 12 { print("[droptest] RESULT placed node never streamed in pass=false"); fflush(stdout); simDigPhase = 99 }
@@ -1713,29 +1699,30 @@ final class WorldSession {
                 }
                 // Leave the shared spawn pad as we found it: the floor sits at
                 // foot height and walls off the sneak test's edge.
-                if let t = simDropTarget {
-                    for dx in -1...1 { for dz in -1...1 { simDropCmds.append("/setblock \(t.x + dx),\(t.y - 2),\(t.z + dz) air") } }
+                if let t = simTarget {
+                    for dx in -1...1 { for dz in -1...1 { simChatQueue.append("/setblock \(t.x + dx),\(t.y - 2),\(t.z + dz) air") } }
                 }
                 simDigPhase = 8; simDigTimer = 0
             case 8 where simDigTimer > 1.3:   // chat-rate paced, like phase 6
                 simDigTimer = 0
-                if simDropCmds.isEmpty { print(simDropResult); fflush(stdout); simDigPhase = 7 }
-                else { client.sendChat(simDropCmds.removeFirst()) }
+                if simChatQueue.isEmpty { print(simDropResult); fflush(stdout); simDigPhase = 7 }
+                else { client.sendChat(simChatQueue.removeFirst()) }
             default: break
             }
         }
+        // -vrdev.digTest 1: prove dig prediction is synchronous (#179). Teleports
+        // onto open ground, then digs the block underfoot and logs the target's
+        // node id right before and right after performDig IN THE SAME TICK: if the
+        // node is already air post-call (no server round-trip) and remeshCooldown
+        // is 0 (remesh scheduled for the next tick, not the 0.4 s coalesce), the
+        // block change is immediate. A before/after screenshot shows the hole.
         if UserDefaults.standard.bool(forKey: "vrdev.digTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
             case 0 where simDigTimer > 2:
                 client.sendChat("/grantme all"); client.sendChat("/giveme mcl_tools:pick_diamond")
-                // Two hops so a player parked near the origin by an earlier scene
-                // still moves (a MOVE_PLAYER under 6 nodes is not applied).
-                client.sendChat("/teleport 0 140 0")
+                simTeleportToPad()
                 print("[digtest] granted pick + teleporting over open ground"); fflush(stdout)
-                simDigPhase = 5; simDigTimer = 0
-            case 5 where simDigTimer > 1:
-                client.sendChat("/teleport 0 121 0")
                 simDigPhase = 1; simDigTimer = 0
             case 1 where simDigTimer > 6:
                 guard let hit = client.world.raycast(origin: player.rayOrigin(), dir: SIMD3(0, -1, 0),
@@ -1795,12 +1782,12 @@ final class WorldSession {
                     print("[chorddrop] item id=\(d.id) wield=\(d.wieldItem) tex=\(d.textures.first ?? "") dist=\(simd_distance(d.pos, feet))"); fflush(stdout)
                 }
                 print("[chorddrop] after chord: cobble left=\(cobble) nearby drops=\(drops.count) leakFrames=\(simChordLeak)"); fflush(stdout)
-                simEatStartCount = (cobble == 0 && !drops.isEmpty && simChordLeak == 0) ? 1 : 0
+                simScratchCount = (cobble == 0 && !drops.isEmpty && simChordLeak == 0) ? 1 : 0
                 simPostGatePlace = 0; simTapPlace = true
                 simDigPhase = 4; simDigTimer = 0
             case 4 where simDigTimer > 0.5:
                 let tapOk = simPostGatePlace == 1
-                print("[chorddrop] RESULT chordOk=\(simEatStartCount == 1) tapPlaceFrames=\(simPostGatePlace) pass=\(simEatStartCount == 1 && tapOk)"); fflush(stdout)
+                print("[chorddrop] RESULT chordOk=\(simScratchCount == 1) tapPlaceFrames=\(simPostGatePlace) pass=\(simScratchCount == 1 && tapOk)"); fflush(stdout)
                 simDigPhase = 9
             default: break
             }
@@ -1898,14 +1885,10 @@ final class WorldSession {
             let f = player.physics().feet
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                // Two hops: a MOVE_PLAYER under 6 nodes is not applied (see onSpawn).
-                client.sendChat("/grantme all"); client.sendChat("/teleport 0 140 0")
-                simDigPhase = 11; simDigTimer = 0
-            case 11 where simDigTimer > 1:
-                client.sendChat("/teleport 0 121 0")
+                client.sendChat("/grantme all"); simTeleportToPad()
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded:
-                simDigPhase = 1; simDigTimer = 0; simFallMinHp = Int(f.y * 100)
+                simDigPhase = 1; simDigTimer = 0; simScratchInt = Int(f.y * 100)
                 print("[flytest] start y=\(f.y) privs has fly=\(client.privileges.contains("fly"))"); fflush(stdout)
             case 1:   // tap, release, tap = double-tap within 0.35 s
                 gi.jump = simDigTimer < 0.05 || (simDigTimer > 0.12 && simDigTimer < 0.17)
@@ -1915,7 +1898,7 @@ final class WorldSession {
                 if simDigTimer > 2 { simDigPhase = 3; simDigTimer = 0; print("[flytest] after 2 s of jump: y=\(f.y) flying=\(flying)"); fflush(stdout) }
             case 3:   // release 2 s: must hover
                 if simDigTimer > 2 {
-                    let rose = f.y - Float(simFallMinHp) / 100
+                    let rose = f.y - Float(simScratchInt) / 100
                     print("[flytest] RESULT rose=\(rose) hoverY=\(f.y) flying=\(flying) pass=\(flying && rose > 4)"); fflush(stdout)
                     simDigPhase = 4; simDigTimer = 0
                 }
@@ -2578,11 +2561,11 @@ final class WorldSession {
             let dy: Float = inLiquid ? 0 : ph.grounded ? 0.05 : 0.5
             return SIMD3(Int(floor(ph.feet.x)), Int(floor(ph.feet.y - dy)), Int(floor(ph.feet.z)))
         }
-        func playStep() { let n = stepNode(); simStepCount += 1; playNodeSound(client.nodes.footstepSound(client.world.nodeId(n)), at: n) }
+        func playStep() { let n = stepNode(); stepCount += 1; playNodeSound(client.nodes.footstepSound(client.world.nodeId(n)), at: n) }
         if bobbing {
             let was = stepPhase
             stepPhase = (stepPhase + dt * min(spd * 10, 70) * 0.03).truncatingRemainder(dividingBy: 1)
-            if was == 0 || (was < 0.5 && stepPhase >= 0.5) || (was > 0.5 && stepPhase <= 0.5) { simBobSteps += 1; playStep() }
+            if was == 0 || (was < 0.5 && stepPhase >= 0.5) || (was > 0.5 && stepPhase <= 0.5) { cadenceStepCount += 1; playStep() }
         } else {
             stepPhase = 0
         }
@@ -2863,8 +2846,8 @@ final class WorldSession {
     private var stepPhase: Float = 0          // view-bobbing phase that times footsteps (camera.cpp)
     private var stepLastFeet = SIMD3<Float>(0, 0, 0)
     private var stepWasGrounded = true
-    private var simStepCount = 0              // -vrdev.stepTest: footsteps played
-    private var simBobSteps = 0               // -vrdev.stepTest: of those, cadence (not landing) steps
+    private var stepCount = 0              // footsteps played (read by -vrdev.stepTest)
+    private var cadenceStepCount = 0       // of those, cadence (not landing) steps
     private var climbLogTick = 0            // rate-limit the [climb] diagnostic
     private var climbColumnLogged = false         // one-shot [climbmap] node-column dump (#331)
     private lazy var climbLogEnabled = UserDefaults.standard.bool(forKey: "vrdev.climbLog")   // opt-in ladder diagnostic (read once)
@@ -3035,7 +3018,7 @@ final class WorldSession {
         } else if gi.place && placeRepeatArmed {
             placeRepeatTimer -= dt
             if placeRepeatTimer <= 0 {
-                placeRepeatArmed = performPlace(sneak: gi.sneak)   // stops if the stack runs out (returns false)
+                placeRepeatArmed = performPlace(sneak: gi.sneak)
                 placeRepeatTimer = Self.placeRepeatTime
             }
         } else if !gi.place {
@@ -3228,10 +3211,12 @@ final class WorldSession {
                                         nodepos: nodepos, neighborpos: neighborpos, playerpos: pn)
     }
 
-    /// Returns true only when the wielded item is a placeable node (so the
-    /// caller can auto-repeat placement while the grip is held, #178). Object
-    /// rightclicks, formspec opens, rightclick-use, throws and food return false
-    /// so a held grip never re-opens a chest or double-eats.
+    /// Returns true when the grip was used against a node (placed, or used the
+    /// wielded item on it), so the caller repeats it while the grip is held, as
+    /// game.cpp's repeat_place_timer does for any item (#178). Object
+    /// rightclicks, rightclickable nodes, meta formspecs, refused attached
+    /// placements and air uses return false, so a held grip never re-opens a
+    /// chest or re-toggles a door.
     @discardableResult
     private func performPlace(sneak: Bool = false, aim: SIMD3<Float>? = nil) -> Bool {
         let o = player.rayOrigin(), a = aim ?? player.aim()   // aim override: sim harnesses only
@@ -4501,12 +4486,6 @@ final class WorldSession {
         packTint(Int((n >> 16) & 0xFF), Int((n >> 8) & 0xFF), Int(n & 0xFF))
     }
 
-    /// Per-element mutable text layer (timers change every second, so a
-    /// per-string cache would churn); re-rendered in place when the text changes.
-    /// Returns the layer and the text's aspect (width/height) so the caller draws
-    /// a constant-height quad: server text carries translation/colour escapes
-    /// (`show_wielded_item` pushes the item description on wield switch) which we
-    /// strip here, matching the inventory name path.
     /// Like hudTextLayer, but for server HUD *text elements*: multi-line and
     /// sized by line metrics (renderTextBlock). Separate cache; same layer cap.
     private func hudTextBlockLayer(id: Int, text: String) -> (layer: Int, aspect: Float, lines: Int, lineToCap: Float)? {
@@ -4524,6 +4503,12 @@ final class WorldSession {
         return (l, r.aspect, r.lines, r.lineToCap)
     }
 
+    /// Per-element mutable text layer (timers change every second, so a
+    /// per-string cache would churn); re-rendered in place when the text changes.
+    /// Returns the layer and the text's aspect (width/height) so the caller draws
+    /// a constant-height quad: server text carries translation/colour escapes
+    /// (`show_wielded_item` pushes the item description on wield switch) which we
+    /// strip here, matching the inventory name path.
     private func hudTextLayer(id: Int, text: String) -> (layer: Int, aspect: Float)? {
         // Cache hit first: it keys on the raw text, so the escape strip (a
         // per-character scan, per HUD text element per tick) only runs on a miss.
@@ -4639,10 +4624,6 @@ final class WorldSession {
     }
     #endif
 
-    /// Draw the server's generic HUD elements (Hud::drawLuaElements): images
-    /// sized by texture px * scale (negative scale = percent of screen) and
-    /// anchored by align (-1..1), text in its `number` colour, waypoints at the
-    /// projected world position. Sorted by z_index so vignettes go underneath.
     /// Sim-only: remember where each advancement-toast element landed, in
     /// nominal HUD pixels, so -vrdev.awardTest can check the text and icon sit
     /// inside the background box without a human squinting at a screenshot.
@@ -4653,6 +4634,10 @@ final class WorldSession {
         #endif
     }
 
+    /// Draw the server's generic HUD elements (Hud::drawLuaElements): images
+    /// sized by texture px * scale (negative scale = percent of screen) and
+    /// anchored by align (-1..1), text in its `number` colour, waypoints at the
+    /// projected world position. Sorted by z_index so vignettes go underneath.
     private func appendServerHUD(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
                                  v: inout [Float], idx: inout [UInt32]) {
         // Sorted view cached by hudGeneration: the server keeps ~80 pre-created
@@ -4773,9 +4758,6 @@ final class WorldSession {
                 // Size constants are cap heights; the block's rows are line
                 // boxes, so scale by row count and line/cap to keep capitals put.
                 var th = (isAwardText ? 16 : 26) * mul * Float(t.lines) * t.lineToCap, tw = th * max(0.4, t.aspect)
-                // Our glyphs run wider than desktop's, so the longest toast line
-                // ("Secret Advancement Made!") overran the box. Shrink an award
-                // line only as far as it takes to stay inside the background.
                 // Mods lay out stacked lines for desktop's ~15px font (the
                 // potion HUD puts an effect's name and timer 15px apart); our
                 // enlarged glyph overlapped the line below. Cap each row at the
@@ -4790,6 +4772,9 @@ final class WorldSession {
                     let maxTh = gap * Self.hudSizeBoost * Float(t.lines)
                     if th > maxTh { let k = maxTh / th; th *= k; tw *= k }
                 }
+                // Our glyphs run wider than desktop's, so the longest toast line
+                // ("Secret Advancement Made!") overran the box. Shrink an award
+                // line only as far as it takes to stay inside the background.
                 if isAwardText, let box = awardBox {
                     let cx = anchor.x + e.align.x * tw / 2, pad: Float = 12 * Self.hudSizeBoost
                     let room = 2 * max(0, min(cx - box.lo.x, box.hi.x - cx) - pad)
@@ -5389,8 +5374,7 @@ final class WorldSession {
                     // One line per drop so a "can't see my mined block" report can
                     // be matched against what we actually emitted for it (#358).
                     let draw = itemDraw(itemStr)
-                    if isDrop, !loggedMobIds.contains(-e.id) {
-                        loggedMobIds.insert(-e.id)
+                    if isDrop, loggedDropIds.insert(e.id).inserted {
                         let path: String
                         switch draw { case .model: path = "model"; case .cube: path = "cube"; case .card: path = "card"; case nil: path = "NONE (no layer yet)" }
                         print("[drop] draw id=\(e.id) item=\(itemStr) path=\(path) pos=\(e.pos) light=\(light)"); fflush(stdout)
