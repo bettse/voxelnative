@@ -316,6 +316,8 @@ final class WorldSession {
     private var simDigTimer: Double = 0
     private var simDropTarget: SIMD3<Int>? = nil        // -vrdev.dropTest: the node we place then dig
     private var simDropCmds: [String] = []               // -vrdev.dropTest: setblocks still to send (chat-rate paced)
+    private var awardBox: (lo: SIMD2<Float>, hi: SIMD2<Float>)? = nil   // this frame's toast background (nominal px), to fit its text
+    private var simAwardRects: [String: (lo: SIMD2<Float>, hi: SIMD2<Float>)] = [:]   // -vrdev.awardTest: drawn toast rects (nominal px)
     private var simFallMinHp = Int.max                  // -vrdev.fallTest low-water mark
     private var simInvPhase = 0                         // -vrdev.invPickTest state machine (#81)
     private var simInvCyclePhase = 0                    // -vrdev.invCycle (#296)
@@ -1433,6 +1435,33 @@ final class WorldSession {
         // dig it, and 1.5 s later check the __builtin:item entity is there AND
         // has a resolved icon layer, i.e. it would actually draw. Bug note
         // 2026-09-22 "I don't see mined blocks" (#358).
+        // -vrdev.awardTest 1 (with -vrdev.fakeAward 1): the advancement toast's
+        // title, header and icon must all land inside its background box, and
+        // the two text lines must not overlap. Uses a long real title by
+        // default, since short ones hid overflow before (#222, device report
+        // 2026-09-23 "looked bad").
+        if UserDefaults.standard.bool(forKey: "vrdev.awardTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            if simDigPhase == 0, simDigTimer > 4 {
+                simDigPhase = 1
+                let r = simAwardRects
+                func fmt(_ k: String) -> String { r[k].map { "(\(Int($0.lo.x)),\(Int($0.lo.y)))-(\(Int($0.hi.x)),\(Int($0.hi.y)))" } ?? "missing" }
+                for k in ["award_bg", "award_au", "award_title", "award_icon"] { print("[awardtest] \(k) \(fmt(k))") }
+                var ok = r.count == 4
+                if let bg = r["award_bg"] {
+                    for k in ["award_au", "award_title", "award_icon"] {
+                        guard let e = r[k] else { ok = false; continue }
+                        let inside = e.lo.x >= bg.lo.x - 1 && e.lo.y >= bg.lo.y - 1 && e.hi.x <= bg.hi.x + 1 && e.hi.y <= bg.hi.y + 1
+                        if !inside { print("[awardtest] \(k) spills outside award_bg"); ok = false }
+                    }
+                    if let a = r["award_au"], let t = r["award_title"], a.hi.y > t.lo.y, t.hi.y > a.lo.y,
+                       a.hi.x > t.lo.x, t.hi.x > a.lo.x { print("[awardtest] header and title overlap"); ok = false }
+                    if let i = r["award_icon"], let t = r["award_title"], i.hi.x > t.lo.x, t.hi.x > i.lo.x,
+                       i.hi.y > t.lo.y, t.hi.y > i.lo.y { print("[awardtest] icon overlaps title"); ok = false }
+                }
+                print("[awardtest] RESULT elements=\(r.count) pass=\(ok)"); fflush(stdout)
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -4240,6 +4269,16 @@ final class WorldSession {
     /// sized by texture px * scale (negative scale = percent of screen) and
     /// anchored by align (-1..1), text in its `number` colour, waypoints at the
     /// projected world position. Sorted by z_index so vignettes go underneath.
+    /// Sim-only: remember where each advancement-toast element landed, in
+    /// nominal HUD pixels, so -vrdev.awardTest can check the text and icon sit
+    /// inside the background box without a human squinting at a screenshot.
+    @inline(__always) private func noteAwardRect(_ name: String, center: SIMD2<Float>, size: SIMD2<Float>) {
+        #if targetEnvironment(simulator)
+        guard name.hasPrefix("award_") else { return }
+        simAwardRects[name] = (center - size / 2, center + size / 2)
+        #endif
+    }
+
     private func appendServerHUD(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
                                  v: inout [Float], idx: inout [UInt32]) {
         // Sorted view cached by hudGeneration: the server keeps ~80 pre-created
@@ -4256,7 +4295,7 @@ final class WorldSession {
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
         // adds (awards/api.lua), including the icon-as-statbar, to verify #222.
-        if UserDefaults.standard.bool(forKey: "vrdev.fakeAward") {
+        if UserDefaults.standard.bool(forKey: "vrdev.fakeAward") || UserDefaults.standard.bool(forKey: "vrdev.awardTest") {
             func aw(_ type: Int, _ text: String, name: String, off: SIMD2<Float>, align: SIMD2<Float>,
                     scale: SIMD2<Float> = SIMD2(1, 1), size: SIMD2<Float> = .zero, number: Int = 0xFFFFFF, z: Int) -> Client.HudElement {
                 var e = Client.HudElement()
@@ -4267,14 +4306,17 @@ final class WorldSession {
             // Names match awards/api.lua so the render path's award_au/award_title
             // font-shrink and the award_icon statbar hack are exercised headless.
             elems.append((9101, aw(0, "awards_bg_default.png", name: "award_bg", off: SIMD2(0, 138), align: SIMD2(0, -1), scale: SIMD2(1.25, 1), z: 101)))
-            elems.append((9102, aw(1, "Advancement Made!", name: "award_au", off: SIMD2(30, 40), align: SIMD2(0, -1), number: 0xFFFF00, z: 102)))
-            elems.append((9103, aw(1, "Acquire Hardware", name: "award_title", off: SIMD2(35, 100), align: SIMD2(0, -1), z: 102)))
+            elems.append((9102, aw(1, UserDefaults.standard.string(forKey: "vrdev.awardHeader") ?? "Advancement Made!", name: "award_au", off: SIMD2(30, 40), align: SIMD2(0, -1), number: 0xFFFF00, z: 102)))
+            let title = UserDefaults.standard.string(forKey: "vrdev.awardTitle")
+                ?? (UserDefaults.standard.bool(forKey: "vrdev.awardTest") ? "Isn't It Iron Pick" : "Acquire Hardware")
+            elems.append((9103, aw(1, title, name: "award_title", off: SIMD2(35, 100), align: SIMD2(0, -1), z: 102)))
             elems.append((9104, aw(2, "mcl_potions_effect_swiftness.png", name: "award_icon", off: SIMD2(-138, 62), align: SIMD2(0, 0), size: SIMD2(64, 64), number: 2, z: 102)))
         }
         // Re-sort only if a sim path added fake elements; the cached list is
         // already z-sorted.
         if elems.count != hudBaseCount { elems.sort { $0.1.zIndex < $1.1.zIndex } }
         #endif
+        awardBox = nil
         guard !elems.isEmpty else { return }
         let skip = client.xpHudIds
         let hx = frameHeadXform
@@ -4350,9 +4392,19 @@ final class WorldSession {
                 // (longer) achievement name spilled past it. Match desktop
                 // proportions for just those two lines so the title fits (#222).
                 let isAwardText = e.name == "award_au" || e.name == "award_title"
-                let th = (isAwardText ? 16 : 26) * mul, tw = th * max(0.4, t.aspect)
+                var th = (isAwardText ? 16 : 26) * mul, tw = th * max(0.4, t.aspect)
+                // Our glyphs run wider than desktop's, so the longest toast line
+                // ("Secret Advancement Made!") overran the box. Shrink an award
+                // line only as far as it takes to stay inside the background.
+                if isAwardText, let box = awardBox {
+                    let cx = anchor.x + e.align.x * tw / 2, pad: Float = 12 * Self.hudSizeBoost
+                    let room = 2 * max(0, min(cx - box.lo.x, box.hi.x - cx) - pad)
+                    if tw > room, room > 0 { let k = room / tw; tw *= k; th *= k }
+                }
                 // align.x: 0 centred on pos, 1 starts at pos, -1 ends at pos.
-                let c = at(anchor + SIMD2(e.align.x * tw / 2, e.align.y * th / 2))
+                let cpx = anchor + SIMD2(e.align.x * tw / 2, e.align.y * th / 2)
+                let c = at(cpx)
+                noteAwardRect(e.name, center: cpx, size: SIMD2(tw, th))
                 appendOverlayQuadUV(center: c, right: hr, up: hu, hw: tw / 2 * kx * D, hh: th / 2 * ky * D,
                                     layer: t.layer, uv: SIMD2(1, 1), tint: Self.hudTint(e.number), v: &v, idx: &idx)
                 drawn += 1
@@ -4364,6 +4416,8 @@ final class WorldSession {
                 var base = anchor
                 if e.type == 5 { guard let p = pixel(ofNode: e.worldPos) else { continue }; base = p + e.offset * Self.hudSizeBoost }
                 let c = at(base + e.align * dst / 2)
+                if e.name == "award_bg" { awardBox = (base + e.align * dst / 2 - dst / 2, base + e.align * dst / 2 + dst / 2) }
+                noteAwardRect(e.name, center: base + e.align * dst / 2, size: dst)
                 appendOverlayQuadUV(center: c, right: hr, up: hu, hw: dst.x / 2 * kx * D, hh: dst.y / 2 * ky * D,
                                     layer: img.layer, uv: img.uv, tint: 16777215, v: &v, idx: &idx)
                 drawn += 1
@@ -4387,7 +4441,11 @@ final class WorldSession {
             case 2:                                              // award-icon statbar drawn as one scaled image (#222)
                 guard !e.text.isEmpty, let img = hudImage(e.text) else { continue }
                 let dst = (e.size.x > 0 ? e.size : SIMD2(64, 64)) * Self.hudSizeBoost
-                let c = at(anchor + e.align * dst / 2)
+                // Hud::drawStatbar puts the first icon's TOP-LEFT at pos+offset and
+                // ignores alignment; centring it there pushed the toast icon half
+                // its size up and left, hanging off the box (#222 follow-up).
+                let c = at(anchor + dst / 2)
+                noteAwardRect(e.name, center: anchor + dst / 2, size: dst)
                 appendOverlayQuadUV(center: c, right: hr, up: hu, hw: dst.x / 2 * kx * D, hh: dst.y / 2 * ky * D,
                                     layer: img.layer, uv: img.uv, tint: 16777215, v: &v, idx: &idx)
                 drawn += 1
@@ -6865,6 +6923,14 @@ final class WorldSession {
         // squashed into a thin unreadable line (HUD P2).
         let ordered = active.reversed()   // newest first (top)
         var oy: Float = 0.36              // top edge well up in the upper field so a long MOTD/chat sits above the action, not over it (Eric)
+        // An advancement arrives as a toast AND a chat line at the same moment,
+        // and both live in the upper field: start the chat stack under the
+        // toast's bottom edge while it shows (awardBox is last frame's, which is
+        // fine for a 3 s toast). Converts the HUD pixel row to height on our plane.
+        if let box = awardBox {
+            let el = (Self.hudScreen.y / 2 - box.hi.y) * (2 * Self.hudHalfAngle.y / Self.hudScreen.y)
+            oy = min(oy, tan(el) * 1.7 - 0.02)
+        }
         for slot in ordered {
             let age = chatClock - chatRing[slot].born
             let fade = age > life - 1 ? Float(max(0, life - age)) : 1
