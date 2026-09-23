@@ -318,6 +318,7 @@ final class WorldSession {
     private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
     private var simDigTimer: Double = 0
     private var simTarget: SIMD3<Int>? = nil        // per-scene scratch: the node the scene works on
+    private var spawnerLogged = Set<String>()            // spawner textures already logged
     private var audioResolveLogged = Set<String>()       // sound names already logged by [audio] resolve
     private var lastHotbarLog = ""
     private var loggedMobNames = Set<String>()           // [mob] identity line, once per entity name
@@ -778,10 +779,13 @@ final class WorldSession {
         }
         client.onAddParticleSpawner = { [weak self] sp in
             // Diagnostic (#199/#201): rain/snow arrive as player-attached spawners;
-            // log the texture + size + spread once so the next weather run shows
-            // exactly what the server sends (the giant-bar and rain->dirt bugs).
-            print("[spawner] id=\(sp.serverId) tex=\(sp.texture) size=\(sp.sizeMin)..\(sp.sizeMax) amount=\(sp.amount) attached=\(sp.attachedId) pos=\(sp.posMin)..\(sp.posMax) anim=\(sp.look.animType):\(sp.look.animA)x\(sp.look.animB)/\(sp.look.animLength)s glow=\(sp.look.glow) node=\(sp.look.nodeId)"); fflush(stdout)
-            self?.activeSpawners[sp.serverId] = ActiveSpawner(spec: sp, emitted: 0, age: 0, gone: 0)
+            // log the texture + size + spread so a weather run shows exactly what
+            // the server sends (the giant-bar and rain->dirt bugs). Once per
+            // texture: VoxeLibre's weather adds ~37 short-lived spawners a second,
+            // 13k lines in a 6-minute snowy session.
+            guard let self else { return }
+            if self.spawnerLogged.insert(sp.texture).inserted { print("[spawner] id=\(sp.serverId) tex=\(sp.texture) size=\(sp.sizeMin)..\(sp.sizeMax) amount=\(sp.amount) attached=\(sp.attachedId) pos=\(sp.posMin)..\(sp.posMax) anim=\(sp.look.animType):\(sp.look.animA)x\(sp.look.animB)/\(sp.look.animLength)s glow=\(sp.look.glow) node=\(sp.look.nodeId)"); fflush(stdout) }
+            self.activeSpawners[sp.serverId] = ActiveSpawner(spec: sp, emitted: 0, age: 0, gone: 0)
         }
         client.onDeleteParticleSpawner = { [weak self] id in self?.activeSpawners.removeValue(forKey: id) }
         client.onStopSound = { [weak self] id in self?.audio.stop(id: id); self?.attachedSounds.removeValue(forKey: id) }
