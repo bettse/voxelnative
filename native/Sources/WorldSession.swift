@@ -4215,7 +4215,14 @@ final class WorldSession {
                 }
             }
         }
-        for case let st? in ownMain { if let tile = invTileCache[iconKey(st)] ?? nil { newTiles.insert(tile) } }
+        // The offhand item draws head-locked beside the hearts (node atlas), so
+        // its tile joins the hotbar's.
+        let ownOffhand = client.inventory["offhand"] ?? []
+        for case let st? in ownOffhand where invTileCache[iconKey(st)] == nil {
+            let img = st.customImage ?? client.items.image(for: st.name)
+            invTileCache[iconKey(st)] = .some((img?.isEmpty == false) ? img : nodeIconTile(st.name))
+        }
+        for case let st? in ownMain + ownOffhand { if let tile = invTileCache[iconKey(st)] ?? nil { newTiles.insert(tile) } }
         if !wantImgs.isEmpty { client.media.request(wantImgs) }
         if !newTiles.isSubset(of: hotbarTiles) {
             hotbarTiles.formUnion(newTiles)
@@ -4776,6 +4783,11 @@ final class WorldSession {
             // as an image element; ours is wrist-anchored (#57), so a strip of
             // empty slots floating at the bottom of view is just noise.
             if e.type == 0, e.text.range(of: "hotbar", options: .caseInsensitive) != nil { continue }
+            // mcl_offhand's slot frame and item: drawn head-locked above the
+            // hearts instead (appendOffhandHUD), so it moves with the view like
+            // the vitals and doesn't sit on top of the heart row.
+            if e.type == 0, e.text.hasPrefix("mcl_offhand_slot") { continue }
+            if e.type == 3, e.text == "offhand" { continue }
             // Pixel offsets scale with the size boost so a mod's layout (a title
             // over its bar, a label over its timer) stays proportional; only the
             // normalised position stays pinned to the screen edge.
@@ -5516,6 +5528,7 @@ final class WorldSession {
         // Armor moved to a left-wrist gauntlet (#108, postHandHud/buildHandHud),
         // so it no longer draws as a peripheral column here.
         appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud)
+        appendOffhandHUD(origin: .zero, gaze: hudGaze, into: &hud)
         // Hotbar is now wrist-anchored (postHandHud / buildHandHud), not head-locked.
         for i in hud.indices { hud[i].headLocal = true }
         billboards.append(contentsOf: hud)
@@ -5576,6 +5589,7 @@ final class WorldSession {
         appendChat(v: &ov, idx: &oi)
         appendStatusBanner(v: &ov, idx: &oi)
         appendXpLevel(v: &ov, idx: &oi)
+        appendOffhandExtras(v: &ov, idx: &oi)
         appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         // Entity nametags (#118): overlay (no depth, like the engine's
         // screen-space nametags), camera-facing, in origin space with the same
@@ -5677,6 +5691,63 @@ final class WorldSession {
     /// azimuth/elevation offsets from where the head looks), so the row travels
     /// with the head and stays low and to the left instead of centred. hp is
     /// 0..20; each heart shows two HP (full / half / dim empty).
+    /// Where the offhand item sits in the vitals band: just above the right end
+    /// of the heart row(s), clear of the XP level digits (az 0) and above any
+    /// health-boost or absorption rows. (az, elev) in radians, like the hearts.
+    private func offhandHudAngles() -> (az: Float, elev: Float) {
+        var top: Float = -0.30
+        var rest = hp - 20
+        while rest > 0 && top < -0.30 + 0.2 { top += 0.05; rest -= 20 }
+        if client.absorption > 0 { top += 0.045 }
+        return (-0.10, top + 0.06)
+    }
+
+    /// The offhand item (mcl_offhand) as a head-locked icon from the node atlas,
+    /// fixed to the view like the hearts. Its count and wear bar need the model
+    /// texture set, so appendOffhandExtras draws those in the overlay.
+    private func appendOffhandHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
+                                  into billboards: inout [EntityInstance]) {
+        guard let st = client.inventory["offhand"]?.first ?? nil, !st.name.isEmpty,
+              let tile = invTileCache[iconKey(st)] ?? nil, let layer = atlas.tileLayer(tile) else { return }
+        let hudDist: Float = 1.35, size: Float = 0.05 * hudDist
+        let (az, elev) = offhandHudAngles()
+        let (fwd, right, up) = stableFrame(gaze, horizFwd: player.bodyForward())
+        let dir = simd_normalize(fwd + right * tan(az) + up * tan(elev))
+        billboards.append(EntityInstance(pos: origin + dir * hudDist - SIMD3(0, size * 0.5, 0),
+                                         width: size, height: size, layer: Float(layer), light: 255))
+    }
+
+    /// Stack count and wear bar for the offhand icon, in the overlay stream
+    /// (text and bars live in the model texture set), anchored to the same
+    /// head frame and angles as appendOffhandHUD.
+    private func appendOffhandExtras(v: inout [Float], idx: inout [UInt32]) {
+        guard let st = client.inventory["offhand"]?.first ?? nil, !st.name.isEmpty else { return }
+        let hx = frameHeadXform
+        let headPos = SIMD3<Float>(hx.columns.3.x, hx.columns.3.y, hx.columns.3.z)
+        let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
+        let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
+        let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
+        let hudDist: Float = 1.35, size: Float = 0.05 * hudDist
+        let (az, elev) = offhandHudAngles()
+        let center = headPos + simd_normalize(hf + hr * tan(az) + hu * tan(elev)) * hudDist - hf * 0.002
+        if st.count > 1, let t = hudTextLayer(id: -2000, text: String(st.count)) {
+            let th = size * 0.45, tw = th * max(0.4, t.aspect)
+            appendQuad(center: center + hr * (size / 2 - tw / 2) - hu * (size / 2 - th / 2), right: hr, up: hu,
+                       hw: tw / 2, hh: th / 2, layer: t.layer, tint: 16777215, v: &v, idx: &idx)
+        }
+        if st.wear > 0, highlightLayer >= 0 {
+            let left = max(0, min(1, 1 - Float(st.wear) / 65535))
+            let bw = size * 0.8, bh = size * 0.08
+            let by = center - hu * (size / 2 - bh * 1.5)
+            appendQuad(center: by, right: hr, up: hu, hw: bw / 2, hh: bh / 2,
+                       layer: highlightLayer, tint: Self.packTint(0, 0, 0), v: &v, idx: &idx)
+            let fw = bw * left
+            appendQuad(center: by - hr * (bw / 2 - fw / 2) - hf * 0.001, right: hr, up: hu, hw: fw / 2, hh: bh / 2,
+                       layer: highlightLayer,
+                       tint: Self.packTint(Int(255 * min(1, 2 * (1 - left))), Int(255 * min(1, 2 * left)), 0), v: &v, idx: &idx)
+        }
+    }
+
     private func appendHealthHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
         // Follow the heart statbar's icon (poison green, wither black, frost
