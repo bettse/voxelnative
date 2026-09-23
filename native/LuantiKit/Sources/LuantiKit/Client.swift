@@ -399,6 +399,8 @@ public final class Client {
     /// Armor changed; arg is 0..20.
     public var onArmor: ((_ armor: Int) -> Void)?
 
+    private var soundLogged = Set<String>()          // sound names already logged
+    private var lastLoggedHotbar: [String?] = []
     private var entitySolidVersion = -2   // NODEDEF version the entity floor-clamp snapshot was built from
 
     public var onAuthenticated: ((_ mapSeed: UInt64) -> Void)?
@@ -1094,7 +1096,7 @@ public final class Client {
                              pos: SIMD3(px / 10, py / 10, pz / 10) + Client.gridShift,
                              objectId: objectId, loop: loop, fade: fade,
                              pitch: pitch, ephemeral: ephemeral)
-        print("[sound] PLAY id=\(id) name=\(name) gain=\(gain) type=\(type) pos=\(spec.pos) obj=\(objectId) loop=\(loop) fade=\(fade) pitch=\(pitch) ephemeral=\(ephemeral)"); fflush(stdout)
+        if soundLogged.insert(name).inserted { print("[sound] PLAY id=\(id) name=\(name) gain=\(gain) type=\(type) pos=\(spec.pos) obj=\(objectId) loop=\(loop) fade=\(fade) pitch=\(pitch) ephemeral=\(ephemeral) (first play of this name)"); fflush(stdout) }
         onPlaySound?(spec)
     }
 
@@ -1491,7 +1493,12 @@ public final class Client {
         var slots: [String?] = main.prefix(9).map { $0?.name }
         while slots.count < 9 { slots.append(nil) }
         hotbar = slots
-        print("[client] INVENTORY main[0..9]=\(slots.map { $0 ?? "nil" }) lists=\(lists.keys.sorted())"); fflush(stdout)
+        // Only when the hotbar names change: VoxeLibre resends the inventory on
+        // every wear tick and pickup, ~1400 identical lines a session.
+        if slots != lastLoggedHotbar {
+            lastLoggedHotbar = slots
+            print("[client] INVENTORY main[0..9]=\(slots.map { $0 ?? "nil" }) lists=\(lists.keys.sorted())"); fflush(stdout)
+        }
         onInventory?(slots)
     }
 

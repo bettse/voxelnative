@@ -315,6 +315,9 @@ final class WorldSession {
     private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
     private var simDigTimer: Double = 0
     private var simDropTarget: SIMD3<Int>? = nil        // -vrdev.dropTest: the node we place then dig
+    private var audioResolveLogged = Set<String>()       // sound names already logged by [audio] resolve
+    private var lastHotbarLog = ""
+    private var loggedMobNames = Set<String>()           // [mob] identity line, once per entity name
     private var simDropResult = ""                       // -vrdev.dropTest: RESULT line, printed after cleanup
     private var simDropCmds: [String] = []               // -vrdev.dropTest: setblocks still to send (chat-rate paced)
     private var awardBox: (lo: SIMD2<Float>, hi: SIMD2<Float>)? = nil   // this frame's toast background (nominal px), to fit its text
@@ -636,7 +639,8 @@ final class WorldSession {
             var wantImgs = Set<String>()
             for t in icons { if let t { for n in NodeRegistry.imageNames(t) where self.client.media.bytes(n) == nil { wantImgs.insert(n) } } }
             if !wantImgs.isEmpty { self.client.media.request(wantImgs) }
-            print("[hud] hotbar: [\(main.map { $0 ?? "nil" }.joined(separator: ", "))] wield=\(self.client.wieldIndex)"); fflush(stdout)
+            let line = "[hud] hotbar: [\(main.map { $0 ?? "nil" }.joined(separator: ", "))] wield=\(self.client.wieldIndex)"
+            if line != self.lastHotbarLog { self.lastHotbarLog = line; print(line); fflush(stdout) }
             if !newTiles.isSubset(of: self.hotbarTiles) {
                 self.hotbarTiles.formUnion(newTiles)
                 self.atlasNeedsRebuild = true
@@ -2873,7 +2877,9 @@ final class WorldSession {
             print("[audio] '\(file)' not yet downloaded for '\(spec.name)'"); fflush(stdout)
             return
         }
-        print("[audio] resolve '\(spec.name)' -> \(file) (\(data.count) bytes)"); fflush(stdout)
+        if audioResolveLogged.insert(spec.name).inserted {
+            print("[audio] resolve '\(spec.name)' -> \(file) (\(data.count) bytes)"); fflush(stdout)
+        }
         // Positional (type 1) and object-attached (type 2) sounds are real 3D
         // sources; local sounds (type 0) play flat 2D. Positions arrive already
         // shifted into our grid by Client.gridShift.
@@ -5275,8 +5281,7 @@ final class WorldSession {
             }
             // One-time identity log per mob: the pink creeper tint wasn't showing
             // on device, so surface each mob's real name/mesh + whether it matched.
-            if !loggedMobIds.contains(e.id) {
-                loggedMobIds.insert(e.id)
+            if loggedMobNames.insert(e.name).inserted {
                 print("[mob] id=\(e.id) name=\(e.name) mesh=\(e.mesh) creeper=\(isCreeper) tint=\(Int(tint))"); fflush(stdout)
             }
             if isCreeper {
@@ -5578,7 +5583,7 @@ final class WorldSession {
             }
         }
         modelDebugTimer += 1
-        if modelDebugTimer % 120 == 0 {
+        if modelDebugTimer % 900 == 0 {   // ~15 s: every 2 s was 840 lines a session
             // Reuse the `ents` snapshot from the top of postEntities (two more
             // full snapshots here were ~240 Entity copies every 2 s, perf #311).
             let live = Set(ents.map { $0.id })

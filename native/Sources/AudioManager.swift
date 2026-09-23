@@ -132,6 +132,7 @@ final class AudioManager: NSObject {
     private var idle3D: [Source] = [], idle2D: [Source] = []
     private static let poolMax = 12
     private var engineStarted = false
+    private var playLogged = Set<String>()   // sound names already logged (q only)
     private var sessionReady = false
 
     override init() {
@@ -399,7 +400,11 @@ final class AudioManager: NSObject {
                 self.oneShots[key] = src
             }
             if spec.fade > 0 { self.ramp(src, to: vol, step: spec.fade) }
-            print("[audio] playing id=\(spec.id) name=\(spec.name) channel=\(channel.rawValue) vol=\(vol) 3d=\(positional) pitch=\(spec.pitch) loop=\(spec.loop)"); fflush(stdout)
+            // Once per sound name: footsteps and dig sounds alone were ~2000
+            // lines of a 30-minute device log.
+            if self.playLogged.insert(spec.name).inserted {
+                print("[audio] playing id=\(spec.id) name=\(spec.name) channel=\(channel.rawValue) vol=\(vol) 3d=\(positional) pitch=\(spec.pitch) loop=\(spec.loop)"); fflush(stdout)
+            }
         }
     }
 
