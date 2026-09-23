@@ -316,6 +316,7 @@ final class WorldSession {
     // launch, so these mean whatever the running scene sets them to (a count,
     // a low-water mark, a target node, a paced chat queue).
     private var simScratchCount = 0
+    private var simFallPrepped = false
     private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
     private var simDigTimer: Double = 0
     private var simTarget: SIMD3<Int>? = nil        // per-scene scratch: the node the scene works on
@@ -1125,6 +1126,14 @@ final class WorldSession {
         // send; the [hud] HP line is the server's TOCLIENT_HP answer.
         if UserDefaults.standard.bool(forKey: "vrdev.fallTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
+            // First scene in the suite, so it can't lean on the last one ending
+            // on the pad: a hand-run scene (creative mode, a formspec check) can
+            // leave the player elsewhere or in creative, where there is no fall
+            // damage at all.
+            if !simFallPrepped, simDigTimer > 2 {
+                simFallPrepped = true
+                client.sendChat("/grantme all"); client.sendChat("/gamemode survival"); simTeleportToPad()
+            }
             switch simDigPhase {
             case 0 where simDigTimer > 8 && player.physics().grounded:
                 simScratchCount = hp
@@ -2022,10 +2031,14 @@ final class WorldSession {
         // hypertext description) so the #339 read-only info-form render can be
         // screenshotted headless. A player form, so no node context.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAchieve"), atlasBuilt {
-            let spec = "size[11,5]tabheader[0,0;tab;Advancements,Goals,Challenges;1;false;false]" +
-                       "image[0.5,0.5;2,2;mcl_potions_effect_swiftness.png]" +
-                       "textlist[4.75,0;6,5;awards;Acquire Hardware,Sleep in a Bed,Time to Farm!,Diamonds\\, Diamonds\\, Diamonds,The Lie,Hot Stuff,Local Brewery,The End?;1;false]" +
-                       "hypertext[0.5,3;4,2;desc;<b>Acquire Hardware</b>\nSmelt an iron ingot.]"
+            // awards.getFormspec's layout (awards/api.lua:437-492), legacy
+            // coordinates: icon, title under it, progress bar, textlist.
+            let spec = "size[11,5]" +
+                       "label[1,2.75;Acquire Hardware]image[1,0;3,3;mcl_potions_effect_swiftness.png]" +
+                       "background[0,4.80;4.6,0.3;awards_progress_gray.png;false]" +
+                       "background[0,4.80;2.3,0.3;awards_progress_green.png;false]label[1.75,4.63;1 / 2]" +
+                       "textarea[0.25,3.25;4.8,1.7;;Smelt an iron ingot.;]" +
+                       "textlist[4.75,0;6,5;awards;Acquire Hardware,Sleep in a Bed,Time to Farm!,Diamonds\\, Diamonds\\, Diamonds,The Lie,Hot Stuff,Local Brewery,The End?;1;false]"
             openFormspec(spec, "awards:awards"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeFurnace 1 opens VoxeLibre's real inactive furnace
@@ -3658,7 +3671,7 @@ final class WorldSession {
     /// text-only for now; close it by clicking off the panel, which sends the
     /// form's quit like any other. Tab switching / row selection is a follow-up
     /// (the parsers already carry the field names) (#339).
-    private func openInfoFormspec(spec: String, name: String) {
+    private func openInfoFormspec(spec: String, name: String, legacy: Bool) {
         // A re-send of the SAME form (tab switch, row select echo) should keep
         // the panel where it is instead of re-anchoring in front of the player
         // on every tap (#346).
@@ -3666,14 +3679,25 @@ final class WorldSession {
         formspecContext = nil            // player form (show_formspec), not a node's meta form
         formspecElements = []
         formspecRings = []
-        formspecLabelsRaw = Formspec.parseLabels(spec) + Formspec.infoFormLabels(spec)
+        // Achievements and Help are old-coordinate forms: convert their own
+        // elements the way openFormspec does, and hand the flag to the
+        // textlist/hypertext flattening so rows land in the same units.
+        var labels = Formspec.parseLabels(spec)
+        var images = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
+        var backgrounds = Formspec.parseBackgrounds(spec)
+        if legacy {
+            labels = labels.map(Formspec.Legacy.convert)
+            images = images.map(Formspec.Legacy.convert)
+            backgrounds = backgrounds.map(Formspec.Legacy.convert)
+        }
+        formspecLabelsRaw = labels + Formspec.infoFormLabels(spec, legacy: legacy)
         formspecFields = []
         formspecButtons = []
         invWidgets = []
-        formspecInfoTargets = Formspec.infoTargets(spec)
-        formspecImages = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
+        formspecInfoTargets = Formspec.infoTargets(spec, legacy: legacy)
+        formspecImages = images
         formspecTooltips = [:]
-        formspecBackgrounds = Formspec.parseBackgrounds(spec)
+        formspecBackgrounds = backgrounds
         formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
         formspecName = name
         formspecOpen = true; inventoryOpen = true; formspecIsInventory = false
@@ -3726,7 +3750,7 @@ final class WorldSession {
             // read-only in the panel so it's legible, instead of the one-button
             // notice that dropped everything but a single button (#339).
             if Formspec.isInfoForm(spec) {
-                openInfoFormspec(spec: spec, name: name)
+                openInfoFormspec(spec: spec, name: name, legacy: Formspec.Legacy.applies(to: rawSpec0))
                 return
             }
             // A button dialog (bed sleep form, death screen): show a notice and
@@ -4014,7 +4038,12 @@ final class WorldSession {
             for b in invBackgrounds { grow(b.u, b.v, b.hw, b.hh) }
             for i in invImages { grow(i.u, i.v, i.hw, i.hh) }
             for w in invWidgets { grow(w.u, w.v, w.hw, w.hh) }
-            for l in invLabels { grow(l.u, l.v, 0, p * 0.5) }
+            // Labels are left-anchored at u; reach right by a rough text width
+            // (~0.2 cell per character) so a long textlist row stays on the panel.
+            for l in invLabels {
+                let w = Float(l.text.count) * 0.2 * p
+                grow(l.u + w * 0.5, l.v, w * 0.5, p * 0.5)
+            }
         }
         return (uMin, uMax, vMin, vMax)
     }

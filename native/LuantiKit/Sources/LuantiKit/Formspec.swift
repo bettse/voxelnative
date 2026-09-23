@@ -506,7 +506,7 @@ public enum Formspec {
     /// and hypertext reduced to text lines. The VR panel has no scrolling yet, so
     /// long lists/text are capped with a "(+N more)" marker (#339). Coordinates
     /// are formspec grid units, matching label[]/list[] placement.
-    public static func infoFormLabels(_ spec: String) -> [Label] {
+    public static func infoFormLabels(_ spec: String, legacy: Bool = false) -> [Label] {
         var out: [Label] = []
         if let t = parseTabHeader(spec) {
             for (i, cap) in t.captions.enumerated() {
@@ -515,7 +515,7 @@ public enum Formspec {
             }
         }
         let maxRows = 12
-        for tl in parseTextlists(spec) {
+        for tl in parseTextlists(spec).map({ legacy ? Legacy.convert($0) : $0 }) {
             for (i, row) in tl.rows.prefix(maxRows).enumerated() where !row.isEmpty {
                 out.append(Label(gx: tl.gx + 0.2, gy: tl.gy + 0.6 + Float(i) * 0.5, text: row, color: nil))
             }
@@ -524,11 +524,57 @@ public enum Formspec {
                                  text: "(+\(tl.rows.count - maxRows) more)", color: nil))
             }
         }
+        // Read-only textarea text: the achievement description, Help entry
+        // bodies. Wrapped to the box width; the panel has no scrolling, so
+        // capped like the textlist.
+        for t in parseTextareas(spec) where !t.text.isEmpty {
+            // Legacy textareas skip the padding (pos -= padding) and start their
+            // text 0.404 below the scaled y (guiFormSpecMenu parseTextArea).
+            let x = legacy ? t.gx * Legacy.spacing.x : t.gx
+            let top = legacy ? t.gy * Legacy.spacing.y + 0.404 : t.gy
+            let w = legacy ? t.w * Legacy.spacing.x : t.w
+            let lines = wrap(t.text, width: max(10, Int(w / 0.2)))
+            for (i, line) in lines.prefix(maxRows).enumerated() {
+                out.append(Label(gx: x + 0.1, gy: top + 0.25 + Float(i) * 0.4, text: line, color: nil))
+            }
+        }
         let maxLines = 16
-        for h in parseHypertexts(spec) {
+        for h in parseHypertexts(spec).map({ legacy ? Legacy.convert($0) : $0 }) {
             for (i, line) in h.lines.prefix(maxLines).enumerated() where !line.isEmpty {
                 out.append(Label(gx: h.gx + 0.1, gy: h.gy + 0.3 + Float(i) * 0.4, text: line, color: nil))
             }
+        }
+        return out
+    }
+
+    /// A `textarea[x,y;w,h;name;label;default]`'s box and its visible text
+    /// (label, then default, joined), for read-only display in info forms.
+    struct Textarea { let gx: Float, gy: Float, w: Float, text: String }
+    static func parseTextareas(_ spec: String) -> [Textarea] {
+        var out: [Textarea] = []
+        for chunk in spec.split(separator: "]") {
+            guard let r = chunk.range(of: "textarea[") else { continue }
+            let f = chunk[r.upperBound...].split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+            guard f.count >= 5 else { continue }
+            let xy = f[0].split(separator: ","), wh = f[1].split(separator: ",")
+            guard xy.count == 2, let gx = Float(xy[0]), let gy = Float(xy[1]),
+                  let w = wh.first.flatMap({ Float($0) }) else { continue }
+            let text = [clean(f[3]), clean(f[4])].filter { !$0.isEmpty }.joined(separator: "\n")
+            out.append(Textarea(gx: gx, gy: gy, w: w, text: text))
+        }
+        return out
+    }
+
+    /// Greedy word wrap to `width` characters, keeping explicit newlines.
+    static func wrap(_ text: String, width: Int) -> [String] {
+        var out: [String] = []
+        for para in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = ""
+            for word in para.split(separator: " ") {
+                if !line.isEmpty, line.count + 1 + word.count > width { out.append(line); line = "" }
+                line += line.isEmpty ? String(word) : " " + word
+            }
+            out.append(line)
         }
         return out
     }
@@ -552,7 +598,7 @@ public enum Formspec {
 
     /// Hit regions for an info form, kept in lockstep with infoFormLabels'
     /// placement so a tap lands on the visible text.
-    public static func infoTargets(_ spec: String) -> [InfoTarget] {
+    public static func infoTargets(_ spec: String, legacy: Bool = false) -> [InfoTarget] {
         var out: [InfoTarget] = []
         // gy matches infoFormLabels exactly (it draws each line with gy as the
         // text's vertical CENTER), so the tap box lands on the visible text.
@@ -563,7 +609,7 @@ public enum Formspec {
             }
         }
         let maxRows = 12
-        for tl in parseTextlists(spec) {
+        for tl in parseTextlists(spec).map({ legacy ? Legacy.convert($0) : $0 }) {
             for i in 0..<min(tl.rows.count, maxRows) where !tl.rows[i].isEmpty {
                 out.append(InfoTarget(gx: tl.gx + 0.2, gy: tl.gy + 0.6 + Float(i) * 0.5, w: max(1.0, tl.w - 0.4), h: 0.5,
                                       field: tl.name, value: "CHG:\(i + 1)"))
@@ -724,6 +770,14 @@ public enum Formspec {
         /// row, which puts the center at gy * spacing.y + 0.5 like the layout expects.
         public static func convert(_ f: Field) -> Field {
             Field(gx: f.gx * spacing.x, gy: f.gy * spacing.y, w: span(f.w), name: f.name, value: f.value)
+        }
+        /// Textlist and hypertext boxes: base position, size scaled by spacing.
+        public static func convert(_ t: TextList) -> TextList {
+            TextList(gx: x(t.gx), gy: y(t.gy), w: t.w * spacing.x, h: t.h * spacing.y,
+                     name: t.name, rows: t.rows, selected: t.selected)
+        }
+        public static func convert(_ h: Hypertext) -> Hypertext {
+            Hypertext(gx: x(h.gx), gy: y(h.gy), w: h.w * spacing.x, h: h.h * spacing.y, lines: h.lines)
         }
         /// Checkbox gy is the box center in real coordinates.
         public static func convert(_ c: Checkbox) -> Checkbox {
