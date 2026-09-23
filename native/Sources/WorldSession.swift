@@ -486,8 +486,6 @@ final class WorldSession {
         self.screenshotFlag = screenshotFlag
         self.player = player
         client.wantedRange = ViewSettings.shared.blocks   // view-distance slider (#161)
-        WorldMesher.lightDiag = UserDefaults.standard.bool(forKey: "vrdev.testingMode")
-            || UserDefaults.standard.bool(forKey: "vrdev.lightDiag")   // names the node behind a dark light blob (#359)
         mobRenderDist = min(96, Float(ViewSettings.shared.blocks * 16))
         client.onAuthenticated = { [weak self] seed in
             print("[session] AUTHENTICATED map_seed=\(seed) \(PerfStats.uptime())"); fflush(stdout)
