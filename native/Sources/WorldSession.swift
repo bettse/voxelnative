@@ -484,6 +484,8 @@ final class WorldSession {
         self.screenshotFlag = screenshotFlag
         self.player = player
         client.wantedRange = ViewSettings.shared.blocks   // view-distance slider (#161)
+        WorldMesher.lightDiag = UserDefaults.standard.bool(forKey: "vrdev.testingMode")
+            || UserDefaults.standard.bool(forKey: "vrdev.lightDiag")   // names the node behind a dark light blob (#359)
         mobRenderDist = min(96, Float(ViewSettings.shared.blocks * 16))
         client.onAuthenticated = { [weak self] seed in
             print("[session] AUTHENTICATED map_seed=\(seed) \(PerfStats.uptime())"); fflush(stdout)
@@ -650,7 +652,13 @@ final class WorldSession {
         }
         client.onXp = { [weak self] level, fraction in self?.xpLevel = level; self?.xpFraction = fraction }
         client.onMediaPushed = { [weak self] name in self?.forgetTexture(name) }
-        client.onPlayerSpeed = { [weak self] v in self?.player.addVelocity(v) }         // knockback
+        client.onPlayerSpeed = { [weak self] v in                                       // knockback
+            guard let self else { return }
+            self.player.addVelocity(v)
+            // A shove you can feel: mob hits and explosions arrive as a server
+            // velocity kick (PLAYER_SPEED), which is the "pushed back" moment.
+            if simd_length(v) > 1 { self.input.rumble(intensity: 0.6, sharpness: 0.3, duration: 0.15) }
+        }
         client.onMovePlayerRel = { [weak self] d in self?.player.addPosition(d) }        // piston/elevator nudge
         client.onMovement = { [weak self] walk, fast, crouch, jump, gravity in
             self?.player.setMovement(walk: walk, fast: fast, crouch: crouch, jump: jump, gravity: gravity)
@@ -2554,9 +2562,9 @@ final class WorldSession {
     /// is silent. The name is a sound group; resolveSound picks a variant.
     private func playDugSound(id: UInt16, at node: SIMD3<Int>) {
         playNodeSound(client.nodes.dugSound(id), at: node)
-        // A faint tick, not a buzz: at mining pace this fires every block, and
-        // 0.5 read as excessive on the Sense (bug note 2026-09-22).
-        input.rumble(intensity: 0.25, sharpness: 0.8)
+        // No haptic here on purpose: at mining pace even a faint tick per block
+        // was too much (bug notes 2026-09-22/23). Haptics are for things that
+        // happen TO the player: damage and knockback.
     }
     /// Play a node sound group positionally at a node (dig loop / dug on break).
     private func playNodeSound(_ name: String?, at node: SIMD3<Int>) {
@@ -2652,7 +2660,6 @@ final class WorldSession {
                 punchRepeat -= dt
                 if gi.dig && (!prevDig || punchRepeat <= 0) {
                     client.sendInteract(action: 0, objectId: obj.id)
-                    input.rumble(intensity: 0.7, sharpness: 0.6)   // hit feedback on a melee punch (#357)
                     client.objects.flash(obj.id, seconds: 0.25)   // immediate hit feedback (#149), not waiting on PUNCHED
                     punchRepeat = 0.2
                     print("[melee] punch object \(obj.id)"); fflush(stdout)
