@@ -1009,7 +1009,7 @@ final class WorldSession {
             }
             switch simEatPhase {
             case 0 where simEatTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/giveme mcl_core:apple_gold 5")
+                client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:apple_gold 5")   // clearinv: the sim account keeps its inventory between runs
                 print("[eattest] gave golden apples"); fflush(stdout)
                 simEatPhase = 1; simEatTimer = 0
             case 1 where simEatTimer > 4:
