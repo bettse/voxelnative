@@ -5770,15 +5770,17 @@ final class WorldSession {
     /// azimuth/elevation offsets from where the head looks), so the row travels
     /// with the head and stays low and to the left instead of centred. hp is
     /// 0..20; each heart shows two HP (full / half / dim empty).
-    /// Where the offhand item sits in the vitals band: just above the right end
-    /// of the heart row(s), clear of the XP level digits (az 0) and above any
-    /// health-boost or absorption rows. (az, elev) in radians, like the hearts.
+    /// Where the offhand item sits in the vitals band: on the XP level's row
+    /// (-0.22, above the XP bar at -0.28), just right of the digits at az 0,
+    /// and above any health-boost or absorption rows. Just above the hearts
+    /// put it on top of the XP bar (device shot-1790199793).
+    /// (az, elev) in radians, like the hearts.
     private func offhandHudAngles() -> (az: Float, elev: Float) {
         var top: Float = -0.30
         var rest = hp - 20
         while rest > 0 && top < -0.30 + 0.2 { top += 0.05; rest -= 20 }
         if client.absorption > 0 { top += 0.045 }
-        return (-0.10, top + 0.06)
+        return (0.09, max(-0.22, top + 0.06))
     }
 
     /// The offhand item (mcl_offhand) as a head-locked icon from the node atlas,
