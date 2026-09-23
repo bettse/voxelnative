@@ -315,6 +315,7 @@ final class WorldSession {
     private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
     private var simDigTimer: Double = 0
     private var simDropTarget: SIMD3<Int>? = nil        // -vrdev.dropTest: the node we place then dig
+    private var simDropResult = ""                       // -vrdev.dropTest: RESULT line, printed after cleanup
     private var simDropCmds: [String] = []               // -vrdev.dropTest: setblocks still to send (chat-rate paced)
     private var awardBox: (lo: SIMD2<Float>, hi: SIMD2<Float>)? = nil   // this frame's toast background (nominal px), to fit its text
     private var simAwardRects: [String: (lo: SIMD2<Float>, hi: SIMD2<Float>)] = [:]   // -vrdev.awardTest: drawn toast rects (nominal px)
@@ -1496,6 +1497,9 @@ final class WorldSession {
                 simDigPhase = simDropCmds.isEmpty ? 9 : 2; simDigTimer = 0
             case 9:
                 print("[stationtest] RESULT opened=\(simEatStartCount)/\(stations.count) pass=\(simEatStartCount == stations.count)"); fflush(stdout)
+                // Leave the shared spawn pad as we found it: a station left at
+                // head height walls off the sneak test's edge.
+                if let t = simDropTarget { client.sendChat("/setblock \(t.x),\(t.y),\(t.z) air") }
                 simDigPhase = 10
             default: break
             }
@@ -1661,7 +1665,9 @@ final class WorldSession {
                     if top != Int.min, d.pos.y + d.cbMin.y < Float(top + 1) - 0.05 { sunk += 1 }
                     print("[droptest] ground under drop column x=\(dx) z=\(dz): highest solid y=\(top) (drop y=\(d.pos.y) cbMin.y=\(d.cbMin.y))"); fflush(stdout)
                 }
-                print("[droptest] RESULT drops=\(drops.count) drawable=\(drawable) sunk=\(sunk) pass=\(drawable > 0 && sunk == 0)"); fflush(stdout)
+                // Held back until the floor is cleared (phase 8): simtests.sh
+                // kills the app on the RESULT line.
+                simDropResult = "[droptest] RESULT drops=\(drops.count) drawable=\(drawable) sunk=\(sunk) pass=\(drawable > 0 && sunk == 0)"
                 simDigPhase = 4; simDigTimer = 0
             case 4 where simDigTimer > 4:
                 // Settle check (#360): the server's send threshold drops to 0.01
@@ -1671,7 +1677,16 @@ final class WorldSession {
                 for d in client.objects.snapshot() where d.name == "__builtin:item" && simd_distance(d.pos, feet) < 24 {
                     print("[droptest] settled id=\(d.id) pos=\(d.pos) vel=\(d.vel) acc=\(d.acc)"); fflush(stdout)
                 }
-                simDigPhase = 7
+                // Leave the shared spawn pad as we found it: the floor sits at
+                // foot height and walls off the sneak test's edge.
+                if let t = simDropTarget {
+                    for dx in -1...1 { for dz in -1...1 { simDropCmds.append("/setblock \(t.x + dx),\(t.y - 2),\(t.z + dz) air") } }
+                }
+                simDigPhase = 8; simDigTimer = 0
+            case 8 where simDigTimer > 1.3:   // chat-rate paced, like phase 6
+                simDigTimer = 0
+                if simDropCmds.isEmpty { print(simDropResult); fflush(stdout); simDigPhase = 7 }
+                else { client.sendChat(simDropCmds.removeFirst()) }
             default: break
             }
         }
