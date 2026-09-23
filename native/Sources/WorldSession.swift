@@ -1500,6 +1500,32 @@ final class WorldSession {
             default: break
             }
         }
+        // -vrdev.statusTest 1: status effects must reach the heart row the way
+        // vl_hudbars shows them. Poison swaps the heart statbar's icon (we must
+        // pick up the new icon AND have a layer for it); absorption adds gold
+        // hearts via a second statbar (parity review 2026-09-23 #4).
+        if UserDefaults.standard.bool(forKey: "vrdev.statusTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            switch simDigPhase {
+            case 0 where simDigTimer > 3:
+                client.sendChat("/grantme all"); client.sendChat("/effect clear")
+                simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 1.5:
+                client.sendChat("/effect poison 60 1 NOPART")
+                simDigPhase = 2; simDigTimer = 0
+            case 2 where simDigTimer > 1.5:
+                client.sendChat("/effect absorption 60 1 NOPART")
+                simDigPhase = 3; simDigTimer = 0
+            case 3 where simDigTimer > 3:
+                let icon = client.healthIcon ?? "nil"
+                let poisoned = icon.contains("poison"), hasLayer = atlas.statusIconPairs[icon] != nil
+                let absorb = client.absorption, gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] != nil
+                print("[statustest] healthIcon=\(icon) layer=\(hasLayer) absorption=\(absorb) goldLayer=\(gold)"); fflush(stdout)
+                print("[statustest] RESULT pass=\(poisoned && hasLayer && absorb > 0 && gold)"); fflush(stdout)
+                simDigPhase = 4
+            default: break
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -5298,9 +5324,18 @@ final class WorldSession {
     /// 0..20; each heart shows two HP (full / half / dim empty).
     private func appendHealthHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
+        // Follow the heart statbar's icon (poison green, wither black, frost
+        // blue, regeneration) like vl_hudbars; plain red until one is known.
+        let pair = client.healthIcon.flatMap { atlas.statusIconPairs[$0] }
         appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: hp,   // low row, left of centre (HUD B)
-                         full: atlas.healthFullLayer, half: atlas.healthHalfLayer,
+                         full: pair?.full ?? atlas.healthFullLayer, half: pair?.half ?? atlas.healthHalfLayer,
                          empty: atlas.healthEmptyLayer, into: &billboards)
+        // Absorption (golden apple): gold hearts in a row just above, only as
+        // many as there are, like vl_hudbars' absorption part.
+        if client.absorption > 0, let gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] {
+            appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: client.absorption,
+                             full: gold.full, half: gold.half, empty: -1, elevOffset: 0.045, into: &billboards)
+        }
     }
 
     /// XP bar (#107): a thin track along the bottom-centre of the peripheral
@@ -5380,8 +5415,9 @@ final class WorldSession {
     /// food points (full / half / dim empty), so 10 drumsticks total.
     private func appendHungerHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
+        let pair = client.hungerIcon.flatMap { atlas.statusIconPairs[$0] }   // food poisoning swaps the icon
         appendStatColumn(origin: origin, gaze: gaze, az: 0.185, value: hunger,   // low row, right of centre (HUD B)
-                         full: atlas.hungerFullLayer, half: atlas.hungerHalfLayer,
+                         full: pair?.full ?? atlas.hungerFullLayer, half: pair?.half ?? atlas.hungerHalfLayer,
                          empty: atlas.hungerEmptyLayer, into: &billboards)
     }
 
@@ -5418,14 +5454,14 @@ final class WorldSession {
     /// so the two bars don't overlap (they used to share one horizontal row).
     private func appendStatColumn(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                   az: Float, value: Int,
-                                  full: Int32, half: Int32, empty: Int32,
+                                  full: Int32, half: Int32, empty: Int32, elevOffset: Float = 0,
                                   into billboards: inout [EntityInstance]) {
         // HUD layout B: a single low HORIZONTAL row (hearts left, hunger right)
         // in the comfortable lower band, instead of two tall corner columns that
         // read as crowded. `az` is the row centre; 10 icons run across it.
         let hudDist: Float = 1.35          // on the panel focal plane (HUD P1)
         let size: Float = 0.05 * hudDist
-        let elev: Float = -0.30            // low band, below the gaze (HUD P3/B)
+        let elev: Float = -0.30 + elevOffset   // low band, below the gaze (HUD P3/B)
         let hstep: Float = 0.032           // radians between icons, left to right
         let az0 = az - Float(9) * hstep / 2
         let (fwd, right, up) = stableFrame(gaze, horizFwd: player.bodyForward())
@@ -5437,6 +5473,7 @@ final class WorldSession {
             let center = origin + dir * hudDist
             let filled = value - i * 2
             let layer = filled >= 2 ? full : filled == 1 ? half : empty
+            if layer < 0 { continue }            // empty: -1 draws no slot (absorption row)
             billboards.append(EntityInstance(pos: center - SIMD3(0, size * 0.5, 0),
                                              width: size, height: size,
                                              layer: Float(layer), light: 255))

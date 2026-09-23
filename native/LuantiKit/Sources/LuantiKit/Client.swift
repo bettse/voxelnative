@@ -1156,6 +1156,7 @@ public final class Client {
         }
         guard type == Client.hudElemStatbar else { return }
         statbars[id] = (text: text, number: number)
+        refreshHealthParts()
         print("[hud] statbar add id=\(id) icon=\(text) number=\(number) item=\(item) dir=\(dir)"); fflush(stdout)
         // The hunger bar's icon is hbhunger_icon.png (mcl_hunger swaps it to a
         // poison/regen variant, all prefixed "hbhunger"), so match by prefix.
@@ -1240,6 +1241,7 @@ public final class Client {
             return
         }
         guard statbars[id] != nil else { return }
+        defer { refreshHealthParts() }
         if let value = numVal {
             statbars[id]?.number = value
             if id == hungerStatbarId {
@@ -1258,10 +1260,26 @@ public final class Client {
         }
     }
 
+    /// The heart statbar's current icon (vl_hudbars swaps it for poison,
+    /// wither, frost, regeneration) and the absorption amount, which rides a
+    /// second statbar on the same heart background. hungerIcon likewise
+    /// (food poisoning). Re-derived whenever a statbar changes.
+    public private(set) var healthIcon: String? = nil
+    public private(set) var absorption = 0
+    public var hungerIcon: String? { hungerStatbarId.flatMap { statbars[$0]?.text } }
+    private func refreshHealthParts() {
+        var icon: String? = nil, absorb = 0
+        for (id, sb) in statbars where hudElements[id]?.text2 == "hudbars_bgicon_health.png" {
+            if sb.text == "mcl_potions_icon_absorb.png" { absorb = sb.number } else { icon = sb.text }
+        }
+        healthIcon = icon; absorption = absorb
+    }
+
     /// TOCLIENT_HUDRM (0x4a): u32 id.
     func handleHudRm(_ payload: Data) {
         let r = PacketReader(payload)
         let id = r.u32()
+        defer { refreshHealthParts() }
         statbars[id] = nil
         hudTypes[id] = nil
         if hudElements[id] != nil { hudElements[id] = nil; hudGeneration &+= 1 }
@@ -1298,6 +1316,9 @@ public final class Client {
         // Breath/oxygen bubbles (shown while submerged).
         needed.insert("hudbars_icon_breath.png")
         needed.insert("hudbars_bgicon_breath.png")
+        // Status-effect variants the game swaps into those rows (poison,
+        // wither, frost, regen, absorption gold hearts, food poisoning).
+        for n in TextureAtlas.healthStatusIcons + TextureAtlas.hungerStatusIcons { needed.insert(n) }
         // Armor icons (mcl_hbarmor statbar) for the armor HUD row.
         needed.insert("hbarmor_icon.png")
         needed.insert("hbarmor_bgicon.png")

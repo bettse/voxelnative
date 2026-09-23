@@ -24,6 +24,17 @@ public final class TextureAtlas {
     public private(set) var markerLayer: Int32 = 0   // plain white, for entity billboards
     public private(set) var crosshairLayer: Int32 = 0 // distinct cyan, for the aim marker
     public private(set) var healthFullLayer: Int32 = 0  // full red heart (HUD)
+    /// Full/half layers for the icons VoxeLibre swaps into the heart and hunger
+    /// statbars (poison, wither, frost, regeneration, absorption, food
+    /// poisoning), keyed by texture name. Built alongside the plain hearts.
+    public private(set) var statusIconPairs: [String: (full: Int32, half: Int32)] = [:]
+    public static let healthStatusIcons = [
+        "hudbars_icon_health.png", "hudbars_icon_regenerate.png",
+        "hbhunger_icon_health_poison.png", "hbhunger_icon_regen_poison.png",
+        "mcl_potions_icon_wither.png", "mcl_potions_icon_regen_wither.png",
+        "mcl_potions_icon_frost.png", "mcl_potions_icon_regen_frost.png",
+        "mcl_potions_icon_absorb.png"]
+    public static let hungerStatusIcons = ["hbhunger_icon.png", "mcl_hunger_icon_foodpoison.png"]
     public private(set) var healthHalfLayer: Int32 = 0  // half-filled heart (HUD)
     public private(set) var healthEmptyLayer: Int32 = 0 // dim/empty heart (HUD)
     public private(set) var hotbarSlotLayer: Int32 = 0   // dim cell behind a hotbar item
@@ -108,6 +119,7 @@ public final class TextureAtlas {
         hotbarSelectLayer = Int32(makeSlotLayer(highlight: true))
         buildHealthLayers(media: media)
         buildHungerLayers(media: media)
+        buildStatusIconLayers(media: media)
         buildBreathLayers(media: media)
         buildArmorLayers(media: media)
         // XP bar (#107): flat colours rather than mcl_experience_bar.png, whose
@@ -338,6 +350,27 @@ public final class TextureAtlas {
         }
         healthEmptyLayer = empty.map { Int32(rawLayer("healthEmpty", $0)) }
             ?? Int32(layerForColor(SIMD3(0.16, 0.05, 0.05)))
+    }
+
+    /// Full + half layers for every status icon the game can swap in (same
+    /// half-icon recipe as the plain hearts), so the heart and hunger rows can
+    /// follow the statbar's current icon like vl_hudbars does on desktop.
+    private func buildStatusIconLayers(media: MediaManager) {
+        let n = TextureAtlas.tile
+        func icon(_ name: String) -> [UInt8]? { media.bytes(name).flatMap { TextureAtlas.decodePNG($0, size: n) } }
+        for (names, bgName) in [(TextureAtlas.healthStatusIcons, "hudbars_bgicon_health.png"),
+                                (TextureAtlas.hungerStatusIcons, "hbhunger_bgicon.png")] {
+            let bg = icon(bgName) ?? [UInt8](repeating: 0, count: n * n * 4)
+            for name in names {
+                guard let full = icon(name) else { continue }
+                var half = full
+                for y in 0..<n { for x in (n / 2)..<n {
+                    let i = (y * n + x) * 4
+                    half[i] = bg[i]; half[i+1] = bg[i+1]; half[i+2] = bg[i+2]; half[i+3] = bg[i+3]
+                } }
+                statusIconPairs[name] = (Int32(rawLayer("status:" + name, full)), Int32(rawLayer("statusHalf:" + name, half)))
+            }
+        }
     }
 
     /// Decode the VoxeLibre hunger drumstick icons into HUD atlas layers: full,
