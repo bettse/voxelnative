@@ -349,6 +349,11 @@ final class WorldSession {
     ]
     private var started = false
     private var prevDig = false, prevPlace = false
+    // Drop chord (#341): right trigger + right grip together = desktop Q.
+    private var dropChordLatched = false        // chord fired; both buttons ignored until both release
+    private var chordWait: Float = 0            // a lone press waits this long for its partner
+    private var chordPendingDig = false         // which button started the wait
+    private static let chordWindow: Float = 0.08
     private var punchRepeat: Float = 0                  // object_hit_delay countdown while the trigger is held (#284)
     private var prevFeet: SIMD3<Float>? = nil           // last tick's feet, for the PLAYERPOS velocity
     private var slipVel = SIMD2<Float>(0, 0)            // eased horizontal velocity while on a slippery node (#269)
@@ -468,6 +473,9 @@ final class WorldSession {
     /// everywhere by default; the device drives movement from the controller.
     private var simAutoWalk = false
     private var simAutoSneak = false
+    private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
+    private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
+    private var simChordLeak = 0, simPostGatePlace = 0  // frames dig/place got past the chord gate
     #if targetEnvironment(simulator)
     private var simSneakMark = SIMD3<Float>(0, 0, 0)   // -vrdev.sneakTest: feet at t=4s
     private var simDigPredictedAir = false              // -vrdev.digTest
@@ -1337,6 +1345,10 @@ final class WorldSession {
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 6 && player.physics().grounded && f.y > 100:
                 simFallMaxY = f.y; simFallMinHp = Int(f.y * 100)
+                // Face a fixed heading: the yaw otherwise carries over from
+                // whatever the last scene left, and toward +X/+Z the pad is
+                // wider than the 4 s walk.
+                player.addYaw(-1.67 - player.snapshot().yaw)
                 simAutoWalk = true; simAutoSneak = true
                 print("[sneaktest] start feet=\(f), sneaking forward"); fflush(stdout)
                 simDigPhase = 1; simDigTimer = 0
@@ -1739,6 +1751,48 @@ final class WorldSession {
                 // (0,120,0) for real and every later teleport there fell through.
                 client.sendChat("/setblock 0,120,0 mcl_core:stone")
                 simDigPhase = 99
+            default: break
+            }
+        }
+        // -vrdev.chordDropTest 1: right trigger + grip together drops the
+        // wielded stack like desktop Q (#341), and neither dig nor place leaks
+        // through while the chord is held. Then a lone one-frame grip tap must
+        // still come out of the gate as a place press (the chord wait replays it).
+        if UserDefaults.standard.bool(forKey: "vrdev.chordDropTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            let m = client.inventory["main"] ?? []
+            let cobble = m.reduce(0) { $0 + (($1?.name == "mcl_core:cobble") ? ($1?.count ?? 0) : 0) }
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 10")
+                simTeleportToPad()
+                simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 6 && player.physics().grounded:
+                guard let slot = m.firstIndex(where: { $0?.name == "mcl_core:cobble" }) else {
+                    if simDigTimer > 15 { print("[chorddrop] RESULT no cobble given pass=false"); fflush(stdout); simDigPhase = 9 }
+                    break
+                }
+                client.setWieldIndex(slot)
+                print("[chorddrop] holding chord with \(cobble) cobble in slot \(slot)"); fflush(stdout)
+                simChordLeak = 0; simChordHold = true
+                simDigPhase = 2; simDigTimer = 0
+            case 2 where simDigTimer > 0.4:
+                simChordHold = false
+                simDigPhase = 3; simDigTimer = 0
+            case 3 where simDigTimer > 2:
+                let feet = player.physics().feet
+                let drops = client.objects.snapshot().filter { $0.name == "__builtin:item" && simd_distance($0.pos, feet) < 12 && ($0.wieldItem.hasPrefix("mcl_core:cobble") || $0.textures.first?.hasPrefix("mcl_core:cobble") == true) }
+                for d in client.objects.snapshot() where d.name == "__builtin:item" && simd_distance(d.pos, feet) < 30 {
+                    print("[chorddrop] item id=\(d.id) wield=\(d.wieldItem) tex=\(d.textures.first ?? "") dist=\(simd_distance(d.pos, feet))"); fflush(stdout)
+                }
+                print("[chorddrop] after chord: cobble left=\(cobble) nearby drops=\(drops.count) leakFrames=\(simChordLeak)"); fflush(stdout)
+                simEatStartCount = (cobble == 0 && !drops.isEmpty && simChordLeak == 0) ? 1 : 0
+                simPostGatePlace = 0; simTapPlace = true
+                simDigPhase = 4; simDigTimer = 0
+            case 4 where simDigTimer > 0.5:
+                let tapOk = simPostGatePlace == 1
+                print("[chorddrop] RESULT chordOk=\(simEatStartCount == 1) tapPlaceFrames=\(simPostGatePlace) pass=\(simEatStartCount == 1 && tapOk)"); fflush(stdout)
+                simDigPhase = 9
             default: break
             }
         }
@@ -2605,6 +2659,10 @@ final class WorldSession {
         // Both grips = screenshot. Suppress dig/place that frame so the gesture
         // doesn't also break/place a block.
         var act = gi
+        #if targetEnvironment(simulator)
+        if simChordHold { act.dig = true; act.place = true }
+        if simTapPlace { act.place = true; simTapPlace = false }
+        #endif
         if gi.snap && !prevSnap { screenshotFlag.request(); print("[shot] requested"); fflush(stdout) }
         if inventoryOpen { handleInventoryInput(gi); act.dig = false; act.place = false }   // trigger/grip belong to the panel
         else { invPrevDig = gi.dig; invPrevPlace = gi.place }
@@ -2829,7 +2887,47 @@ final class WorldSession {
         audio.play(spec: spec, data: data, file: file, pos: pos)
     }
 
+    /// Right trigger + right grip pressed together drops the wielded stack, like
+    /// desktop Q (sneak held: just one item; game.cpp dropSelectedItem). There's
+    /// no spare button on the Sense controllers, so it's a chord (#341). A lone
+    /// dig or place press is held back for chordWindow so a near-simultaneous
+    /// chord doesn't also dig or place first; after the drop both buttons stay
+    /// blanked until both are released.
+    private func gateDropChord(_ gi: inout GameInput.State, dt: Float) {
+        if gi.dig && gi.place && !dropChordLatched {
+            dropChordLatched = true; chordWait = 0
+            dropWielded(single: gi.sneak)
+        }
+        if dropChordLatched {
+            if !gi.dig && !gi.place { dropChordLatched = false }
+            gi.dig = false; gi.place = false
+        } else if chordWait > 0 {
+            chordWait -= dt
+            if gi.dig || gi.place {
+                if chordWait > 0 { gi.dig = false; gi.place = false }   // still waiting for the partner
+                else { chordWait = 0 }                                  // no partner: let the press through
+            } else {
+                // Released inside the window: replay it as a one-frame press so
+                // a quick tap still digs or places.
+                gi.dig = chordPendingDig; gi.place = !chordPendingDig; chordWait = 0
+            }
+        } else if (gi.dig && !prevDig) || (gi.place && !prevPlace) {
+            chordWait = Self.chordWindow; chordPendingDig = gi.dig
+            gi.dig = false; gi.place = false
+        }
+    }
+
+    private func dropWielded(single: Bool) {
+        let w = client.wieldIndex
+        guard w >= 0, w < hotbar.count, hotbar[w] != nil else { return }
+        if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove); digNode = nil; digElapsed = 0 }
+        client.sendInventoryAction(Client.dropAction(count: single ? 1 : 0,
+            from: Client.InvRef("current_player", "main", w)))
+        print("[drop] chord dropped \(single ? "one" : "stack") of \(hotbar[w] ?? "") from slot \(w)"); fflush(stdout)
+    }
+
     private func handleInteraction(_ gi: GameInput.State, dt: Float) {
+        var gi = gi
         // Dead: no digging/placing; any action button respawns (no text death
         // screen yet, so the red cast + this is the whole death UX for now).
         if dead {
@@ -2849,6 +2947,11 @@ final class WorldSession {
             return
         }
         prevRespawnBtn = false
+        gateDropChord(&gi, dt: dt)
+        #if targetEnvironment(simulator)
+        if simChordHold && (gi.dig || gi.place) { simChordLeak += 1 }
+        if gi.place { simPostGatePlace += 1 }
+        #endif
         // A "usable" item (has on_use: egg, snowball, ender pearl, bow) throws/
         // uses on the attack-button PRESS, and that takes priority over digging
         // (Luanti game.cpp: usable && DIG pressed -> INTERACT_USE). The pointed
@@ -4093,6 +4196,12 @@ final class WorldSession {
     /// Model-texture layers handed back by releasePanelIconLayers, reused by
     /// registerRGBALayer before the array grows.
     private var freeModelLayers: [Int] = []
+    /// How each item string draws when it's an item entity (dropped item,
+    /// falling node, item frame): resolved once instead of ~10 registry lookups
+    /// per entity per tick. Cleared whenever model layers are released, since
+    /// the cached layer indices would then point at reused slots.
+    private enum ItemDraw { case model(nid: UInt16, layer: Int), cube([Int]), card(layer: Int, uv: SIMD2<Float>) }
+    private var itemDrawCache: [String: ItemDraw] = [:]
 
     /// When a panel closes, give back the icon layers only that panel needed.
     /// Layers are append-only otherwise, and one creative page adds ~50: paging
@@ -4115,6 +4224,7 @@ final class WorldSession {
             freeModelLayers.append(layer); freed += 1
             nodeIconCache.removeAll()   // resolved icons pointed at these layers
         }
+        if freed > 0 { itemDrawCache.removeAll() }
         if freed > 0 { print("[icon] released \(freed) panel icon layers (\(freeModelLayers.count) free of \(modelTexCount))"); fflush(stdout) }
     }
 
@@ -4597,11 +4707,11 @@ final class WorldSession {
             // VoxeLibre adds its own crosshair image; we deliberately draw no
             // reticle (#48: the pointed-node outline is the cue, and a reticle
             // at a guessed depth reads badly in stereo).
-            if e.type == 0, e.text.lowercased().contains("crosshair") { continue }
+            if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { continue }
             // VoxeLibre also draws its hotbar background (mcl_inventory_hotbar.png)
             // as an image element; ours is wrist-anchored (#57), so a strip of
             // empty slots floating at the bottom of view is just noise.
-            if e.type == 0, e.text.lowercased().contains("hotbar") { continue }
+            if e.type == 0, e.text.range(of: "hotbar", options: .caseInsensitive) != nil { continue }
             // Pixel offsets scale with the size boost so a mod's layout (a title
             // over its bar, a label over its timer) stays proportional; only the
             // normalised position stays pinned to the screen edge.
@@ -4738,6 +4848,7 @@ final class WorldSession {
             modelTexLayer[spec] = nil; modelTexUV[spec] = nil; hudImageCache[spec] = nil; dropped += 1
         }
         modelFailed = modelFailed.filter { !NodeRegistry.imageNames($0).contains(file) }
+        if dropped > 0 { itemDrawCache.removeAll() }
         // The node atlas is append-only now (seeded across rebuilds), so a
         // re-pushed file's tiles must be explicitly evicted from the seed or
         // the rebuild would keep their stale pixels.
@@ -5232,42 +5343,34 @@ final class WorldSession {
                     let cubeSz: Float = isDrop ? 0.22 : vs
                     let cardSz: Float = isDrop ? 0.18 : vs * 0.8
                     let modelSz: Float = isDrop ? 0.4 : vs
-                    let nid = client.nodes.id(for: ItemRegistry.baseName(itemStr))
-                    let kind = nid.map { client.nodes.kind($0) }
                     // One line per drop so a "can't see my mined block" report can
                     // be matched against what we actually emitted for it (#358).
+                    let draw = itemDraw(itemStr)
                     if isDrop, !loggedMobIds.contains(-e.id) {
                         loggedMobIds.insert(-e.id)
-                        let path = (nid != nil && kind == .mesh) ? "model" : (nid != nil && kind == .cube) ? "cube"
-                            : (droppedItemSpec(itemStr).flatMap { modelTexLayer[$0] } != nil ? "card" : "NONE (no layer yet)")
+                        let path: String
+                        switch draw { case .model: path = "model"; case .cube: path = "cube"; case .card: path = "card"; case nil: path = "NONE (no layer yet)" }
                         print("[drop] draw id=\(e.id) item=\(itemStr) path=\(path) pos=\(e.pos) light=\(light)"); fflush(stdout)
                     }
-                    // These go into the model stream, which the renderer samples
-                    // from the MODEL texture array, so node faces must be the
-                    // upscaled model-layer copies (iconLayerForTile, like the 3D
-                    // inventory icons), not node-atlas indices: an atlas index in
-                    // this stream picks an unrelated skin/icon layer or falls
-                    // off the end, and the drop draws as nothing (#358).
-                    let topTile = nid.flatMap { client.nodes.faceTile($0, 0) }
-                    if let nid, nid != WorldMap.CONTENT_AIR, kind == .mesh,
-                       let model = nodeMeshModel(for: nid), let layer = topTile.flatMap(iconLayerForTile) {
-                        // A mesh-drawtype node (chest etc): its real model (#191).
-                        appendItemModel(model, pos: e.pos, layer: layer,
-                                        eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw,
-                                        light: light, size: modelSz, v: &mv, idx: &mi)
-                    } else if let nid, nid != WorldMap.CONTENT_AIR, kind == .cube {
+                    switch draw {
+                    case .model(let nid, let layer):
+                        if let model = nodeMeshModel(for: nid) {
+                            // A mesh-drawtype node (chest etc): its real model (#191).
+                            appendItemModel(model, pos: e.pos, layer: layer,
+                                            eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw,
+                                            light: light, size: modelSz, v: &mv, idx: &mi)
+                        }
+                    case .cube(let layers):
                         // A cube node: a small spinning cube like Minecraft for drops,
                         // a still full-size block for falling sand/gravel (#191 sibling).
-                        let layers = (0..<6).map { (client.nodes.faceTile(nid, $0) ?? topTile).flatMap(iconLayerForTile) ?? -1 }
-                        if !layers.contains(-1) {
-                            appendItemCube(faceLayers: layers, pos: e.pos,
-                                           eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
-                                           size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
-                        }
-                    } else if let spec = droppedItemSpec(itemStr), let layer = modelTexLayer[spec] {
+                        appendItemCube(faceLayers: layers, pos: e.pos,
+                                       eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
+                                       size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
+                    case .card(let layer, let uv):
                         // Tools/craftitems (and non-cube/non-mesh nodes): flat card.
-                        appendItemQuads(pos: e.pos, layer: layer, uv: modelTexUV[spec] ?? SIMD2(1, 1),
+                        appendItemQuads(pos: e.pos, layer: layer, uv: uv,
                                         eye: eye, cosY: cy, sinY: sy, light: light, size: cardSz, v: &mv, idx: &mi)
+                    case nil: break
                     }
                 }
                 continue
@@ -6103,6 +6206,38 @@ final class WorldSession {
             : WieldMesh.extrudeIcon(alpha: alpha, width: 16, height: 16, thickness: 0.08)
         wieldSilCache[tile] = mesh
         return mesh.positions.isEmpty ? nil : mesh
+    }
+
+    /// Resolve (and cache) how an item entity's itemstring draws. These go into
+    /// the model stream, which the renderer samples from the MODEL texture
+    /// array, so node faces must be the upscaled model-layer copies
+    /// (iconLayerForTile, like the 3D inventory icons), not node-atlas indices:
+    /// an atlas index in this stream picks an unrelated skin/icon layer or falls
+    /// off the end, and the drop draws as nothing (#358). Unresolved items
+    /// aren't cached, so they pick up their layer once the texture lands.
+    private func itemDraw(_ itemStr: String) -> ItemDraw? {
+        if let d = itemDrawCache[itemStr] { return d }
+        var d: ItemDraw?
+        var provisional = false   // a mesh node's card stand-in until its model loads
+        let nid = client.nodes.id(for: ItemRegistry.baseName(itemStr))
+        if let nid, nid != WorldMap.CONTENT_AIR {
+            let kind = client.nodes.kind(nid)
+            let topTile = client.nodes.faceTile(nid, 0)
+            if kind == .mesh {
+                if nodeMeshModel(for: nid) != nil, let layer = topTile.flatMap(iconLayerForTile) {
+                    d = .model(nid: nid, layer: layer)
+                } else { provisional = true }
+            } else if kind == .cube {
+                let layers = (0..<6).map { (client.nodes.faceTile(nid, $0) ?? topTile).flatMap(iconLayerForTile) ?? -1 }
+                if !layers.contains(-1) { d = .cube(layers) }
+                else { return nil }   // a cube waits for its faces; never falls back to a card
+            }
+        }
+        if d == nil, let spec = droppedItemSpec(itemStr), let layer = modelTexLayer[spec] {
+            d = .card(layer: layer, uv: modelTexUV[spec] ?? SIMD2(1, 1))
+        }
+        if let d, !provisional { itemDrawCache[itemStr] = d }
+        return d
     }
 
     private func droppedItemSpec(_ itemStr: String) -> String? {

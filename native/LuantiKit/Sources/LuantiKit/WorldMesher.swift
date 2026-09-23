@@ -320,13 +320,16 @@ public enum WorldMesher {
     // dir_i for our six faces (order matches `faces`): +Y -Y +Z -Z +X -X.
     static let faceDirI: [Int] = [2, 6, 3, 5, 1, 7]
 
-    // Node names already reported by noteDarkSample (#359). The mesher runs on
-    // one serial queue, so a plain static set is enough; capped so a bad world
-    // can't flood the log.
-    nonisolated(unsafe) static var lightDiagSeen: Set<String> = []
-    static func noteDarkSample(_ name: String, id: UInt16, light: UInt8, at p: SIMD3<Int>, hi: UInt8, face: SIMD3<Int>, normal: SIMD3<Int>) {
-        guard lightDiagSeen.count < 40, !lightDiagSeen.contains(name) else { return }
-        lightDiagSeen.insert(name)
+    // Node ids already reported by noteDarkSample (#359). The mesher runs on
+    // one serial queue, so plain statics are enough; capped so a bad world
+    // can't flood the log. Keyed by id and checked before the name lookup:
+    // sharp light edges hit this per vertex corner for the whole session.
+    nonisolated(unsafe) static var lightDiagSeen = [Bool](repeating: false, count: 65536)
+    nonisolated(unsafe) static var lightDiagCount = 0
+    static func noteDarkSample(_ nodes: NodeRegistry, id: UInt16, light: UInt8, at p: SIMD3<Int>, hi: UInt8, face: SIMD3<Int>, normal: SIMD3<Int>) {
+        guard lightDiagCount < 40, !lightDiagSeen[Int(id)] else { return }
+        lightDiagSeen[Int(id)] = true; lightDiagCount += 1
+        let name = nodes.name(id)
         print("[lightdiag] dark sample node=\(name) id=\(id) param1=\(light) at \(p) day=\(light & 0x0F) vs max \(hi) (face of \(face), normal \(normal))"); fflush(stdout)
     }
 
@@ -602,7 +605,7 @@ public enum WorldMesher {
             // than the rest, with no occluder to explain it, names that node once
             // per node type. It rides the loop we already run, so ordinary play
             // produces the answer in native.log with no settings flipped.
-            if ao == 0, count >= 2, hiDay >= loDay + 6 { WorldMesher.noteDarkSample(nodes.name(loId), id: loId, light: loLight, at: loPos, hi: hiDay, face: np &- normal, normal: normal) }
+            if ao == 0, count >= 2, hiDay >= loDay + 6 { WorldMesher.noteDarkSample(nodes, id: loId, light: loLight, at: loPos, hi: hiDay, face: np &- normal, normal: normal) }
             if count == 0 {
                 let l = cNodeLight(np); day = Float(l & 0x0F); night = Float(l >> 4); count = 1
             }

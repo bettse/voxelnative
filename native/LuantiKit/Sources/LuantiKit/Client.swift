@@ -399,6 +399,8 @@ public final class Client {
     /// Armor changed; arg is 0..20.
     public var onArmor: ((_ armor: Int) -> Void)?
 
+    private var entitySolidVersion = -2   // NODEDEF version the entity floor-clamp snapshot was built from
+
     public var onAuthenticated: ((_ mapSeed: UInt64) -> Void)?
     /// (reason, code). code is AccessDeniedCode (8 = already-connected, etc); -1
     /// for client-side auth failures. The consumer decides retryable by code.
@@ -647,10 +649,15 @@ public final class Client {
         timeOfDay = (timeOfDay + timeSpeed * Float(delta) * (24000.0 / 86400.0)).truncatingRemainder(dividingBy: 24000)
         if timeOfDay < 0 { timeOfDay += 24000 }
         updateDaylight()
-        if objects.isSolidNode == nil {
-            objects.isSolidNode = { [world, nodes] p in
+        // Entity floor clamp reads a lock-free physics snapshot, rebuilt only
+        // when NODEDEF changes: it runs per resting item/mob per poll.
+        let defsVersion = nodes.version()
+        if objects.isSolidNode == nil || defsVersion != entitySolidVersion {
+            entitySolidVersion = defsVersion
+            let snap = nodes.physicsSnapshot()
+            objects.isSolidNode = { [world] p in
                 let id = world.nodeId(p)
-                return id != WorldMap.CONTENT_AIR && id != WorldMap.CONTENT_IGNORE && nodes.isSolidCube(id)
+                return id != WorldMap.CONTENT_AIR && id != WorldMap.CONTENT_IGNORE && snap.isSolidCube(id)
             }
         }
         objects.step(Float(delta))
