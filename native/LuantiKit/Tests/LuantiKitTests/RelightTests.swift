@@ -101,4 +101,30 @@ final class RelightTests: XCTestCase {
         m.setNode(SIMD3(8, 14, 8), param0: stone)
         XCTAssertEqual(Int(m.nodeLight(SIMD3(8, 10, 8)) & 0x0F), 0)
     }
+
+    /// Snow piling up in daylight (#367): VoxeLibre's ABM set_node()s a snow
+    /// layer (light-propagating, sunlight-propagating) onto sunlit ground. The
+    /// ADDNODE param1 is whatever the server had; the layer and its neighbours
+    /// must end up in full daylight, not a dark cell the smooth lighting would
+    /// average into a streak.
+    func testSnowLayerLandingInSunlightStaysLit() {
+        let r = NodeRegistry()
+        let stone = NodeFixtures.node(name: "t:stone", drawtype: 0, dugSound: "", lightPropagates: false) { w in w.u8(6).u8(0) }
+        let snow = NodeFixtures.node(name: "t:snow", drawtype: 7, dugSound: "", walkable: false) { w in w.u8(6).u8(0) }
+        r.parseNodeDef(NodeFixtures.nodedefPayload([(id: 1, blob: stone), (id: 2, blob: snow)]))
+        let m = WorldMap()
+        // Ground at y=0..3, open sky (day 15) above.
+        for x in 0..<16 { for z in 0..<16 {
+            for y in 0..<4 { m.setNode(SIMD3(x, y, z), param0: r.id(for: "t:stone")!) }
+            for y in 4..<16 { m.setNode(SIMD3(x, y, z), param0: WorldMap.CONTENT_AIR, param1: 0x0F) }
+        } }
+        m.lightInfo = r.lightInfo()
+        for given: UInt8 in [0x00, 0x0F] {
+            m.setNode(SIMD3(8, 4, 8), param0: r.id(for: "t:snow")!, param1: given)
+            XCTAssertEqual(Int(m.nodeLight(SIMD3(8, 4, 8)) & 0x0F), 15, "the layer itself (ADDNODE param1 \(given))")
+            XCTAssertEqual(Int(m.nodeLight(SIMD3(9, 4, 8)) & 0x0F), 15, "air beside it")
+            XCTAssertEqual(Int(m.nodeLight(SIMD3(8, 5, 8)) & 0x0F), 15, "air above it")
+            m.removeNode(SIMD3(8, 4, 8))
+        }
+    }
 }
