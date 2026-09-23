@@ -1558,6 +1558,37 @@ final class WorldSession {
             default: break
             }
         }
+        // -vrdev.offhandTest 1: put a stack of torches in the offhand slot so the
+        // HUD inventory element's count (and wear bar, for tools) can be seen
+        // headless. Also -vrdev.offhandItem "<itemstring>" (e.g. a worn shield).
+        if UserDefaults.standard.bool(forKey: "vrdev.offhandTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                // Empty the offhand first: mcl_offhand never forgets its HUD ids
+                // on leave, so a relog with the slot already full shows no slot
+                // HUD at all (a VoxeLibre bug, desktop too). Emptying it lets the
+                // mod remove + re-add the HUD fresh for this session.
+                client.sendChat("/grantme all")
+                client.sendInventoryAction("Drop 99 current_player offhand 0")
+                simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 2:
+                client.sendChat("/clearinv")
+                simDigPhase = 2; simDigTimer = 0
+            case 2 where simDigTimer > 1.5:
+                client.sendChat("/giveme \(UserDefaults.standard.string(forKey: "vrdev.offhandItem") ?? "mcl_torches:torch 32")")
+                simDigPhase = 3; simDigTimer = 0
+            case 3 where simDigTimer > 2:
+                let n = client.inventory["main"]?.first.flatMap { $0?.count } ?? 0
+                client.sendInventoryAction("Move \(max(1, n)) current_player main 0 current_player offhand 0")
+                simDigPhase = 4; simDigTimer = 0
+            case 4 where simDigTimer > 2:
+                let off = client.inventory["offhand"]?.first.flatMap { $0 }
+                print("[offhandtest] RESULT offhand=\(off?.name ?? "nil") count=\(off?.count ?? 0) wear=\(off?.wear ?? 0) pass=\(off != nil)"); fflush(stdout)
+                simDigPhase = 5
+            default: break
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -4584,10 +4615,32 @@ final class WorldSession {
                 for i in 0..<max(1, e.number) where i < stacks.count {
                     guard let st = stacks[i], !st.name.isEmpty, let layer = invIconModelLayer(st.name) else { continue }
                     let dst = SIMD2<Float>(px, px)
-                    let c = at(anchor + SIMD2(Float(i) * px, 0) + e.align * dst / 2)
+                    let cpx = anchor + SIMD2(Float(i) * px, 0) + e.align * dst / 2
+                    let c = at(cpx)
                     appendOverlayQuadUV(center: c, right: hr, up: hu, hw: dst.x / 2 * kx * D, hh: dst.y / 2 * ky * D,
                                         layer: layer, uv: SIMD2(1, 1), tint: 16777215, v: &v, idx: &idx)
                     drawn += 1
+                    // drawItemStack extras, like desktop: the stack count in the
+                    // lower-right corner and, for worn tools/shields, a wear bar
+                    // along the bottom going green -> red as durability drops.
+                    if st.count > 1, let t = hudTextLayer(id: -2000 - i, text: String(st.count)) {
+                        let th = 16 * Self.hudSizeBoost, tw = th * max(0.4, t.aspect)
+                        let tc = at(cpx + SIMD2(dst.x / 2 - tw / 2, dst.y / 2 - th / 2))
+                        appendOverlayQuadUV(center: tc + hf * -0.001, right: hr, up: hu, hw: tw / 2 * kx * D, hh: th / 2 * ky * D,
+                                            layer: t.layer, uv: SIMD2(1, 1), tint: 16777215, v: &v, idx: &idx)
+                    }
+                    if st.wear > 0, highlightLayer >= 0 {
+                        let left = max(0, min(1, 1 - Float(st.wear) / 65535))
+                        let bh = 3 * Self.hudSizeBoost, bw = dst.x * 0.8
+                        let by = cpx.y + dst.y / 2 - bh * 1.5
+                        let bx0 = cpx.x - bw / 2
+                        appendOverlayQuadUV(center: at(SIMD2(cpx.x, by)), right: hr, up: hu, hw: bw / 2 * kx * D, hh: bh / 2 * ky * D,
+                                            layer: highlightLayer, uv: SIMD2(1, 1), tint: Self.packTint(0, 0, 0), v: &v, idx: &idx)
+                        let fw = bw * left
+                        appendOverlayQuadUV(center: at(SIMD2(bx0 + fw / 2, by)) + hf * -0.001, right: hr, up: hu, hw: fw / 2 * kx * D, hh: bh / 2 * ky * D,
+                                            layer: highlightLayer, uv: SIMD2(1, 1),
+                                            tint: Self.packTint(Int(255 * min(1, 2 * (1 - left))), Int(255 * min(1, 2 * left)), 0), v: &v, idx: &idx)
+                    }
                 }
             case 2:                                              // award-icon statbar drawn as one scaled image (#222)
                 guard !e.text.isEmpty, let img = hudImage(e.text) else { continue }
