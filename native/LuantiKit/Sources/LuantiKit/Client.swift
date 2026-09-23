@@ -522,8 +522,11 @@ public final class Client {
         public var glow = 0                    // 0..14 light floor (Particle::updateLight)
         public var objectCollision = false
         /// node=: draw a random tile of this node instead of `texture`
-        /// (ParticleManager::getNodeParticleParams); 0 = not a node particle.
-        public var nodeId = 0
+        /// (ParticleManager::getNodeParticleParams). CONTENT_IGNORE (127, what
+        /// the server sends when node= isn't set) = not a node particle; 0 is a
+        /// real node id.
+        public var nodeId = Int(WorldMap.CONTENT_IGNORE)
+        public var isNodeParticle: Bool { nodeId != Int(WorldMap.CONTENT_IGNORE) }
         public var nodeTile = 0                // 0 = random face, else face index + 1
         // 5.6+ physics extras (Particle::step): per-axis drag, brownian jitter
         // range picked every frame, bounciness on collision.

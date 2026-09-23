@@ -483,6 +483,7 @@ final class WorldSession {
     private var simAutoSneak = false
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
+    private var simChurnTimer: Float = 0                // -vrdev.weatherTest: time since the last spawner swap
     private var simChordPreIds: Set<Int> = []           // item entities that existed before the chord
     private var simChordLeak = 0                        // frames the chord was held but dig/place leaked past the gate
     private var simPostGatePlace = 0                    // place frames after the gate (tap-replay check)
@@ -1755,6 +1756,39 @@ final class WorldSession {
         // wielded stack like desktop Q (#341), and neither dig nor place leaks
         // through while the chord is held. Then a lone one-frame grip tap must
         // still come out of the gate as a place press (the chord wait replays it).
+        // -vrdev.weatherTest 1: VoxeLibre's snow the way its weather mod sends
+        // it: a player-attached, time=0 (infinite) spawner with node= unset
+        // (127), deleted and re-added every server step because mcl_weather's
+        // per-player table only ever holds one of the two flake spawners. After
+        // 3 s of that churn there must be falling flakes. Eric saw none on a
+        // snowy device session: 127 read as a node particle dropped them all.
+        if UserDefaults.standard.bool(forKey: "vrdev.weatherTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            if simDigPhase == 0, simDigTimer > 2 {
+                simDigPhase = 1; simDigTimer = 0; simScratchCount = 0
+            } else if simDigPhase == 1 {
+                simChurnTimer += dt
+                if simChurnTimer >= 0.09 {
+                    simChurnTimer = 0
+                    if simScratchCount > 0 { client.onDeleteParticleSpawner?(900_000 + simScratchCount) }
+                    simScratchCount += 1
+                    var sp = Client.ParticleSpawner(serverId: 900_000 + simScratchCount, amount: 100, time: 0,
+                        posMin: SIMD3(-25, 20, -25), posMax: SIMD3(25, 25, 25),
+                        velMin: SIMD3(-0.2, -1, -0.2), velMax: SIMD3(0.2, -4, 0.2),
+                        accMin: SIMD3(0, -1, 0), accMax: SIMD3(0, -4, 0), expMin: 3, expMax: 5,
+                        sizeMin: 2, sizeMax: 5, attachedId: client.objects.localPlayerId,
+                        texture: "weather_pack_snow_snowflake\(simScratchCount % 2 + 1).png",
+                        collisionRemoval: true, collisionDetection: true)
+                    sp.look.glow = 1
+                    client.onAddParticleSpawner?(sp)
+                }
+                if simDigTimer > 3 {
+                    let flakes = particles.filter { $0.tex.hasPrefix("weather_pack_snow") }.count
+                    print("[weathertest] RESULT spawners=\(simScratchCount) flakes=\(flakes) pass=\(flakes >= 50)"); fflush(stdout)
+                    simDigPhase = 9
+                }
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.chordDropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             let m = client.inventory["main"] ?? []
@@ -7773,7 +7807,10 @@ final class WorldSession {
         // a tile of that node instead of a texture string:
         // ParticleManager::getNodeParticleParams picks a random face unless
         // node_tile names one. These used to be dropped entirely (#307).
-        if look.nodeId > 0 {
+        // Only when node= was set: the engine tests != CONTENT_IGNORE
+        // (particles.cpp). Treating the unset 127 as a node dropped every
+        // weather flake and raindrop, since IGNORE has no tiles.
+        if look.isNodeParticle {
             let faces = client.nodes.faceTilesSnapshot()[UInt16(look.nodeId)] ?? []
             let candidates = faces.filter { !$0.isEmpty }
             if look.nodeTile > 0, look.nodeTile - 1 < faces.count, !faces[look.nodeTile - 1].isEmpty {

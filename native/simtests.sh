@@ -39,13 +39,14 @@ SCENES=(
   fly     "flyTest:flytest"
   invpick "invPickTest:invpick"
   chord   "chordDropTest:chorddrop"
+  weather "weatherTest:weathertest"
   bugnote "bugNoteTest:bugnotetest"
   ladder  "ladderTest:laddertest"
 )
 # Every scene teleports to its own start (simTeleportToPad or a fixed spot) and
 # clears the blocks it places, so order shouldn't matter; the walkers and the
 # igloo trip still go last as a safety margin.
-order=(fall bounce place eat bow dig drop award station status step torch fly invpick chord bugnote ladder ice igloo sneak)
+order=(fall bounce place eat bow dig drop award station status step torch fly invpick chord weather bugnote ladder ice igloo sneak)
 want=("$@"); [[ ${#want} -eq 0 ]] && want=("${order[@]}")
 
 # Build + install once (sim.sh also boots the simulator and takes a smoke shot).

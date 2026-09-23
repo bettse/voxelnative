@@ -182,4 +182,16 @@ final class ParticleSpawnerTests: XCTestCase {
         XCTAssertEqual(sp.expMax, 3.0, accuracy: 1e-4)
         XCTAssertEqual(sp.texture, "smoke.png")
     }
+
+    /// node= unset arrives as CONTENT_IGNORE (127); only other ids are node
+    /// particles (particles.cpp tests != CONTENT_IGNORE). Treating 127 as a node
+    /// dropped every VoxeLibre weather flake, since IGNORE has no tiles.
+    func testUnsetNodeIsNotANodeParticle() {
+        var look = Client.ParticleLook()
+        XCTAssertFalse(look.isNodeParticle)
+        look.nodeId = 127
+        XCTAssertFalse(look.isNodeParticle)
+        look.nodeId = 0
+        XCTAssertTrue(look.isNodeParticle)
+    }
 }
