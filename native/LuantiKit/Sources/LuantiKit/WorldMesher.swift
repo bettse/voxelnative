@@ -543,6 +543,37 @@ public enum WorldMesher {
             let d = min(15, (day / Float(count)) * k), n = min(15, (night / Float(count)) * k)
             return d + n * 16
         }
+        // Smooth light for a vertex of a see-through node (plants, mesh nodes),
+        // after mapblock_mesh.cpp getSmoothLightTransparent: average the eight
+        // nodes around the vertex's corner (own node included), skipping opaque
+        // ones, and only start darkening past four opaque like the engine's
+        // light_amount table. Cached per octant, since a chest mesh has hundreds
+        // of vertices but only eight corners' worth of distinct answers.
+        let aoOctant: [Float] = [1, 1, 1, 1, 1, 0.85, 0.68, 0.46, 0.46]
+        var octantNode = SIMD3<Int>(Int.min, 0, 0)
+        var octantCache = SIMD8<Float>(repeating: -1)
+        func octantLight(_ g: SIMD3<Int>, _ c: SIMD3<Float>) -> Float {
+            if octantNode != g { octantNode = g; octantCache = SIMD8(repeating: -1) }
+            let sx = c.x < 0.5 ? -1 : 1, sy = c.y < 0.5 ? -1 : 1, sz = c.z < 0.5 ? -1 : 1
+            let key = (sx > 0 ? 1 : 0) | (sy > 0 ? 2 : 0) | (sz > 0 ? 4 : 0)
+            if octantCache[key] >= 0 { return octantCache[key] }
+            var day: Float = 0, night: Float = 0, count = 0, ao = 0
+            for i in 0..<8 {
+                let sp = SIMD3(g.x + (i & 1 != 0 ? sx : 0), g.y + (i & 2 != 0 ? sy : 0), g.z + (i & 4 != 0 ? sz : 0))
+                let id = cNodeId(sp)
+                if id == WorldMap.CONTENT_IGNORE { continue }
+                if id != WorldMap.CONTENT_AIR, ms.occ(id) { ao += 1; continue }
+                let l = cNodeLight(sp)
+                day += Float(l & 0x0F); night += Float(l >> 4); count += 1
+            }
+            if count == 0 {
+                let l = cNodeLight(g); day = Float(l & 0x0F); night = Float(l >> 4); count = 1
+            }
+            let k = aoOctant[min(ao, 8)]
+            let v = min(15, day / Float(count) * k) + min(15, night / Float(count) * k) * 16
+            octantCache[key] = v
+            return v
+        }
 
         @inline(__always)
         // The renderer back-face culls the SOLID stream (#85), which the engine
@@ -712,7 +743,10 @@ public enum WorldMesher {
                     if deg != 0 { n = SIMD3(n.x * cs - n.z * sn, n.y, n.x * sn + n.z * cs) }
                     shade = WorldMesher.normalShade(n)
                 }
-                pushVert(&ov, px, py, pz, t.x, t.y, layer, shade + waveShift, light, tint)
+                // Per-vertex smooth light so a chest against a wall darkens on
+                // that side; self-lit meshes (lanterns) keep their flat light.
+                let vl = lit ? light : octantLight(b, SIMD3(lx, ly, lz))
+                pushVert(&ov, px, py, pz, t.x, t.y, layer, shade + waveShift, vl, tint)
             }
             for i in m.indices { oi.append(vbase + i) }
         }
@@ -872,7 +906,12 @@ public enum WorldMesher {
                             o.y = -Float(yrng.draw() % 16) / 16 * 0.125
                         }
                         let quad = WorldMesher.plantQuad(rotDeg: q.rot + rot, scale: s, height: 1, offsetZ: q.off, topOnly: q.topOnly, offset: o)
-                        emitQuad(quad, base: g, layer: layer, shade: 1.0, light: light, liquid: false, tint: tint)
+                        // Smooth light per corner (engine blendLightColor on plants):
+                        // the base of a flower in a shaded corner goes dark while its
+                        // top still catches the sky. Glowing plants stay flat.
+                        let lights = ms.lit(id) ? SIMD4(repeating: light)
+                            : SIMD4(octantLight(g, quad[0]), octantLight(g, quad[1]), octantLight(g, quad[2]), octantLight(g, quad[3]))
+                        emitQuad(quad, base: g, layer: layer, shade: 1.0, lights: lights, liquid: false, tint: tint)
                     }
                 case .rooted:
                     // plantlike_rooted (kelp, coral, sea pickle, seagrass): a solid
