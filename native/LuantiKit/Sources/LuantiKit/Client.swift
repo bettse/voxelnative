@@ -200,9 +200,13 @@ public final class Client {
     // are unit-tested; the `perform*` methods send the action AND predict.
     // count == 0 means "the whole source stack".
 
-    /// Move `count` from one slot to another within the same list dictionary,
-    /// merging same items (clamped to stack_max), swapping different ones (only a
-    /// whole-stack move can swap), or placing into an empty slot.
+    /// Move `count` from one slot to another, the way inventorymanager.cpp
+    /// IMoveAction + inventory.cpp moveItem do it: into an empty slot, or merged
+    /// onto the same item (same name AND metadata; wear isn't compared, and
+    /// stack_max clamps it), else -- nothing fits (different item, or a full
+    /// stack) -- the two whole stacks swap, even for a partial count. Metadata
+    /// (enchantments, anvil names) rides along so it doesn't blink off until
+    /// the server echo.
     public static func applyMove(_ lists: inout [String: [ItemStack?]],
                                  fromList: String, fromIdx: Int, toList: String, toIdx: Int,
                                  count: Int, stackMax: (String) -> Int) {
@@ -212,19 +216,19 @@ public final class Client {
         let n = count == 0 ? s.count : Swift.min(count, s.count)
         guard n > 0 else { return }
         let d = dArr[toIdx]
+        func with(_ st: ItemStack, _ c: Int) -> ItemStack? {
+            c <= 0 ? nil : ItemStack(name: st.name, count: c, wear: st.wear, meta: st.meta)
+        }
         var newSrc: ItemStack?, newDst: ItemStack?
-        if d == nil {
-            newDst = ItemStack(name: s.name, count: n, wear: s.wear)
-            newSrc = (s.count - n) <= 0 ? nil : ItemStack(name: s.name, count: s.count - n, wear: s.wear)
-        } else if d!.name == s.name && d!.wear == s.wear {
-            let moved = Swift.max(0, Swift.min(n, stackMax(s.name) - d!.count))
-            newDst = ItemStack(name: d!.name, count: d!.count + moved, wear: d!.wear)
-            let rem = s.count - moved
-            newSrc = rem <= 0 ? nil : ItemStack(name: s.name, count: rem, wear: s.wear)
+        if let d, d.name == s.name, d.meta == s.meta, d.count < stackMax(s.name) {
+            let moved = Swift.min(n, stackMax(s.name) - d.count)
+            newDst = with(d, d.count + moved)
+            newSrc = with(s, s.count - moved)
+        } else if let d {
+            newDst = s; newSrc = d                     // nothing fits: swap the whole stacks
         } else {
-            guard n == s.count else { return }   // partial move onto a different item is a no-op in Luanti
-            newDst = ItemStack(name: s.name, count: s.count, wear: s.wear)
-            newSrc = d
+            newDst = with(s, n)
+            newSrc = with(s, s.count - n)
         }
         if fromList == toList {
             var arr = sArr; arr[fromIdx] = newSrc; arr[toIdx] = newDst; lists[fromList] = arr
@@ -238,7 +242,7 @@ public final class Client {
         guard let arr = lists[fromList], fromIdx >= 0, fromIdx < arr.count, let s = arr[fromIdx] else { return }
         let n = count == 0 ? s.count : Swift.min(count, s.count)
         let rem = s.count - n
-        lists[fromList]?[fromIdx] = rem <= 0 ? nil : ItemStack(name: s.name, count: rem, wear: s.wear)
+        lists[fromList]?[fromIdx] = rem <= 0 ? nil : ItemStack(name: s.name, count: rem, wear: s.wear, meta: s.meta)
     }
 
     /// Distribute `count` from a slot into another list: fill matching stacks
@@ -253,17 +257,17 @@ public final class Client {
         var remaining = want
         let mx = stackMax(s.name)
         for i in dst.indices where remaining > 0 {
-            if let d = dst[i], d.name == s.name, d.wear == s.wear, d.count < mx {
+            if let d = dst[i], d.name == s.name, d.meta == s.meta, d.count < mx {
                 let moved = Swift.min(remaining, mx - d.count); dst[i]!.count += moved; remaining -= moved
             }
         }
         for i in dst.indices where remaining > 0 {
-            if dst[i] == nil { let put = Swift.min(remaining, mx); dst[i] = ItemStack(name: s.name, count: put, wear: s.wear); remaining -= put }
+            if dst[i] == nil { let put = Swift.min(remaining, mx); dst[i] = ItemStack(name: s.name, count: put, wear: s.wear, meta: s.meta); remaining -= put }
         }
         lists[toList] = dst
         let moved = want - remaining
         let rem = s.count - moved
-        lists[fromList]?[fromIdx] = rem <= 0 ? nil : ItemStack(name: s.name, count: rem, wear: s.wear)
+        lists[fromList]?[fromIdx] = rem <= 0 ? nil : ItemStack(name: s.name, count: rem, wear: s.wear, meta: s.meta)
     }
 
     /// Test-only: seed the local inventory so prediction can be exercised without

@@ -357,7 +357,8 @@ final class WorldSession {
     private var chordWait: Float = 0            // a lone press waits this long for its partner
     private var chordPendingDig = false         // which button started the wait
     private static let chordWindow: Float = 0.08
-    private var punchRepeat: Float = 0                  // object_hit_delay countdown while the trigger is held (#284)
+    private var objectHitDelay: Float = 0               // game.cpp object_hit_delay_timer, counts down every tick (#284)
+    private var digInstantly = false                    // last break was an instant dig (game.cpp dig_instantly)
     private var prevFeet: SIMD3<Float>? = nil           // last tick's feet, for the PLAYERPOS velocity
     private var slipVel = SIMD2<Float>(0, 0)            // eased horizontal velocity while on a slippery node (#269)
     // Hold-to-place repeat (#178): armed only while the wield is a placeable node.
@@ -2958,6 +2959,14 @@ final class WorldSession {
         }
         prevRespawnBtn = false
         gateDropChord(&gi, dt: dt)
+        // game.cpp updateInteractTimers: both count down every frame, not only
+        // while the trigger is held at something.
+        if nodigDelay > 0 { nodigDelay -= dt }
+        if objectHitDelay > 0 { objectHitDelay -= dt }
+        // Releasing after an instant dig clears the delay so tapping through
+        // torches and grass isn't sticky ("Remove e.g. torches faster when
+        // clicking instead of holding dig button").
+        if !gi.dig && prevDig && digInstantly { nodigDelay = 0; digInstantly = false }
         #if targetEnvironment(simulator)
         if simChordHold && (gi.dig || gi.place) { simChordLeak += 1 }
         if gi.place { simPostGatePlace += 1 }
@@ -2981,35 +2990,45 @@ final class WorldSession {
             // attack press (Luanti: object punch = INTERACT_START_DIGGING with the
             // pointed object). Only raycast nodes when there's an entity to beat,
             // so the common no-mob case stays a single raycast.
+            // While a dig is under way the engine stops looking for objects
+            // (game.cpp: look_for_object = !btn_down_for_dig), so a mob walking
+            // through the ray doesn't reset the crack and eat a punch.
             let o = player.rayOrigin(), a = player.aim()
-            let obj = client.objects.raycastEntity(origin: o, dir: a, maxDist: currentReach)
+            let digging = gi.dig && prevDig && digNode != nil
+            let obj = digging ? nil : client.objects.raycastEntity(origin: o, dir: a, maxDist: currentReach)
             let nodeHit = obj != nil ? client.world.raycast(origin: o, dir: a, maxDist: currentReach,
                                                             pointable: client.nodes.isPointable, boxes: pointBoxes) : nil
             let nodeDist: Float = nodeHit.map { simd_length((SIMD3<Float>($0.under) + SIMD3(0.5, 0.5, 0.5)) - o) } ?? .infinity
             if let obj, obj.dist <= nodeDist {
                 if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove); digNode = nil; digElapsed = 0 }
-                // Punch on the press, then keep punching every object_hit_delay
-                // (0.2 s) while the trigger stays held, as game.cpp
-                // handlePointingAtObject does; mcl_mobs' 0.5 s invulnerability
-                // paces the actual damage (#284).
-                punchRepeat -= dt
-                if gi.dig && (!prevDig || punchRepeat <= 0) {
-                    client.sendInteract(action: 0, objectId: obj.id)
-                    client.objects.flash(obj.id, seconds: 0.25)   // immediate hit feedback (#149), not waiting on PUNCHED
-                    punchRepeat = 0.2
-                    print("[melee] punch object \(obj.id)"); fflush(stdout)
+                // game.cpp handlePointingAtObject: while the trigger is held, a
+                // punch is reported whenever object_hit_delay (0.2 s, counting
+                // down every tick) has run out, so spam-clicking can't beat the
+                // hold rate; any punch holds off digging for 0.15 s. mcl_mobs'
+                // 0.5 s invulnerability paces the actual damage (#284).
+                if gi.dig {
+                    if objectHitDelay <= 0 {
+                        objectHitDelay = 0.2
+                        nodigDelay = max(nodigDelay, 0.15)
+                        client.sendInteract(action: 0, objectId: obj.id)
+                        // Immediate hit feedback (#149); flash() skips immortal
+                        // objects (armor stands, item frames), which take no damage.
+                        client.objects.flash(obj.id, seconds: 0.25)
+                        print("[melee] punch object \(obj.id)"); fflush(stdout)
+                    } else if !prevDig {
+                        nodigDelay = max(nodigDelay, 0.15)
+                    }
                 }
-                if !gi.dig { punchRepeat = 0 }
             } else {
                 updateDig(gi.dig, dt: dt)
             }
         }
         prevDig = gi.dig
         client.sneakHeld = gi.sneak   // report sneak so mods see it + it can force placement (#178)
-        // Place, with hold-to-repeat for blocks (#178): first press places, then
-        // while held it repeats every repeat_place_time -- but only if the wield
-        // is a placeable node (performPlace returns that), so holding grip on a
-        // chest/food/tool never re-fires. Sneak-place also repeats (build a wall).
+        // Place, with hold-to-repeat (#178): first press places, then while held
+        // it repeats every repeat_place_time as long as performPlace pointed at
+        // a node it placed against (not a rightclick/formspec/entity/air use).
+        // Sneak-place also repeats (build a wall).
         if gi.place && !prevPlace {
             placeRepeatArmed = performPlace(sneak: gi.sneak)
             placeRepeatTimer = Self.placeRepeatTime
@@ -3053,10 +3072,7 @@ final class WorldSession {
         // dig time over the crack frame count, capped at 0.3 s, 0.15 s for
         // instant nodes, so holding the trigger across tall grass or torches
         // doesn't chain-delete them faster than desktop (#297).
-        if nodigDelay > 0 {
-            nodigDelay -= dt
-            if digNode == nil { return }
-        }
+        if nodigDelay > 0, digNode == nil { return }   // counted down in handleInteraction
         if digNode != hit.under {
             if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove) }  // stop old
             digNode = hit.under; digAbove = hit.above; digElapsed = 0
@@ -3092,6 +3108,7 @@ final class WorldSession {
             markNodeDirty(hit.under); remeshCooldown = 0   // show the hole now, don't wait out the coalesce
             print("[dig] break \(hit.under)"); fflush(stdout)
             nodigDelay = digTime > 0 ? min(0.3, digTime / Float(max(1, crackTex.count))) : 0.15
+            digInstantly = digTime == 0
             digNode = nil; digElapsed = 0
         }
     }
@@ -3362,9 +3379,11 @@ final class WorldSession {
             client.sendInteract(action: 3, under: hit.under, above: hit.above)   // place, no prediction
             print("[place] on \(hit.above) (wield=\(wield ?? "nil"), server-only)"); fflush(stdout)
         }
-        // Auto-repeat placement only for a real placeable node (dirt/stone/...),
-        // not a door/bucket/food whose item name isn't itself a node (#178).
-        return wield.flatMap { client.nodes.id(for: $0) } != nil
+        // Holding grip at a node repeats for any item, like game.cpp's
+        // repeat_place_timer: seeds, bone meal and hoes plant/till a row, not
+        // only blocks. Rightclickable nodes and meta formspecs returned false
+        // above, so a held grip never re-toggles a door or reopens a chest.
+        return true
     }
 
 
@@ -4052,10 +4071,22 @@ final class WorldSession {
                 // empty -> place. (The old pull-into-hand was backwards, #150: it
                 // blocked dropping onto an existing stack to grow it.)
                 let count = secondary ? 1 : held.count
+                // Nothing of the held stack fits the target (a different item, a
+                // different name/enchant, or a full stack): the server swaps the
+                // whole stacks, whatever count we send (inventorymanager.cpp
+                // allow_swap), and desktop keeps the swapped-in stack in hand
+                // (m_selected_swap).
+                var willSwap = false
+                if let list = listFor(loc: held.loc, name: held.list), held.index < list.count,
+                   let src = list[held.index], let dst = inventoryStack(h) {
+                    willSwap = !(dst.name == src.name && dst.meta == src.meta && dst.count < client.items.stackMax(dst.name))
+                }
                 client.sendInventoryAction(Client.moveAction(count: count,
                     from: Client.InvRef(held.loc, held.list, held.index),
                     to: Client.InvRef(h.loc, h.list, h.index)))
-                if held.list == "craftresult" {
+                if willSwap, held.list != "craftresult" {
+                    invHeld = (held.loc, held.list, held.index, 0)   // the swapped-in stack, now at the source
+                } else if held.list == "craftresult" {
                     // The craft output regenerates one batch per Craft action and
                     // never leaves a remainder, so the hand is empty once placed.
                     // (It's a hidden list, so the empty-slot guard can't clear it.)

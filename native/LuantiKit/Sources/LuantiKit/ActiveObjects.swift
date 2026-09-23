@@ -10,7 +10,7 @@ public final class ActiveObjects {
     // AO command ids
     private static let SET_PROPERTIES = 0, UPDATE_POSITION = 1, SET_TEXTURE_MOD = 2, PUNCHED = 4
     private static let ATTACH_TO = 8, SET_ANIMATION = 6, SET_ANIMATION_SPEED = 12, STOP_ANIMATION = 13
-    private static let SET_PHYSICS_OVERRIDE = 9, SET_BONE_POSITION = 7, SET_SPRITE = 3
+    private static let SET_PHYSICS_OVERRIDE = 9, SET_BONE_POSITION = 7, SET_SPRITE = 3, UPDATE_ARMOR_GROUPS = 5
 
     /// One bone's server override with the engine's interpolation state
     /// (activeobject.h BoneOverride): a re-send snapshots the previous targets
@@ -105,6 +105,9 @@ public final class ActiveObjects {
         // a hit-flash timer that mirrors GenericCAO's damage-texture timer.
         public var hp: Int = 0
         public var hitFlash: Float = 0     // seconds of flash left (0 = none)
+        /// armor_groups.immortal: punches do no damage, so no hit flash
+        /// (content_cao.cpp directReportPunch flashes only on damage != 0).
+        public var immortal = false
         // From ObjectProperties: the floating name over the object, and the
         // texture modifier the engine overlays briefly when it takes damage.
         public var nametag: String = ""
@@ -312,6 +315,15 @@ public final class ActiveObjects {
             if o.mesh.contains("chest") { print("[chest] id=\(id) anim \(range) fps=\(fps) loop=\(!noLoop)"); fflush(stdout) }
         case ActiveObjects.SET_ANIMATION_SPEED:
             o.animFps = r.f32()
+        case ActiveObjects.UPDATE_ARMOR_GROUPS:
+            // u16 count, then (string16 name, s16 rating) pairs.
+            let n = Int(r.u16())
+            var imm = false
+            for _ in 0..<n where r.has(2) {
+                let name = r.string16(); let rating = r.s16()
+                if name == "immortal", rating != 0 { imm = true }
+            }
+            o.immortal = imm
         case ActiveObjects.PUNCHED:
             // u16 result_hp. GenericCAO diffs it against the last known hp (so it
             // doesn't fight client prediction), flashes damage_texture_modifier
@@ -585,7 +597,7 @@ public final class ActiveObjects {
     /// doesn't always send as a clean hp diff. Never shortens a longer flash
     /// already running (a real server punch on the same frame still wins).
     public func flash(_ id: Int, seconds: Float) {
-        guard var o = objects[id] else { return }
+        guard var o = objects[id], !o.immortal else { return }
         o.hitFlash = max(o.hitFlash, seconds)
         objects[id] = o
     }

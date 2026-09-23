@@ -50,11 +50,29 @@ final class InventoryPredictionTests: XCTestCase {
         XCTAssertEqual(lists["main"]![1]?.count, 10)
     }
 
-    func testPartialMoveOntoDifferentItemIsNoop() {
+    func testPartialMoveOntoDifferentItemSwapsWholeStacks() {
+        // inventorymanager.cpp allow_swap: nothing fits, so the WHOLE stacks
+        // swap even though only 3 were asked for.
         var lists: [String: [Client.ItemStack?]] = ["main": [stack("dirt", 10), stack("cobble", 5)]]
         Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 3, stackMax: sm)
-        XCTAssertEqual(lists["main"]![0]?.count, 10)   // unchanged
-        XCTAssertEqual(lists["main"]![1]?.name, "cobble")
+        XCTAssertEqual(lists["main"]![0]?.name, "cobble")
+        XCTAssertEqual(lists["main"]![0]?.count, 5)
+        XCTAssertEqual(lists["main"]![1]?.name, "dirt")
+        XCTAssertEqual(lists["main"]![1]?.count, 10)
+    }
+
+    func testMoveKeepsMetaAndMetaBlocksMerge() {
+        let named = Client.ItemStack(name: "dirt", count: 4, wear: 0, meta: ["description": "Special"])
+        var lists: [String: [Client.ItemStack?]] = ["main": [named, nil, stack("dirt", 10)]]
+        // Into an empty slot: the name override rides along.
+        Client.applyMove(&lists, fromList: "main", fromIdx: 0, toList: "main", toIdx: 1, count: 2, stackMax: sm)
+        XCTAssertEqual(lists["main"]![1]?.customDescription, "Special")
+        XCTAssertEqual(lists["main"]![0]?.customDescription, "Special")
+        // Onto plain dirt: different metadata, so no merge -- a swap.
+        Client.applyMove(&lists, fromList: "main", fromIdx: 1, toList: "main", toIdx: 2, count: 0, stackMax: sm)
+        XCTAssertEqual(lists["main"]![2]?.count, 2)
+        XCTAssertEqual(lists["main"]![2]?.customDescription, "Special")
+        XCTAssertEqual(lists["main"]![1]?.count, 10)
     }
 
     func testMoveAcrossLists() {
