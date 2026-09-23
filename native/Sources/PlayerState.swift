@@ -257,6 +257,19 @@ final class PlayerState {
     private var _rightHand: simd_float4x4? = nil
     func setRightHand(_ m: simd_float4x4?) { lock.lock(); _rightHand = m; lock.unlock() }
     func rightHand() -> simd_float4x4? { lock.lock(); defer { lock.unlock() }; return _rightHand }
+
+    /// The open inventory/formspec panel's plane in origin space, so the
+    /// renderer can draw the pointer dot from each frame's controller pose
+    /// instead of the tick's (the dot trailed the controller by a tick plus a
+    /// handoff). nil while no panel is open.
+    struct PanelPointer {
+        var center: SIMD3<Float>, right: SIMD3<Float>, up: SIMD3<Float>, toward: SIMD3<Float>
+        var dotLayer: Int, dotHalf: Float
+        var heldLayer: Int, heldHalf: Float   // heldLayer -1: nothing in hand
+    }
+    private var _panelPointer: PanelPointer? = nil
+    func setPanelPointer(_ p: PanelPointer?) { lock.lock(); _panelPointer = p; lock.unlock() }
+    func panelPointer() -> PanelPointer? { lock.lock(); defer { lock.unlock() }; return _panelPointer }
     func headXform() -> simd_float4x4 { lock.lock(); defer { lock.unlock() }; return _headXform }
     /// Origin for dig/place/crosshair rays: the real tracked head if we have it
     /// (so aiming matches your gaze), else the nominal eye (feet + eye height).

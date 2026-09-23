@@ -191,6 +191,9 @@ actor Renderer {
     var handHudTextVertexBuffer: MTLBuffer
     var handHudTextIndexBuffer: MTLBuffer
     var handHudTextIndexCount: Int = 0
+    var pointerVertexBuffer: MTLBuffer
+    var pointerIndexBuffer: MTLBuffer
+    var pointerIndexCount: Int = 0
     // Wield animation (#136): track the wield identity to time a drop-and-pop on
     // switch, and a wall clock for the continuous dig swing.
     private var lastWieldKey: (Int, Int32) = (-1, -1)
@@ -379,6 +382,8 @@ actor Renderer {
         handHudVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
         handHudTextVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
         handHudTextIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
+        pointerVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
+        pointerIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
         handHudIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
         handVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
         handIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
@@ -623,6 +628,37 @@ actor Renderer {
         poseLeft = l; poseRight = r
     }
     private func handPose(left: Bool) -> simd_float4x4? { left ? poseLeft : poseRight }
+
+    /// The panel pointer dot (and the stack held on it), placed where this
+    /// frame's right-controller ray meets the open panel. Same ray and plane
+    /// math as WorldSession.handleInventoryInput, in origin space; drawn over
+    /// the overlay so the panel never hides it.
+    private var pointerV: [Float] = [], pointerIdx: [UInt32] = []
+    private func buildPanelPointer() {
+        pointerIndexCount = 0
+        guard let pp = appModel.player.panelPointer(), let m = handPose(left: false) else { return }
+        let o = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
+        let d = simd_normalize(-SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z))
+        let denom = simd_dot(d, pp.toward)
+        guard abs(denom) > 1e-4 else { return }
+        let t = simd_dot(pp.center - o, pp.toward) / denom
+        guard t > 0, t < 3 * PlayerState.scale else { return }
+        let hit = o + d * t
+        pointerV.removeAll(keepingCapacity: true); pointerIdx.removeAll(keepingCapacity: true)
+        func quad(_ c: SIMD3<Float>, _ h: Float, _ layer: Int) {
+            let r = pp.right * h, u = pp.up * h
+            let base = UInt32(pointerV.count / 9)
+            pushQuadV9(&pointerV, c - r - u, c + r - u, c + r + u, c - r + u,
+                       layer: Float(layer), shade: 1, light: 255, tint: 16777215)
+            pushQuad(&pointerIdx, base)
+        }
+        let s = PlayerState.scale
+        quad(hit - pp.toward * (0.012 * s), pp.dotHalf, pp.dotLayer)
+        if pp.heldLayer >= 0 { quad(hit - pp.toward * (0.02 * s), pp.heldHalf, pp.heldLayer) }
+        upload(pointerV, into: &pointerVertexBuffer)
+        upload(pointerIdx, into: &pointerIndexBuffer)
+        pointerIndexCount = pointerIdx.count
+    }
 
     /// A textured quad lying flat in a hand anchor's local X/Z plane, offset in
     /// hand-local metres. Orientation is a first cut for device iteration.
@@ -1742,6 +1778,7 @@ actor Renderer {
         }
         appModel.player.setHeadXform(head)   // for head-locked overlays (Kogane menu, death text)
         appModel.player.setRightHand(handPose(left: false))   // inventory pointer ray
+        buildPanelPointer()                  // panel dot from this frame's controller pose
         buildHudBillboards(head: head)       // place the HUD against this frame's head (no lag/ghost)
         // View frame -> node frame: undo the Z mirror, then the yaw (see modelMatrix).
         let fwdOrigin = simd_normalize(SIMD3<Float>(-head.columns.2.x, -head.columns.2.y, head.columns.2.z))
@@ -2112,6 +2149,14 @@ actor Renderer {
             renderEncoder.setVertexBuffer(overlayVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: overlayIndexCount,
                                                 indexType: .uint32, indexBuffer: overlayIndexBuffer, indexBufferOffset: 0)
+        }
+        if pointerIndexCount > 0, let mtex = modelTextureArray {
+            renderEncoder.setRenderPipelineState(entityPipelineState)
+            renderEncoder.setDepthStencilState(noDepthState)
+            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            renderEncoder.setVertexBuffer(pointerVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
+            renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: pointerIndexCount,
+                                                indexType: .uint32, indexBuffer: pointerIndexBuffer, indexBufferOffset: 0)
         }
         // Red death cast: over everything (including the underwater tint and HUD) once hp is 0.
         if appModel.player.isDead() {

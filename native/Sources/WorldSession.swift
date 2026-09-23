@@ -475,6 +475,7 @@ final class WorldSession {
     private var simAutoSneak = false
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
+    private var simChordPreIds: Set<Int> = []           // item entities that existed before the chord
     private var simChordLeak = 0, simPostGatePlace = 0  // frames dig/place got past the chord gate
     #if targetEnvironment(simulator)
     private var simSneakMark = SIMD3<Float>(0, 0, 0)   // -vrdev.sneakTest: feet at t=4s
@@ -1773,6 +1774,7 @@ final class WorldSession {
                     break
                 }
                 client.setWieldIndex(slot)
+                simChordPreIds = Set(client.objects.snapshot().filter { $0.name == "__builtin:item" }.map { $0.id })
                 print("[chorddrop] holding chord with \(cobble) cobble in slot \(slot)"); fflush(stdout)
                 simChordLeak = 0; simChordHold = true
                 simDigPhase = 2; simDigTimer = 0
@@ -1781,7 +1783,9 @@ final class WorldSession {
                 simDigPhase = 3; simDigTimer = 0
             case 3 where simDigTimer > 2:
                 let feet = player.physics().feet
-                let drops = client.objects.snapshot().filter { $0.name == "__builtin:item" && simd_distance($0.pos, feet) < 12 && ($0.wieldItem.hasPrefix("mcl_core:cobble") || $0.textures.first?.hasPrefix("mcl_core:cobble") == true) }
+                // Any new cobble item, wherever it landed: VoxeLibre throws the drop
+                // forward and it can sail off the small spawn pad.
+                let drops = client.objects.snapshot().filter { $0.name == "__builtin:item" && !simChordPreIds.contains($0.id) && ($0.wieldItem.hasPrefix("mcl_core:cobble") || $0.textures.first?.hasPrefix("mcl_core:cobble") == true) }
                 for d in client.objects.snapshot() where d.name == "__builtin:item" && simd_distance(d.pos, feet) < 30 {
                     print("[chorddrop] item id=\(d.id) wield=\(d.wieldItem) tex=\(d.textures.first ?? "") dist=\(simd_distance(d.pos, feet))"); fflush(stdout)
                 }
@@ -4923,7 +4927,7 @@ final class WorldSession {
     private func appendInventoryPanel(eye: SIMD3<Float>, cosY: Float, sinY: Float,
                                       billboards: inout [EntityInstance], v: inout [Float], idx: inout [UInt32]) {
         _ = billboards   // panel is all fixed quads now (no billboards)
-        guard inventoryOpen, let fr = invFrame, highlightLayer >= 0 else { return }
+        guard inventoryOpen, let fr = invFrame, highlightLayer >= 0 else { player.setPanelPointer(nil); return }
         let scale = PlayerState.scale
         func toOrigin(_ p: SIMD3<Float>) -> SIMD3<Float> {
             let rx = (p.x - eye.x) * scale, ry = (p.y - eye.y) * scale, rz = (p.z - eye.z) * scale
@@ -5132,16 +5136,15 @@ final class WorldSession {
                            layer: t.layer, tint: cb.color ?? 16777215, v: &v, idx: &idx)
             }
         }
-        // Held stack rides the cursor; hovered item's name floats above the panel.
-        if let cur = invCursor {
-            appendQuad(center: toOrigin(cur - toward * 0.012), right: oRight, up: oUp, hw: 0.006, hh: 0.006,
-                       layer: highlightLayer, tint: 16777215, v: &v, idx: &idx)
-            if let held = invHeld, let list = listFor(loc: held.loc, name: held.list), held.index < list.count, let st = list[held.index],
-               let icon = invIconModelLayer(iconKey(st)) {
-                appendQuad(center: toOrigin(cur - toward * 0.02), right: oRight, up: oUp, hw: cell * 0.35, hh: cell * 0.35,
-                           layer: icon, tint: 16777215, v: &v, idx: &idx)
-            }
-        }
+        // The pointer dot and the held stack riding it are drawn by the renderer
+        // from each frame's controller pose (PanelPointer); drawing them here
+        // put a tick plus a handoff of lag between the controller and the dot.
+        var heldIcon = -1
+        if let held = invHeld, let list = listFor(loc: held.loc, name: held.list), held.index < list.count, let st = list[held.index],
+           let icon = invIconModelLayer(iconKey(st)) { heldIcon = icon }
+        player.setPanelPointer(PlayerState.PanelPointer(
+            center: toOrigin(fr.center), right: oRight, up: oUp, toward: toOriginDir(toward),
+            dotLayer: highlightLayer, dotHalf: 0.006 * scale, heldLayer: heldIcon, heldHalf: cell * 0.35 * scale))
         // Hover tooltip for a widget (enchant cost, effect name, #236): a text
         // plate near the cursor. Single line (the filled renderer), so a
         // multi-line tooltip shows its first, most useful line.
