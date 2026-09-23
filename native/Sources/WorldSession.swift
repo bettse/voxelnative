@@ -1482,7 +1482,16 @@ final class WorldSession {
                     print("[droptest] ground under drop column x=\(dx) z=\(dz): highest solid y=\(top) (drop y=\(d.pos.y) cbMin.y=\(d.cbMin.y))"); fflush(stdout)
                 }
                 print("[droptest] RESULT drops=\(drops.count) drawable=\(drawable) sunk=\(sunk) pass=\(drawable > 0 && sunk == 0)"); fflush(stdout)
-                simDigPhase = 4
+                simDigPhase = 4; simDigTimer = 0
+            case 4 where simDigTimer > 4:
+                // Settle check (#360): the server's send threshold drops to 0.01
+                // after 1 s of quiet, so a landed item's residual velocity should
+                // have been zeroed by now instead of dead-reckoning it away.
+                let feet = player.physics().feet
+                for d in client.objects.snapshot() where d.name == "__builtin:item" && simd_distance(d.pos, feet) < 24 {
+                    print("[droptest] settled id=\(d.id) pos=\(d.pos) vel=\(d.vel) acc=\(d.acc)"); fflush(stdout)
+                }
+                simDigPhase = 7
             default: break
             }
         }
