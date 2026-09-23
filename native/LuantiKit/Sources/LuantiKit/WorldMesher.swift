@@ -333,6 +333,30 @@ public enum WorldMesher {
         print("[lightdiag] dark sample node=\(name) id=\(id) param1=\(light) at \(p) day=\(light & 0x0F) vs max \(hi) (face of \(face), normal \(normal))"); fflush(stdout)
     }
 
+    /// Averaged (fractional) day/night light for a vertex. The plain format is
+    /// day + night*16 with WHOLE banks (a node's param1 byte); a fractional
+    /// night there spills 16*frac into the day nibble on decode, so a torch's
+    /// 9.5 night next to day 15 read back as night 10, day 7: a dark band at
+    /// the edge of any torch light, day or night (#359, #367). The engine keeps
+    /// the banks in separate bytes (mapblock_mesh.cpp); this does the same in
+    /// 1/16 steps, offset past 1024 so the shader tells it from a plain byte.
+    /// Exact in float32 (max 1024 + 240 + 240*256).
+    @inline(__always)
+    public static func packSmoothLight(day: Float, night: Float) -> Float {
+        let dq = (max(0, min(15, day)) * 16).rounded(), nq = (max(0, min(15, night)) * 16).rounded()
+        return 1024 + dq + nq * 256
+    }
+    /// Inverse of the vertex light packing, both formats (mirrors Shaders.metal
+    /// unpackLight): (day, night) on 0...15.
+    public static func unpackLight(_ p: Float) -> (day: Float, night: Float) {
+        if p >= 1024 {
+            let q = p - 1024, nq = (q / 256).rounded(.down)
+            return ((q - nq * 256) / 16, nq / 16)
+        }
+        let n = (p / 16).rounded(.down)
+        return (p - n * 16, n)
+    }
+
     /// Rotate a tile UV by R90/180/270 (content_mapblock applies this to the
     /// cuboid tcoords). rot 0 = identity.
     @inline(__always)
@@ -611,7 +635,7 @@ public enum WorldMesher {
             }
             let k = aoAmount[min(ao, 4)]
             let d = min(15, (day / Float(count)) * k), n = min(15, (night / Float(count)) * k)
-            return d + n * 16
+            return WorldMesher.packSmoothLight(day: d, night: n)
         }
         // Smooth light for a vertex of a see-through node (plants, mesh nodes),
         // after mapblock_mesh.cpp getSmoothLightTransparent: average the eight
@@ -640,7 +664,7 @@ public enum WorldMesher {
                 let l = cNodeLight(g); day = Float(l & 0x0F); night = Float(l >> 4); count = 1
             }
             let k = aoOctant[min(ao, 8)]
-            let v = min(15, day / Float(count) * k) + min(15, night / Float(count) * k) * 16
+            let v = WorldMesher.packSmoothLight(day: min(15, day / Float(count) * k), night: min(15, night / Float(count) * k))
             octantCache[key] = v
             return v
         }

@@ -127,4 +127,19 @@ final class RelightTests: XCTestCase {
             m.removeNode(SIMD3(8, 4, 8))
         }
     }
+
+    /// A torch's averaged night light is fractional at most vertices; packing
+    /// it as day + night*16 spilled the fraction into the day bank (night 9.5,
+    /// day 15 decoded as night 10, day 7): the dark ring at the edge of held
+    /// torch light and the streak on daytime snow (#359, #367).
+    func testSmoothLightPackingKeepsBanksApart() {
+        for (d, n): (Float, Float) in [(15, 9.5), (15, 0.5), (12.75, 8.5), (0, 14.9375), (15, 15), (0, 0)] {
+            let u = WorldMesher.unpackLight(WorldMesher.packSmoothLight(day: d, night: n))
+            XCTAssertEqual(u.day, d, accuracy: 1.0 / 32, "day for (\(d), \(n))")
+            XCTAssertEqual(u.night, n, accuracy: 1.0 / 32, "night for (\(d), \(n))")
+        }
+        // The plain byte format still decodes as before.
+        let b = WorldMesher.unpackLight(Float(0x3F))   // day 15, night 3
+        XCTAssertEqual(b.day, 15); XCTAssertEqual(b.night, 3)
+    }
 }

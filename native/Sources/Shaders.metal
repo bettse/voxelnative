@@ -43,7 +43,17 @@ static inline float3 applyFog(float3 col, float dist, constant Uniforms & unifor
     return mix(uniforms.fogColor.rgb, col, clarity);
 }
 
+// Two vertex light formats (WorldMesher.packSmoothLight / unpackLight):
+// a node's param1 byte, day + night*16 with whole banks; or, past 1024, the
+// averaged smooth-light banks in 1/16 steps in separate bytes. Averaged
+// fractional banks can't share the byte format: the night fraction bled into
+// the day nibble and drew dark bands at the edge of torch light.
 static inline float2 unpackLight(float packed) {
+    if (packed >= 1024.0) {
+        float q = packed - 1024.0;
+        float nq = floor(q / 256.0);
+        return float2(q - nq * 256.0, nq) / 16.0;
+    }
     float night = floor(packed / 16.0);
     return float2(packed - night * 16.0, night);
 }
