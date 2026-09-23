@@ -20,7 +20,7 @@ let package = Package(
             .product(name: "libzstd", package: "zstd"),
             "CSTBVorbis",
         ]),
-        .executableTarget(name: "luantikit-probe", dependencies: ["LuantiKit"]),
+        .executableTarget(name: "luantikit-joincheck", dependencies: ["LuantiKit"]),
         .testTarget(name: "LuantiKitTests", dependencies: ["LuantiKit"], resources: [.copy("Fixtures")]),
     ]
 )

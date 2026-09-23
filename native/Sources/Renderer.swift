@@ -1194,7 +1194,7 @@ actor Renderer {
         let d = (eye - s.meshRef) * scale
         // NOTE: an earlier "lift the world by the head height" fix for the
         // too-tall camera lifted ONLY the world mesh (this modelMatrix), while
-        // mobs/highlight/particles are drawn in the entity stream that bypasses
+        // mobs/highlight/particles are drawn in the entity stream that skips
         // it -- so the mesh floated ~a block above everything else (sunk mobs,
         // targeting outline a block low, worse clipping). Reverted to keep the
         // whole scene consistent; the too-tall camera needs a fix that shifts

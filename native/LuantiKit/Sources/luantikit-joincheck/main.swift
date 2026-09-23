@@ -9,7 +9,7 @@ import LuantiKit
 // map blocks streamed in and how many solid nodes they hold. That's the
 // cheapest way to check the protocol layer end to end without a headset or
 // the simulator. It is not a general-purpose client and is only ever run
-// against that local server. Usage: luantikit-probe [host] [port] [name] [password]
+// against that local server. Usage: luantikit-joincheck [host] [port] [name] [password]
 let args = CommandLine.arguments
 let host = args.count > 1 ? args[1] : "127.0.0.1"
 let port = UInt16(args.count > 2 ? args[2] : "30000") ?? 30000

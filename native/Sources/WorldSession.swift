@@ -60,7 +60,11 @@ final class WorldSession {
         return generatedName
     }
     // A stable (registered) password so re-login authenticates as the same
-    // account instead of hitting "empty passwords not allowed".
+    // account instead of hitting "empty passwords not allowed". On a server where
+    // this name has no account yet the join takes the engine's FIRST_SRP path
+    // (Client::startAuth, src/client/client.cpp) and registers it, which is what
+    // the desktop client's Register button does; the launcher lets the player set
+    // their own name/password instead.
     static let password: String = {
         let key = "vrdev.password"
         if let p = UserDefaults.standard.string(forKey: key), !p.isEmpty { return p }
@@ -325,7 +329,7 @@ final class WorldSession {
     // read as a broken/dangerous world. Counts down as a safety cap.
     private var teleportSettle: Float = 0
     private var terrainLoading = false
-    private var debugInvTimer: Double = 0
+    private var simSceneTimer: Double = 0
     private var inventoryOpen = false   // right O toggles; panel itself is #81
     // Per-mapblock mesh cache (mesherQueue-only). A dig/place re-meshes just the
     // touched block + its neighbours instead of the whole world, then the cache
@@ -964,8 +968,9 @@ final class WorldSession {
         // set up REAL server-streamed scenes: -vrdev.cmd "/teleport 0 200 0;;/grantme all;;/giveme mcl_core:glass_red 64".
         // Split on ";;" (chat commands contain spaces). Needs the matching privs.
         // Sent one per 1.3 s, about the pace a person typing commands manages,
-        // so the server's chat_message_limit_per_10sec (clientiface.cpp
-        // chat_message_allowance, default 8/10 s) accepts every command and the
+        // so the server's chat_message_limit_per_10sec budget
+        // (RemotePlayer::canSendChatMessage, src/remoteplayer.cpp; default 8 per
+        // 10 s, refilled at limit/8 per second) accepts every command and the
         // scene setup applies fully instead of half of it being dropped.
         if !simCmdDone, client.objects.localPlayerId != 0,
            let cmd = UserDefaults.standard.string(forKey: "vrdev.cmd"), !cmd.isEmpty {
@@ -1159,11 +1164,11 @@ final class WorldSession {
             let f = player.physics().feet
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/teleport -113.08 -9.5 -104.94")   // Eric's basement feet (-112.58,-9,-104.44) in server coords (ours - 0.5)
+                client.sendChat("/grantme all"); client.sendChat("/teleport -113.08 -9.5 -104.94")   // the #303 repro spot in the developer's own dev world, in server coords (ours - 0.5)
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 8:
                 simFallMinHp = Int(f.y * 100); simFallMaxY = f.y
-                // Column dump around Eric's basement spot so the map contents can
+                // Print the node column around the #303 repro coordinates so the client's decoded map can
                 // be compared with what his device log saw.
                 for y in stride(from: -4, through: -12, by: -1) {
                     var row = "[igloo] y=\(y):"
@@ -1343,7 +1348,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.probe 1: dump the client's OWN decoded world nodes in a 7x7 at
+        // -vrdev.probe 1: print the client's OWN already-decoded world nodes in a 7x7 at
         // y=120 around the origin (the sim's sky platform) so a harness that ate
         // it can be spotted. Local debug print of already-received map data, no network.
         if UserDefaults.standard.bool(forKey: "vrdev.probe"), client.objects.localPlayerId != 0, atlasBuilt, simDigPhase == 0 {
@@ -1695,41 +1700,41 @@ final class WorldSession {
         // its layout can be screenshotted without a controller. The whole aid
         // block is simulator-only: on device it was 14 UserDefaults reads per
         // tick (CFPreferences lock + string bridge each) for flags never set.
-        debugInvTimer += Double(dt)
+        simSceneTimer += Double(dt)
         #if targetEnvironment(simulator)
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.openInventory"), atlasBuilt { toggleInventory(); debugInvTimer = -1e9 }
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.openInventory"), atlasBuilt { toggleInventory(); simSceneTimer = -1e9 }
         // -vrdev.invCycle 1: open at 8 s, close at 16 s, reopen at 20 s, so the
         // [icon] released/reused layer counts show in the log (#296).
         if UserDefaults.standard.bool(forKey: "vrdev.invCycle"), atlasBuilt {
-            if simInvCyclePhase == 0, debugInvTimer > 8, !inventoryOpen { toggleInventory(); simInvCyclePhase = 1 }
-            else if simInvCyclePhase == 1, debugInvTimer > 16, inventoryOpen { let before = modelTexCount; toggleInventory(); print("[invcycle] closed: layers=\(before) free=\(freeModelLayers.count)"); fflush(stdout); simInvCyclePhase = 2 }
-            else if simInvCyclePhase == 2, debugInvTimer > 20, !inventoryOpen { toggleInventory(); simInvCyclePhase = 3 }
-            else if simInvCyclePhase == 3, debugInvTimer > 26 { print("[invcycle] RESULT reopened: layers=\(modelTexCount) free=\(freeModelLayers.count)"); fflush(stdout); simInvCyclePhase = 4 }
+            if simInvCyclePhase == 0, simSceneTimer > 8, !inventoryOpen { toggleInventory(); simInvCyclePhase = 1 }
+            else if simInvCyclePhase == 1, simSceneTimer > 16, inventoryOpen { let before = modelTexCount; toggleInventory(); print("[invcycle] closed: layers=\(before) free=\(freeModelLayers.count)"); fflush(stdout); simInvCyclePhase = 2 }
+            else if simInvCyclePhase == 2, simSceneTimer > 20, !inventoryOpen { toggleInventory(); simInvCyclePhase = 3 }
+            else if simInvCyclePhase == 3, simSceneTimer > 26 { print("[invcycle] RESULT reopened: layers=\(modelTexCount) free=\(freeModelLayers.count)"); fflush(stdout); simInvCyclePhase = 4 }
         }
         // Sim-only: -vrdev.fakeStation 1 opens a canned station formspec (labels +
         // a small list) so the #176 label rendering can be screenshotted headless.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeStation"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeStation"), atlasBuilt {
             seedFakePlayerInventory()
             let spec = "size[9,9]label[0.5,0.5;Cartography Table]label[2,2;Map]label[4,2;Paper]" +
                        "list[current_player;main;0,5;9,3;]list[current_player;main;0,8;9,1;8]"
-            openFormspec(spec, ""); debugInvTimer = -1e9
+            openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeAchieve 1 opens a VoxeLibre-shaped achievements
         // form (awards:awards: tabheader + textlist rows + an icon image[] + a
         // hypertext description) so the #339 read-only info-form render can be
         // screenshotted headless. A player form, so no node context.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAchieve"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAchieve"), atlasBuilt {
             let spec = "size[11,5]tabheader[0,0;tab;Advancements,Goals,Challenges;1;false;false]" +
                        "image[0.5,0.5;2,2;mcl_potions_effect_swiftness.png]" +
                        "textlist[4.75,0;6,5;awards;Acquire Hardware,Sleep in a Bed,Time to Farm!,Diamonds\\, Diamonds\\, Diamonds,The Lie,Hot Stuff,Local Brewery,The End?;1;false]" +
                        "hypertext[0.5,3;4,2;desc;<b>Acquire Hardware</b>\nSmelt an iron ingot.]"
-            openFormspec(spec, "awards:awards"); debugInvTimer = -1e9
+            openFormspec(spec, "awards:awards"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeFurnace 1 opens VoxeLibre's real inactive furnace
         // formspec (mcl_furnaces/init.lua, formspec_version 4, per-slot
         // mcl_formspec_itemslot.png backgrounds at 1.25 spacing) so the slot
         // alignment Eric saw on device can be checked headless.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeFurnace"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeFurnace"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             func slotBg(_ x: Float, _ y: Float, _ w: Int, _ h: Int, _ size: Float = 0.05) -> String {
@@ -1753,12 +1758,12 @@ final class WorldSession {
                 + slotBg(0.375, 5.1, 9, 3) + "list[current_player;main;0.375,5.1;9,3;9]"
                 + slotBg(0.375, 9.05, 9, 1) + "list[current_player;main;0.375,9.05;9,1;]"
                 + "image_button[0.325,1.95;1.1,1.1;craftguide_book.png;__mcl_craftguide;]"
-            openFormspec(spec, "mcl_furnaces:furnace_0_0_0"); debugInvTimer = -1e9
+            openFormspec(spec, "mcl_furnaces:furnace_0_0_0"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeAnvil 1 opens an anvil-style form (item lists + a
         // rename field + a button) to screenshot the #229 widget boxes headless.
         // A field needs a node context to submit, so stub one.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAnvil"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAnvil"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             // Worn tool in input so the wear bar shows too; a craftitem output.
@@ -1771,11 +1776,11 @@ final class WorldSession {
                        "list[context;input;1.625,2.6;1,1;]list[context;output;9.125,2.6;1,1;]" +
                        "button[4.125,1.9;3.5,0.8;setname;Rename]" +
                        "list[current_player;main;0.375,5.1;9,3;9]list[current_player;main;0.375,9.05;9,1;]"
-            openFormspec(spec, ""); debugInvTimer = -1e9
+            openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeChest 1 opens the chest form (Chest + Inventory
         // labels, item grids) to screenshot the #241 layout headless.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeChest"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeChest"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             // Seed the chest's nodemeta with items so the nodemeta render path
@@ -1816,11 +1821,11 @@ final class WorldSession {
                        slots(0.375, 5.1, 9, 3) + "list[current_player;main;0.375,5.1;9,3;9]" +
                        slots(0.375, 9.05, 9, 1) + "list[current_player;main;0.375,9.05;9,1;]" +
                        "listring[nodemeta:0,0,0;main]listring[current_player;main]"
-            openFormspec(spec, "mcl_chests:chest_0_0_0"); debugInvTimer = -1e9
+            openFormspec(spec, "mcl_chests:chest_0_0_0"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeFurnace 1 opens the active furnace form (fire gauge
         // + cook arrow via image[] with ^[lowpart) to screenshot #223 headless.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeFurnace"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeFurnace"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             // Seed real craftitems in the item slots (not just the fire/arrow
@@ -1839,11 +1844,11 @@ final class WorldSession {
                        "image[5.25,2;1.5,1;gui_furnace_arrow_bg.png^[lowpart:60:gui_furnace_arrow_fg.png^[transformR270]" +
                        "list[context;dst;7.875,2;1,1;]" +
                        "list[current_player;main;0.375,5.1;9,3;9]list[current_player;main;0.375,9.05;9,1;]"
-            openFormspec(spec, ""); debugInvTimer = -1e9
+            openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeBeacon 1 opens a beacon-style form (item_image[]
         // payment icons + image_button[] effect selector) to screenshot #232/#233.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBeacon"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBeacon"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             let spec = "formspec_version[4]size[11.75,10.425]label[0.375,0.375;Beacon]" +
@@ -1852,11 +1857,11 @@ final class WorldSession {
                        "image_button[1,3.5;1,1;mcl_potions_swift.png;swiftness;]" +
                        "image_button[2.25,3.5;1,1;mcl_potions_leaping.png;leaping;]" +
                        "list[current_player;main;0.375,5.1;9,3;9]list[current_player;main;0.375,9.05;9,1;]"
-            openFormspec(spec, ""); debugInvTimer = -1e9
+            openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeBrewing 1 opens the brewing form with its full-panel
         // background[] art (mcl_brewing_inventory.png) to screenshot #245 headless.
-        if !inventoryOpen, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBrewing"), atlasBuilt {
+        if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBrewing"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             client.world.setNodeInventoryForTest(SIMD3(0, 0, 0), list: "fuel",
@@ -1867,7 +1872,7 @@ final class WorldSession {
                        "list[context;fuel;0.5,1.75;1,1;]list[context;input;2.5,0.5;1,1;]" +
                        "list[context;output;4.1,1.42;1,1;]list[context;output;5.05,0.75;1,1;]list[context;output;6.0,1.42;1,1;]" +
                        "list[current_player;main;0,4.75;9,3;9]list[current_player;main;0,8.0;9,1;]"
-            openFormspec(spec, ""); debugInvTimer = -1e9
+            openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeRain 1 feeds the exact mcl_weather rain spawner
         // (player-attached, size 4..8, box above the head) so #199 (giant bars)
@@ -1877,7 +1882,7 @@ final class WorldSession {
         // Sim aid (-vrdev.fakeSkybox 1): the End's SET_SKY as mcl_weather sends
         // it (type skybox, six mcl_playerplus_end_sky.png), through the real
         // packet path, so the cube-texture sky can be screenshotted (#290).
-        if !fakeSkyboxSent, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeSkybox"), atlasBuilt {
+        if !fakeSkyboxSent, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeSkybox"), atlasBuilt {
             fakeSkyboxSent = true
             let w = PacketWriter()
             w.u32(0xFF00_0000 | 0x00_0A08_0A).string16("skybox").u8(0)   // bgcolor #0A080A, no clouds
@@ -1908,7 +1913,7 @@ final class WorldSession {
         // -vrdev.digCapsTest 1: with the real VoxeLibre ITEMDEF/NODEDEF, print
         // what getDigParams says for pick/shovel/hand on dirt and stone, so the
         // hand fallback (#297) can be checked without a controller.
-        if !digCapsTestDone, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.digCapsTest"), atlasBuilt, handItemName() != nil {
+        if !digCapsTestDone, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.digCapsTest"), atlasBuilt, handItemName() != nil {
             digCapsTestDone = true
             // ITEMDEF tail check (#298): VoxeLibre sets place_param2 on crops/kelp,
             // wield_scale 1.8 on tools.
@@ -1931,7 +1936,7 @@ final class WorldSession {
                 print(line); fflush(stdout)
             }
         }
-        if !fakeRainSpawned, debugInvTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeRain"), atlasBuilt {
+        if !fakeRainSpawned, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeRain"), atlasBuilt {
             fakeRainSpawned = true
             let sp = Client.ParticleSpawner(serverId: 990001, amount: 900, time: 0,
                 posMin: SIMD3(-15, 20, -15), posMax: SIMD3(15, 25, 15),
@@ -1962,8 +1967,8 @@ final class WorldSession {
             }
         }
         // Sim-only: -vrdev.openKeyboard 1 pops the on-screen keyboard for a layout screenshot.
-        if !keyboardOpen, debugInvTimer > 6, UserDefaults.standard.bool(forKey: "vrdev.openKeyboard"), atlasBuilt {
-            openKeyboard(prefill: UserDefaults.standard.string(forKey: "vrdev.kbText") ?? "hello world", simple: UserDefaults.standard.bool(forKey: "vrdev.simpleKb")) { _ in }; debugInvTimer = -1e9   // -vrdev.kbText overrides (long text tests the tail); -vrdev.simpleKb 1 = the bug-note board
+        if !keyboardOpen, simSceneTimer > 6, UserDefaults.standard.bool(forKey: "vrdev.openKeyboard"), atlasBuilt {
+            openKeyboard(prefill: UserDefaults.standard.string(forKey: "vrdev.kbText") ?? "hello world", simple: UserDefaults.standard.bool(forKey: "vrdev.simpleKb")) { _ in }; simSceneTimer = -1e9   // -vrdev.kbText overrides (long text tests the tail); -vrdev.simpleKb 1 = the bug-note board
         }
         #endif
         if gi.inventory && !prevInventory { toggleInventory() }
@@ -2193,8 +2198,8 @@ final class WorldSession {
                     // Once, dump the node column around the feet so the exact shaft
                     // layout (which cells are brick, air, ladder) is visible and the
                     // "can't reach the ladder" case can be solved, not guessed (#331).
-                    if !climbDumped {
-                        climbDumped = true
+                    if !climbColumnLogged {
+                        climbColumnLogged = true
                         for y in stride(from: Int(floor(feet.y)) + 3, through: Int(floor(feet.y)) - 2, by: -1) {
                             var row = "[climbmap] y=\(y):"
                             for dz in -1...1 {
@@ -2556,7 +2561,7 @@ final class WorldSession {
     /// Play a node sound group positionally at a node (dig loop / dug on break).
     private func playNodeSound(_ name: String?, at node: SIMD3<Int>) {
         guard let name, !name.isEmpty else { return }
-        let pos = SIMD3<Float>(Float(node.x) + 0.5, Float(node.y) + 0.5, Float(node.z) + 0.5)   // node centre in our [g,g+1] grid (locally built, bypasses gridShift)
+        let pos = SIMD3<Float>(Float(node.x) + 0.5, Float(node.y) + 0.5, Float(node.z) + 0.5)   // node centre in our [g,g+1] grid (built locally, so gridShift is not applied)
         let g = client.nodes.soundGain(name)   // the NODEDEF's gain/pitch for this sound (#280)
         playSound(SoundSpec(id: -1, name: name, gain: g.gain, type: 1, pos: pos,
                             objectId: 0, loop: false, fade: 0, pitch: g.pitch, ephemeral: true))
@@ -2564,7 +2569,7 @@ final class WorldSession {
     private var digSoundTimer: Float = 0
     private var footstepTimer: Float = 0   // cadence gate for footstep sounds (#178)
     private var climbLogTick = 0            // rate-limit the [climb] diagnostic
-    private var climbDumped = false         // one-shot [climbmap] node-column dump (#331)
+    private var climbColumnLogged = false         // one-shot [climbmap] node-column dump (#331)
     private lazy var climbLogEnabled = UserDefaults.standard.bool(forKey: "vrdev.climbLog")   // opt-in ladder diagnostic (read once)
 
     private func playSound(_ spec: SoundSpec) {
@@ -3376,7 +3381,7 @@ final class WorldSession {
         client.setPlayerInventoryForTest(list: "main", main)
     }
 
-    /// Dump the resolved contents of every list a formspec references, plus the
+    /// Print the resolved contents of every list a formspec references, plus the
     /// player's own main list, so we can compare what the server actually sent
     /// against what the panel renders (chest slots showing empty, #254). Prints
     /// slot index -> item xN for each filled slot; `<no list resolved>` means the
@@ -3384,7 +3389,7 @@ final class WorldSession {
     /// empty in-world too).
     private func logInventoryContents(_ lists: [Formspec.List]) {
         var seen = Set<String>()
-        func dump(_ loc: String, _ list: String) {
+        func logList(_ loc: String, _ list: String) {
             let key = "\(loc)/\(list)"
             guard seen.insert(key).inserted else { return }
             guard let stacks = listFor(loc: loc, name: list) else {
@@ -3396,8 +3401,8 @@ final class WorldSession {
             }
             print("[chest] \(key) slots=\(stacks.count) filled=\(filled.count) [\(filled.joined(separator: ", "))]")
         }
-        for e in lists { dump(e.loc, e.list) }
-        dump("current_player", "main")
+        for e in lists { logList(e.loc, e.list) }
+        logList("current_player", "main")
         fflush(stdout)
     }
 
@@ -4073,7 +4078,7 @@ final class WorldSession {
     // against a nominal 1920x1080 screen mapped onto a +-0.42 x +-0.32 rad
     // window 1.2 m ahead. Statbars and the XP pair have their own paths.
     private var hudTextLayers: [Int: (layer: Int, text: String, aspect: Float)] = [:]
-    private var hudDumped = false          // sim: one-shot dump of the server's HUD elements
+    private var hudElementsLogged = false          // sim: one-shot dump of the server's HUD elements
     private static let hudScreen = SIMD2<Float>(1920, 1080)
     // Horizontal half-angle kept under the peripheral stat columns (hearts /
     // hunger at +-0.66 rad, bowing in to ~0.56 at the top) so VoxeLibre's
@@ -4294,8 +4299,8 @@ final class WorldSession {
         // potion-effect slots, which must not starve the elements after them.
         var drawn = 0
         #if targetEnvironment(simulator)
-        if !hudDumped {
-            hudDumped = true
+        if !hudElementsLogged {
+            hudElementsLogged = true
             for (id, e) in elems {
                 print("[hud] elem id=\(id) type=\(e.type) pos=\(e.pos) off=\(e.offset) scale=\(e.scale) align=\(e.align) z=\(e.zIndex) num=\(String(e.number, radix: 16)) text='\(e.text.prefix(60))' skipXp=\(skip.contains(id))"); fflush(stdout)
             }

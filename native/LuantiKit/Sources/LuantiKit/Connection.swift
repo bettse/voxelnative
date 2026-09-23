@@ -84,9 +84,11 @@ public final class Connection {
         // Stale-session cleanup: if our OWN previous connection died without a
         // goodbye (crash/kill/in-session reconnect), the server still holds that
         // peer -- and our player name -- for its peer timeout (~30 s), so a
-        // relaunch is refused with "already connected". Luanti's connection.cpp
-        // resolves an incoming datagram's peer from the sender's address, so a
-        // CONTROLTYPE_DISCO only ends the session whose socket actually sent it:
+        // relaunch is refused with "already connected". The engine's
+        // ConnectionReceiveThread::receive() (src/network/mtp/threads.cpp) looks
+        // the peer up by sender address and drops any datagram whose sender
+        // isn't that peer's address, so a CONTROLTYPE_DISCO can only ever end
+        // the session whose own socket sent it:
         // we re-bind OUR saved local port and send the goodbye the crashed
         // process never got to send. Nothing here can affect another client's
         // peer. Cleared on a clean disconnect.
@@ -369,8 +371,9 @@ public final class Connection {
     }
 
     /// One-shot UDP CONTROLTYPE_DISCO for OUR previous session, sent from the
-    /// local port that session used: the server matches a datagram to a peer by
-    /// sender address (connection.cpp), so this is the only way to say goodbye
+    /// local port that session used: ConnectionReceiveThread::receive()
+    /// (src/network/mtp/threads.cpp) matches a datagram to a peer by sender
+    /// address and ignores it otherwise, so this is the only way to say goodbye
     /// for a process that crashed. NWConnection won't reproduce the port, hence
     /// a plain BSD socket. Best-effort; host must be an IP literal.
     @discardableResult

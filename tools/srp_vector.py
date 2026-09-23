@@ -2,8 +2,9 @@
 """
 Generate an SRP-6a test vector with fixed secrets, following csrp (Luanti's
 util/srp.cpp) byte for byte: SHA-256, RFC 5054 2048-bit group, csrp padding.
-Both the client proof M and a server-side B are produced so the GDScript
-SRP class can be checked offline. Output: client/tests/srp_vector.json
+Both the client proof M and a server-side B are produced so LuantiKit's
+SRP.swift can be checked offline against a known-good vector.
+Output: native/LuantiKit/Tests/LuantiKitTests/Fixtures/srp_vector.json
 """
 import hashlib, json, os
 

@@ -8,7 +8,7 @@ client/export/
 .DS_Store
 tools/__pycache__/
 tools/*.log
-tools/packet-dumps/
+tools/join-fixtures/
 !client/export/.gdignore
 tools/device-logs/
 tools/server.log*

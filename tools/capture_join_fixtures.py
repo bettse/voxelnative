@@ -2,7 +2,7 @@
 """
 Log into the developer's local VoxeLibre dev server (tools/server.sh) with a
 test account, using miney's protocol layer, and save the join-time server
-messages as parser fixtures (tools/packet-dumps/).
+messages as parser fixtures (tools/join-fixtures/).
 
 The binary capture holds each server-to-client message as  u16 opcode,
 u32 length, payload  so LuantiKit's decoders can be unit-tested offline
@@ -10,7 +10,7 @@ against real VoxeLibre data. The text log lists both directions with opcode
 names and sizes.
 
 Usage:
-  tools/join_dump.py [--host 127.0.0.1] [--port 30000] [--name vrdev]
+  tools/capture_join_fixtures.py [--host 127.0.0.1] [--port 30000] [--name vrdev]
                      [--password vrdev] [--register] [--seconds 20]
 """
 import argparse, os, struct, sys, time, logging
@@ -56,7 +56,7 @@ def main():
     ap.add_argument("--register", action="store_true", help="create the account (FIRST_SRP)")
     ap.add_argument("--seconds", type=float, default=20, help="how long to stay connected after joining")
     ap.add_argument("--protocol", type=int, default=53)
-    ap.add_argument("--out", default=os.path.join(HERE, "packet-dumps"))
+    ap.add_argument("--out", default=os.path.join(HERE, "join-fixtures"))
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
@@ -77,7 +77,7 @@ def main():
     client = LuantiClient(host=args.host, port=args.port, playername=args.name, password=args.password)
     # Speak the current protocol so the capture matches what the Godot client will see.
     client.protocol = Protocol(protocol_id=0x4F457403, serialization_version=29,
-                               protocol_version=args.protocol, version_string="join_dump")
+                               protocol_version=args.protocol, version_string="capture_join_fixtures")
     client.connection.protocol = client.protocol
 
     real_process = client.command_handler.process_command
@@ -111,7 +111,7 @@ def main():
     ok = client.connect(register=args.register)
     note(f"connect returned {ok}, state={client.state.state}, denied={client.state.access_denied_reason}")
     if ok:
-        client.send_chat_message("hello from join_dump")
+        client.send_chat_message("hello from capture_join_fixtures")
         end = time.time() + args.seconds
         while time.time() < end:
             time.sleep(0.5)

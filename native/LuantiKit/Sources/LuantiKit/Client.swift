@@ -902,6 +902,10 @@ public final class Client {
 
     /// TEXTURENAME_ALLOWED_CHARS: ASCII letters, digits, "_", ".", "-" only, so a
     /// pushed name can never be a path.
+    /// Reject server-supplied media names that could escape the cache directory
+    /// ("..", separators, non-ASCII). The engine checks pushed file names the same
+    /// way before writing them; we key the cache by sha1 anyway, but a buggy or
+    /// hostile server shouldn't get to pick a path.
     static func isSafeMediaName(_ s: String) -> Bool {
         !s.isEmpty && !s.contains("..") && s.allSatisfy {
             $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "." || $0 == "-")
@@ -1326,6 +1330,11 @@ public final class Client {
         onNodeChanged?(p)
     }
 
+    /// Finish the join the way the engine does: once NODEDEF/ITEMDEF have landed
+    /// the official client sends TOSERVER_CLIENT_READY with its version + formspec
+    /// API version (Client::sendReady, src/client/client.cpp, called when the
+    /// client leaves LC_Init). The server only spawns the player and starts
+    /// streaming blocks after this.
     private func sendClientReadyIfNeeded() {
         guard defsReady, !clientReadySent else { return }
         clientReadySent = true
@@ -1883,8 +1892,9 @@ public final class Client {
         return gone
     }
 
-    /// Wire format from player.gd player_pos_block(): pos/vel as v3s32*1000,
-    /// pitch/yaw as s32*100, then control/fov/range fields.
+    /// Wire format per Client::sendPlayerPos / writePlayerPos (src/client/client.cpp):
+    /// pos/vel as v3s32*1000, pitch/yaw as s32 degrees*100, u32 pressed keys,
+    /// u8 fov*80, u8 wanted_range. (Originally ported via player.gd player_pos_block().)
     func playerPosBlockData(keys: Int = 0) -> Data {   // internal for PlayerPosPacketTests
         let w = PacketWriter()
         func si(_ f: Float) -> Int { f.isFinite ? Int(f) : 0 }   // Int(NaN/Inf) traps
@@ -1941,7 +1951,8 @@ public final class Client {
         conn.sendMessage(Op.toserverPlayerPos, playerPosBlockData(keys: heldKeys))
     }
 
-    /// TOSERVER_INTERACT (interaction.gd _send_interact): u8 action, u16 wield,
+    /// TOSERVER_INTERACT, mirroring Client::interact (src/client/client.cpp) and the
+    /// InteractAction enum in src/network/networkprotocol.h: u8 action, u16 wield,
     /// bytes32(pointed thing), then the player-pos block.
     /// action: 0 start dig, 1 stop dig, 2 dig complete, 3 place, 4 use,
     /// 5 activate (rightclick air; pointed thing is always "nothing").

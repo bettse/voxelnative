@@ -4,7 +4,7 @@ Written 2026-09-09 from `repos/luanti` at commit c5ba5f7 (2026-09-08, engine
 5.17.0 line) plus the Python reference client in `repos/miney`. Everything here
 is from code, not from `doc/protocol.txt` (which only covers the UDP handshake).
 
-Purpose: enough detail to write a Luanti client from scratch in Godot that can
+Purpose: enough detail to reimplement the Luanti client protocol for this project (originally targeted Godot, now Swift under `native/`) so it can
 join a VoxeLibre server, receive the world, move, dig and place.
 
 Local server to test against: Luanti 5.15.1 (`/Applications/luanti.app`), which
@@ -835,7 +835,7 @@ These are not optional for a playable VoxeLibre session, but can be staged:
   reliable split message, thousands of 512-byte chunks. Expect a couple of
   seconds on LAN.
 
-## 17. Implementation order for a Godot client (no code yet)
+## 17. Original implementation order (Godot-era plan, superseded by `native/`)
 
 1. **Transport**: base header, reliable/ACK/window per channel, split
    reassembly, resend, ping, disconnect. Godot: `PacketPeerUDP` on a thread

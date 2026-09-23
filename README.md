@@ -87,7 +87,7 @@ server and playing is real. 🛠️
 - `notes/` 📓 research writeups: `luanti-protocol.md` (wire formats),
   `ui-textures-models.md` (formspecs, HUD, texture modifiers, b3d),
   `native-visionos-assessment.md`, `prior-art.md`.
-- `tools/` 🔧 the local VoxeLibre dev server, media server, and packet dump.
+- `tools/` 🔧 the local VoxeLibre dev server, media server, and join-fixture capture.
 - `repos/` 📚 upstream repos cloned just for reading (not vendored): `luanti`
   (engine source, protocol in `src/network/`) and `miney` (a Python protocol
   client, proof the protocol works from outside the engine).
@@ -136,7 +136,7 @@ throwaway account and checks auth/spawn/block streaming:
 LUANTI_DEV_SERVER=127.0.0.1:30000 swift test --filter DevServerJoinTests
 ```
 
-`luantikit-probe` is a small macOS CLI target for headless protocol checks
+`luantikit-joincheck` is a small macOS CLI target for headless protocol checks
 against your own local dev server (`tools/server.sh`) without any of the
 graphics: it performs the same join sequence as the official client and prints
 what streamed in. It's a separate package target and isn't part of the app.

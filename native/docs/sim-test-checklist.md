@@ -24,9 +24,9 @@ Where to read results:
 - **Log:** app stdout goes to `Documents/native.log` in the app container, NOT the console:
   `cat "$(xcrun simctl get_app_container booted dev.ericbetts.voxelnative data)/Documents/native.log"`. Logic aids (`[simcmd]`, `[eattest]`, `[simmob]`, `[simride]`, `[realhud]`, `[hotbar]`) print there.
 
-Prereqs (see `sim-passthrough-washout` memory): the dev server must be up (sim connects to `127.0.0.1`), and each run needs a **unique** player name or the server denies the relaunch (ACCESS_DENIED 8) until the old peer times out (~30 s). `sim.sh`/ContentView use a random `vrdev-XXXX`; override with `-vrdev.name <name>`.
+Prereqs: the dev server must be up (sim connects to `127.0.0.1`), and each run needs a **unique** player name or the server denies the relaunch (ACCESS_DENIED 8) until the old peer times out (~30 s). `sim.sh`/ContentView use a random `vrdev-XXXX`; override with `-vrdev.name <name>`.
 
-Real server-driven scenes (`vrdev-world-testing` memory): the dev world is fair game to modify. Use `-vrdev.cmd "cmd1;;cmd2"` (";;"-separated chat commands, fired once the player exists) for `/grantme all`, `/giveme`, `/teleport`, `/setblock`, creative. These beat local node injection, which lands buried at the busy jungle spawn.
+Real server-driven scenes: the dev world is the developer's own (`tools/server.sh`, world `vrdev`), so it is meant to be rebuilt between tests. Use `-vrdev.cmd "cmd1;;cmd2"` (";;"-separated chat commands, fired once the player exists) for `/grantme all`, `/giveme`, `/teleport`, `/setblock`, creative. These beat building nodes into the local world copy, which lands buried at the busy jungle spawn.
 
 ---
 
@@ -48,19 +48,19 @@ HUD / wield stubs (dev account inventory is empty, so these fake what never show
 - `vrdev.fakeXp 1` — stub XP level 7 @ 60%.
 - `vrdev.fakeNametag 1` — a "Steve" nametag 3 nodes ahead.
 - `vrdev.fakeHud 1` — a boss bar (Ender Dragon) + a potion-effect element.
-- `vrdev.realHud 1` — inject the REAL server HUDADD packets (armor statbar id 300, XP level text id 301) through the actual parse path, as they arrive on device.
+- `vrdev.realHud 1` — replay the REAL server HUDADD packets (armor statbar id 300, XP level text id 301) through `Client.simulateServerPacket`, i.e. the same parse path the socket feeds, as they arrive on device.
 
 Panels / formspecs:
 - `vrdev.openInventory 1` — open the player inventory panel ~8 s in.
 - `vrdev.fakeStation 1` — open a canned station formspec (cartography-table labels + a small list) to check formspec label/list layout.
 - `vrdev.openKeyboard 1` — pop the on-screen keyboard (prefilled "hello world") ~6 s in.
 
-Scene aids (locally injected nodes/entities; re-assert against server streaming where noted):
+Scene aids (nodes/entities built locally in the client's own world copy — nothing is sent to the server; re-assert against server streaming where noted):
 - `vrdev.spawnMob 1` — a row of 6 texture-tricky mobs (cow w/ walk+head-swivel, skeleton, horse composite skin, zombie, witch, pitched arrow) at distinct yaws + a dropped dirt node and a dropped diamond pick.
 - `vrdev.spawnBed 1` — 4 beds (each foot+head mesh nodes), one per facedir 0..3, on a carved stone floor.
 - `vrdev.spawnGlass 1` — a 3×3 red stained-glass wall with a gold wall behind it (translucency check); re-asserts over ~3.5 s so server streams don't overwrite it.
 - `vrdev.spawnRails 1` — a straight run, an L-corner, a T, and a cross of rails in a carved pit (view from above with `-vrdev.pitch -85`).
-- `vrdev.rideTest 1` — inject a vehicle AO ahead+up and attach the player to it.
+- `vrdev.rideTest 1` — spawn a vehicle AO ahead+up in the client's own object table and attach the player to it.
 - `vrdev.eatTest 1` — the hold-to-eat state machine: gives golden apples, drives the place-hold, logs stack count before/after (verifies mechanic, not the hand-at-mouth geometry).
 
 Server-driven:
@@ -151,7 +151,7 @@ Verify the item in the hand matches desktop scale/pose for each item class. The 
 
 - [ ] **Nametag.** Look for: "Bessie"/"Skeleton"/etc. labels above the mobs, legible, billboarded toward the camera (#118).
 
-- [ ] **Hit flash — gap.** No flag triggers a damage flash on a mob. Would need a hurt/animation message injection. See "Suggested new sim hooks".
+- [ ] **Hit flash — gap.** No flag triggers a damage flash on a mob. Would need a locally-built hurt/animation message fed through `simulateServerPacket`. See "Suggested new sim hooks".
 
 ---
 
@@ -205,7 +205,7 @@ These run the real server physics; verify by screenshot AND by the player positi
 
 Each would make a currently-awkward or device-only check a one-line headless screenshot.
 
-- **`-vrdev.wield <itemstring>`** — force any named item into the hand (set inventory slot 0 + wieldIndex 0, bypass fakeWield). Would make the **wielded-chest size** (and any mesh/tool/node wield) a one-flag check instead of the `fakeWield 0 + giveme` dance. Verifies: the `.mesh` wield branch at correct scale for chest/bed/any mesh node.
+- **`-vrdev.wield <itemstring>`** — force any named item into the hand (set inventory slot 0 + wieldIndex 0 directly, instead of `fakeWield`'s canned cube). Would make the **wielded-chest size** (and any mesh/tool/node wield) a one-flag check instead of the `fakeWield 0 + giveme` dance. Verifies: the `.mesh` wield branch at correct scale for chest/bed/any mesh node.
 
 - **`-vrdev.openContainer <nodename>`** — place the node in front, then open its real container formspec (chest/furnace/anvil) without a right-click gesture. Verifies: real container UI layout, container inventory list, item icons inside a chest — none of which `fakeStation`'s canned spec covers.
 
@@ -213,7 +213,7 @@ Each would make a currently-awkward or device-only check a one-line headless scr
 
 - **`-vrdev.walk "<dir> <nodes>"`** — script a movement input for N nodes. Verifies: sneak edge-glue, sustained ladder climb, movement resistance rate, step-up — all currently blocked because the sim delivers no per-frame movement input.
 
-- **`-vrdev.mobHurt <id>`** — inject a hurt/animation message on a spawned mob. Verifies: the damage hit-flash tint (currently untestable headless).
+- **`-vrdev.mobHurt <id>`** — feed a locally-built hurt/animation message for a sim-spawned mob through `simulateServerPacket`. Verifies: the damage hit-flash tint (currently untestable headless).
 
 - **`-vrdev.spawnPlants 1` / `-vrdev.spawnNodebox 1`** — dedicated scene aids (like spawnBed/spawnGlass/spawnRails) for plantlike crops and nodebox fences/walls/buttons/torches, so those drawtypes get a reliable, re-asserting headless scene instead of hand-built `-vrdev.cmd /setblock` chains.
 

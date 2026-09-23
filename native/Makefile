@@ -29,7 +29,7 @@ simshot:        ## screenshot the running simulator to /tmp/voxel_sim_now.png
 test:           ## LuantiKit unit tests
 	cd LuantiKit && swift test 2>&1 | grep -E "error:|Executed .* tests|failed" | tail -3
 
-integration:    ## join the running dev server (throwaway account) and check auth/spawn/blocks
+integration:    ## join the LOCAL dev server (tools/server.sh) with a fresh per-run name and check auth/spawn/blocks
 	cd LuantiKit && LUANTI_DEV_SERVER=127.0.0.1:30000 swift test --filter DevServerJoinTests 2>&1 | grep -E "error:|Executed .* tests?|failed|skipped" | tail -3
 
 help:

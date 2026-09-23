@@ -1,8 +1,9 @@
 import XCTest
 @testable import LuantiKit
 
-/// Opt-in integration test: joins the local dev server as a throwaway
-/// account and waits for auth, spawn and a first mapblock. Skipped unless
+/// Opt-in integration test: joins the developer's own local dev server with a
+/// fresh randomly-named account each run (the server holds a name until the
+/// old peer times out) and waits for auth, spawn and a first mapblock. Skipped unless
 /// LUANTI_DEV_SERVER=host:port is set (`make integration` from native/), so a
 /// plain `swift test` stays green with no server around.
 final class DevServerJoinTests: XCTestCase {

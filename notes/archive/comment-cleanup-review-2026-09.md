@@ -1,3 +1,5 @@
+> Snapshot of a 2026-09 comment review; line numbers and symbol names predate the `debugAuto*` -> `simAuto*` rename and are not current. Kept for history only.
+
 # Comment cleanup review
 
 Scope: comments in `native/Sources/*.swift`, `native/LuantiKit/Sources/LuantiKit/*.swift`,
