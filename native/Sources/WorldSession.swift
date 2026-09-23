@@ -4535,6 +4535,10 @@ final class WorldSession {
             }
         }
         #endif
+        // Visible text lines, for the stacking check in the text case below.
+        let textLines: [(id: Int, pos: SIMD2<Float>, off: SIMD2<Float>)] = elems.compactMap { (id, e) in
+            e.type == 1 && !e.text.isEmpty && !skip.contains(id) ? (id, e.pos, e.offset) : nil
+        }
         for (id, e) in elems where !skip.contains(id) && drawn < 128 {
             // statbar/inventory/compass/minimap/hotbar aren't drawn here EXCEPT
             // the award-icon hack: VoxeLibre's advancement toast draws its icon as
@@ -4578,6 +4582,20 @@ final class WorldSession {
                 // Our glyphs run wider than desktop's, so the longest toast line
                 // ("Secret Advancement Made!") overran the box. Shrink an award
                 // line only as far as it takes to stay inside the background.
+                // Mods lay out stacked lines for desktop's ~15px font (the
+                // potion HUD puts an effect's name and timer 15px apart); our
+                // enlarged glyph overlapped the line below. Cap each row at the
+                // gap to the nearest text line sharing this anchor, so stacked
+                // lines fit like desktop while lone text keeps its full size.
+                var gap = Float.infinity
+                for o in textLines where o.id != id && o.pos == e.pos && abs(o.off.x - e.offset.x) < 40 {
+                    let dy = abs(o.off.y - e.offset.y)
+                    if dy > 0.5 { gap = min(gap, dy) }
+                }
+                if gap.isFinite {
+                    let maxTh = gap * Self.hudSizeBoost * Float(t.lines)
+                    if th > maxTh { let k = maxTh / th; th *= k; tw *= k }
+                }
                 if isAwardText, let box = awardBox {
                     let cx = anchor.x + e.align.x * tw / 2, pad: Float = 12 * Self.hudSizeBoost
                     let room = 2 * max(0, min(cx - box.lo.x, box.hi.x - cx) - pad)
