@@ -1460,11 +1460,54 @@ final class WorldSession {
                 print("[awardtest] RESULT elements=\(r.count) pass=\(ok)"); fflush(stdout)
             }
         }
+        // -vrdev.stationTest 1: stations that are rightclickable AND keep their
+        // form in node meta (grindstone, shulker box) must open on rightclick,
+        // as Game::nodePlacement opens the meta formspec after sending the use.
+        // Places each 3 nodes ahead at eye level, rightclicks it, checks a form
+        // opened, closes it, moves on (parity review 2026-09-23 #1).
+        if UserDefaults.standard.bool(forKey: "vrdev.stationTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            let stations = ["mcl_grindstone:grindstone", "mcl_chests:violet_shulker_box"]
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                client.sendChat("/grantme all"); client.sendChat("/teleport 0 121 0")
+                simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 6 && player.physics().grounded:
+                let feet = player.physics().feet, bf = player.bodyForward()
+                simDropTarget = SIMD3<Int>(Int((feet.x + bf.x * 3).rounded(.down)), Int((feet.y + 1.2).rounded(.down)),
+                                           Int((feet.z + bf.z * 3).rounded(.down)))
+                simDropCmds = stations
+                simEatStartCount = 0
+                simDigPhase = 2; simDigTimer = 2
+            case 2 where simDigTimer > 1.5:     // place the next station (chat-rate paced)
+                guard let t = simDropTarget, let name = simDropCmds.first else { simDigPhase = 9; break }
+                client.sendChat("/setblock \(t.x),\(t.y),\(t.z) \(name)")
+                simDigPhase = 3; simDigTimer = 0
+            case 3 where simDigTimer > 3:       // rightclick it
+                guard let t = simDropTarget, let name = simDropCmds.first else { simDigPhase = 9; break }
+                let centre = SIMD3<Float>(Float(t.x) + 0.5, Float(t.y) + 0.5, Float(t.z) + 0.5)
+                let hasMetaForm = client.world.nodeFormspec(t) != nil
+                _ = performPlace(aim: simd_normalize(centre - player.rayOrigin()))
+                let ok = formspecOpen
+                print("[stationtest] \(name) node=\(client.nodes.name(client.world.nodeId(t))) metaForm=\(hasMetaForm) opened=\(ok)"); fflush(stdout)
+                if ok { simEatStartCount += 1 }
+                closeFormspec()
+                simDropCmds.removeFirst()
+                simDigPhase = simDropCmds.isEmpty ? 9 : 2; simDigTimer = 0
+            case 9:
+                print("[stationtest] RESULT opened=\(simEatStartCount)/\(stations.count) pass=\(simEatStartCount == stations.count)"); fflush(stdout)
+                simDigPhase = 10
+            default: break
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/giveme mcl_tools:pick_diamond")
+                // The sim account keeps its inventory between runs, so empty it
+                // first: the pick must land in hotbar slot 0 (the wielded one) or
+                // the server rejects the instant dig as "completed digging too fast".
+                client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_tools:pick_diamond")
                 client.sendChat("/teleport 0 140 0")
                 simDigPhase = 5; simDigTimer = 0
             case 5 where simDigTimer > 1:
@@ -2089,10 +2132,9 @@ final class WorldSession {
         player.setPostEffect(fx)
         if eyeSubmerged != wasSubmerged {
             wasSubmerged = eyeSubmerged
-            // Surfacing: snap the shown breath back to full so the bubbles clear
-            // at once (desktop refills breath instantly above water); the server
-            // echo will confirm, and this keeps the next dive starting full (#231).
-            if !eyeSubmerged { breath = 20 }
+            // No local refill on surfacing: the server refills breath a point at
+            // a time and reports each step (TOCLIENT_BREATH), and the bubbles
+            // should follow that like desktop's hudbar does.
             print("[water] eye submerged -> tint \(eyeSubmerged ? "on" : "off")"); fflush(stdout)
         }
         // Send the same control bits the official client sends in PLAYERPOS:
@@ -2960,8 +3002,14 @@ final class WorldSession {
         // through to the server (their on_rightclick sends the formspec).
         // Sneaking forces placement instead of "use", so you can build against a
         // furnace/chest/door (Luanti: the use branches bail when SNEAK is up) (#178).
+        // Game::nodePlacement does this for rightclickable nodes too: it sends
+        // the use (so on_rightclick still runs) AND opens the meta formspec.
+        // Shulker boxes (on_rightclick only animates the lid) and the grindstone
+        // (on_rightclick only rewrites meta.formspec) rely on the client opening
+        // the form; skipping it for rightclickable nodes meant they never opened.
         let hitId = client.world.nodeId(hit.under)
-        if !sneak, !client.nodes.isRightclickable(hitId), let fs = client.world.nodeFormspec(hit.under) {
+        if !sneak, let fs = client.world.nodeFormspec(hit.under) {
+            if client.nodes.isRightclickable(hitId) { client.sendInteract(action: 3, under: hit.under, above: hit.above) }
             formspecContext = hit.under
             openFormspec(fs, "")
             print("[place] open node formspec \(client.nodes.name(hitId)) at \(hit.under)"); fflush(stdout)
@@ -3295,7 +3343,13 @@ final class WorldSession {
     /// TOCLIENT_SHOW_FORMSPEC handler: an empty spec closes; otherwise parse the
     /// list[] elements and open the spatial panel over them.
     private func openFormspec(_ rawSpec0: String, _ name: String, inventory: Bool = false) {
-        if rawSpec0.isEmpty { closeFormspec(); return }
+        // An empty spec is a close request, but only for its own form: the
+        // engine quits the open menu only when the formname is empty or matches
+        // it, so a mod clearing its dialog can't shut a chest you have open.
+        if rawSpec0.isEmpty {
+            if name.isEmpty || name == formspecName { closeFormspec() }
+            return
+        }
         formspecIsInventory = inventory
         // The server's per-player formspec prepend carries the global stone
         // background9 panel + styles; Luanti prepends it to every formspec, so we
@@ -5331,12 +5385,14 @@ final class WorldSession {
                          empty: atlas.hungerEmptyLayer, into: &billboards)
     }
 
-    /// Air bubbles across the top-centre, only while the head is underwater.
-    /// Bubbles pop off from the right as breath drops (empty ones are hidden),
-    /// like Minecraft. breath is 0..20, 2 per bubble.
+    /// Air bubbles across the top-centre while breath is below full, the way
+    /// vl_hudbars shows its breath bar (autohide_breath): full bubbles don't
+    /// show just for being underwater, and the bar stays up after surfacing
+    /// while the server refills breath. Bubbles pop off from the right as
+    /// breath drops (empty ones are hidden). breath is 0..20, 2 per bubble.
     private func appendBreathHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
-        guard player.submerged() else { return }
+        guard breath < 20 else { return }
         let hudDist: Float = 1.35          // focal plane, was 1.7 (HUD P1)
         let size: Float = 0.05 * hudDist
         let elev: Float = 0.30            // above the gaze (top of view)

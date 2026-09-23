@@ -32,6 +32,7 @@ SCENES=(
   dig     "digTest:digtest"
   drop    "dropTest:droptest"
   award   "awardTest:awardtest"
+  station "stationTest:stationtest"
   torch   "torchTest:torchtest"
   fly     "flyTest:flytest"
   invpick "invPickTest:invpick"
@@ -40,7 +41,7 @@ SCENES=(
 )
 # Scenes that walk the player away from the platform origin (ice, sneak) or
 # teleport it elsewhere (igloo) go last, so the others start from a known spot.
-order=(fall bounce place eat bow dig drop award torch fly invpick bugnote ladder ice igloo sneak)
+order=(fall bounce place eat bow dig drop award station torch fly invpick bugnote ladder ice igloo sneak)
 want=("$@"); [[ ${#want} -eq 0 ]] && want=("${order[@]}")
 
 # Build + install once (sim.sh also boots the simulator and takes a smoke shot).

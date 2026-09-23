@@ -80,6 +80,46 @@ public enum WorldMesher {
         [plantQuad(rotDeg: 46, scale: scale, height: height), plantQuad(rotDeg: -44, scale: scale, height: height)]
     }
 
+    /// A tall rooted plant (kelp) as one quad pair per node of height, each
+    /// with its own UVs. The engine draws one quad with V running 0..height, so
+    /// the texture repeats once per node with its top at every whole node below
+    /// the plant's top; our world sampler clamps (repeat would bleed tile edges
+    /// on cubes), so we cut at those same boundaries instead. Returns
+    /// (corners, uvs) in plantQuad's corner order.
+    static func plantQuadsTallTiled(_ height: Float, scale: Float = 1) -> [([SIMD3<Float>], [SIMD2<Float>])] {
+        var out: [([SIMD3<Float>], [SIMD2<Float>])] = []
+        var top = height
+        while top > 1e-4 {
+            let seg = min(1, top), y0 = top - seg
+            let uvs = [SIMD2<Float>(0, seg), SIMD2(1, seg), SIMD2(1, 0), SIMD2(0, 0)]
+            for rot: Float in [46, -44] {
+                out.append((plantQuad(rotDeg: rot, scale: scale, height: seg, offset: SIMD3(0, y0 * scale, 0)), uvs))
+            }
+            top = y0
+        }
+        return out
+    }
+
+    /// drawPlantlikeQuad's wallmounted turn (amethyst buds/clusters): the quad
+    /// is built standing on the floor (DWM_YN) and rotated about the node
+    /// centre onto the ceiling or a wall. wm = param2 & 7 (0 YP, 1 YN, 2 XP,
+    /// 3 XN, 4 ZP, 5 ZN). Same irrlicht rotateXZ/XY/YZBy sense as the engine.
+    static func wallmountedPlant(_ p: SIMD3<Float>, _ wm: UInt8) -> SIMD3<Float> {
+        if wm == 1 || wm > 5 { return p }
+        func xz(_ v: SIMD3<Float>, _ d: Float) -> SIMD3<Float> { let r = d * .pi / 180, c = cos(r), s = sin(r); return SIMD3(v.x * c - v.z * s, v.y, v.x * s + v.z * c) }
+        func xy(_ v: SIMD3<Float>, _ d: Float) -> SIMD3<Float> { let r = d * .pi / 180, c = cos(r), s = sin(r); return SIMD3(v.x * c - v.y * s, v.x * s + v.y * c, v.z) }
+        func yz(_ v: SIMD3<Float>, _ d: Float) -> SIMD3<Float> { let r = d * .pi / 180, c = cos(r), s = sin(r); return SIMD3(v.x, v.y * c - v.z * s, v.y * s + v.z * c) }
+        var v = p - SIMD3(0.5, 0.5, 0.5)
+        switch wm {
+        case 0: v = xz(yz(v, 180), 180)
+        case 2: v = xy(v, 90)
+        case 3: v = yz(xy(v, -90), 180)
+        case 4: v = xy(yz(v, -90), 90)
+        default: v = xy(yz(v, 90), 90)      // 5: ZN
+        }
+        return v + SIMD3(0.5, 0.5, 0.5)
+    }
+
     // Firelike (NDT_FIRELIKE): flames lean outward on the floor and climb any
     // adjacent solid wall. Ported from Luanti's drawFirelikeNode/drawFirelikeQuad
     // (content_mapblock.cpp). Neighbour indices follow D6D: 0 +Z, 1 +Y, 2 +X,
@@ -911,6 +951,7 @@ public enum WorldMesher {
                     var rot: Float = 0
                     var off = SIMD3<Float>.zero
                     var randomY = false
+                    var wallPlant = false
                     let p2 = block.param2[nodeIdx]
                     switch ms.p2t(id) {
                     case 7:
@@ -922,6 +963,7 @@ public enum WorldMesher {
                             off.z = Float(rng.draw() % 16) / 16 * 0.29 - 0.145
                         }
                         randomY = p2 & 0x20 != 0
+                    case 4, 10: wallPlant = true   // wallmounted / colorwallmounted (amethyst buds)
                     case 6:  rot = 1.5 * Float(p2 % 240)
                     case 12: rot = 1.5 * Float(10 * ((p2 & 0x1F) % 24))
                     default: break
@@ -932,7 +974,8 @@ public enum WorldMesher {
                             var yrng = PseudoRandom(seed: UInt32(truncatingIfNeeded: qi | g.x << 16 | g.z << 8 | g.y << 24))
                             o.y = -Float(yrng.draw() % 16) / 16 * 0.125
                         }
-                        let quad = WorldMesher.plantQuad(rotDeg: q.rot + rot, scale: s, height: 1, offsetZ: q.off, topOnly: q.topOnly, offset: o)
+                        var quad = WorldMesher.plantQuad(rotDeg: q.rot + rot, scale: s, height: 1, offsetZ: q.off, topOnly: q.topOnly, offset: o)
+                        if wallPlant { quad = quad.map { WorldMesher.wallmountedPlant($0, p2 & 0x07) } }
                         // Smooth light per corner (engine blendLightColor on plants):
                         // the base of a flower in a shaded corner goes dark while its
                         // top still catches the sky. Glowing plants stay flat.
@@ -962,7 +1005,7 @@ public enum WorldMesher {
                         // param2 0 falls back to 1 so a plant is never invisible.
                         let raw = Float(block.param2[nodeIdx]) / 16.0
                         let h = ms.p2t(id) == 5 && raw > 0 ? raw : 1.0
-                        for q in WorldMesher.plantQuadsTall(h, scale: nodes.visualScale(id)) { emitQuad(q, base: up, layer: Float(sl), shade: 1.0, light: light, liquid: false, tint: tint) }
+                        for (q, uv) in WorldMesher.plantQuadsTallTiled(h, scale: nodes.visualScale(id)) { emitQuad(q, base: up, layer: Float(sl), shade: 1.0, light: light, liquid: false, tint: tint, uvs: uv) }
                     }
                 case .torch:
                     let layer = Float(atlas.layer(id: id, face: 0))
