@@ -12,10 +12,15 @@ final class ModelHandoff {
     // nearby terrain never buries it. Same vertex layout + model texture array.
     private var ov: [Float] = []
     private var oi: [UInt32] = []
+    // Translucent entity stream (use_texture_alpha mobs like slimes): drawn
+    // after the opaque models, blended, without writing depth.
+    private var bv: [Float] = []
+    private var bi: [UInt32] = []
     // Bumped on every post so the renderer (which runs at 90Hz vs the ~62.5Hz
     // producer) can skip re-uploading unchanged geometry (#163).
     private var gen = 0
-    func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = []) {
+    func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = [],
+              blendVerts: [Float] = [], blendIndices: [UInt32] = []) {
         lock.lock()
         // Only bump gen when the bytes actually changed, so the 90Hz renderer
         // skips re-uploading identical geometry on idle frames (standing still,
@@ -28,13 +33,15 @@ final class ModelHandoff {
             a.count == b.count && (a.isEmpty || a.withUnsafeBytes { pa in b.withUnsafeBytes { pb in
                 memcmp(pa.baseAddress!, pb.baseAddress!, pa.count) == 0 } })
         }
-        if !same(verts, v) || !same(indices, i) || !same(overlayVerts, ov) || !same(overlayIndices, oi) {
-            v = verts; i = indices; ov = overlayVerts; oi = overlayIndices; gen &+= 1
+        if !same(verts, v) || !same(indices, i) || !same(overlayVerts, ov) || !same(overlayIndices, oi)
+            || !same(blendVerts, bv) || !same(blendIndices, bi) {
+            v = verts; i = indices; ov = overlayVerts; oi = overlayIndices; bv = blendVerts; bi = blendIndices; gen &+= 1
         }
         lock.unlock()
     }
     func read() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, v, i) }
     func readOverlay() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, ov, oi) }
+    func readBlend() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, bv, bi) }
 }
 
 /// One full-res model texture, placed into a fixed-size layer of a texture

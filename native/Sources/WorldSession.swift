@@ -5221,6 +5221,7 @@ final class WorldSession {
         var billboards: [EntityInstance] = []
         var mv: [Float] = []; var mi: [UInt32] = []
         mv.reserveCapacity(lastModelVerts); mi.reserveCapacity(lastModelIdx)
+        var bv: [Float] = []; var bi: [UInt32] = []   // use_texture_alpha mobs (blended pass)
         // Nametags to draw this frame (emitted into the overlay stream below,
         // which is declared after this loop).
         var nametagJobs: [(pos: SIMD3<Float>, text: String, color: UInt32)] = []
@@ -5341,8 +5342,11 @@ final class WorldSession {
             if e.visual == "mesh", !e.textures.isEmpty,
                let mesh = model(for: e.mesh), simd_distance(e.pos, s.feet) < mobRenderDist {
                 let pm0 = perf.now()
-                let drew = appendModel(mesh, entity: e, eye: eye, cosY: cy, sinY: sy,
-                                       playerYaw: s.yaw, light: light, tint: tint, v: &mv, idx: &mi)
+                let drew = e.useTextureAlpha
+                    ? appendModel(mesh, entity: e, eye: eye, cosY: cy, sinY: sy,
+                                  playerYaw: s.yaw, light: light, tint: tint, v: &bv, idx: &bi)
+                    : appendModel(mesh, entity: e, eye: eye, cosY: cy, sinY: sy,
+                                  playerYaw: s.yaw, light: light, tint: tint, v: &mv, idx: &mi)
                 perf.add("e.model", pm0, perf.now())
                 if drew {
                     modelsDrawn += 1
@@ -5595,7 +5599,7 @@ final class WorldSession {
         entityHandoff.post(world: worldB, hud: hudB)
         postHandHud()
         lastModelVerts = mv.count; lastModelIdx = mi.count   // seed next tick's reserve (#162)
-        modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi)
+        modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi)
         if !doorDebugDone, !client.nodes.allNames().isEmpty {
             doorDebugDone = true
             // Only the wooden door + a fence gate: enough to see box geometry

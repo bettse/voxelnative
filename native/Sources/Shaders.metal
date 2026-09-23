@@ -259,6 +259,26 @@ fragment float4 entityFragment(ColorInOut in [[stage_in]],
     return float4(applyFog(lit, in.fogDist, uniforms), 1.0);
 }
 
+// use_texture_alpha entities (slimes): entityFragment's lighting and tint, but
+// the texture's own alpha is kept and blended instead of cut out at 0.5.
+fragment float4 entityBlendFragment(ColorInOut in [[stage_in]],
+                                    constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
+                                    texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+{
+    constexpr sampler s(mag_filter::nearest, min_filter::nearest);
+    half4 c = atlas.sample(s, in.uv, in.layer);
+    if (c.a < 0.02h) { discard_fragment(); }
+    half3 rgb = c.rgb / c.a;
+    half3 tintRGB = in.tint;
+    bool grey = abs(tintRGB.r - tintRGB.g) < 0.02h && abs(tintRGB.g - tintRGB.b) < 0.02h;
+    half str = (grey || all(tintRGB > half3(0.99h))) ? 0.0h : 0.7h;
+    rgb = grey ? rgb * tintRGB : mix(rgb, tintRGB, str);
+    float3 lit = float3(rgb) * in.shade * in.lit;
+    float luma = dot(lit, float3(0.213, 0.715, 0.072));
+    lit = mix(float3(luma), lit, uniforms.saturation);
+    return float4(applyFog(lit, in.fogDist, uniforms), float(c.a));
+}
+
 // Glass backing plate behind the head-locked vitals (HUD layout B, P4): a soft-
 // edged dark translucent panel so the icons have consistent contrast in any
 // scene (kills glare on snow, grounds them in dark caves) instead of floating

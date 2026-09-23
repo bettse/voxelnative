@@ -204,6 +204,10 @@ actor Renderer {
     var modelVertexBuffer: MTLBuffer
     var modelIndexBuffer: MTLBuffer
     var modelIndexCount: Int = 0
+    var modelBlendVertexBuffer: MTLBuffer
+    var modelBlendIndexBuffer: MTLBuffer
+    var modelBlendIndexCount: Int = 0
+    var entityBlendPipelineState: MTLRenderPipelineState
     var overlayVertexBuffer: MTLBuffer
     var overlayIndexBuffer: MTLBuffer
     var overlayIndexCount: Int = 0
@@ -366,6 +370,11 @@ actor Renderer {
                                                                mtlVertexDescriptor: mtlVertexDescriptor)
         } catch { fatalError("Unable to compile entity pipeline: \(error)") }
         do {
+            entityBlendPipelineState = try Self.buildGlassPipeline(device: device, layerRenderer: layerRenderer,
+                                                                   mtlVertexDescriptor: mtlVertexDescriptor,
+                                                                   fragment: "entityBlendFragment", label: "EntityBlendPipeline")
+        } catch { fatalError("Unable to compile entity blend pipeline: \(error)") }
+        do {
             hudGlassPipelineState = try Self.buildGlassPipeline(device: device, layerRenderer: layerRenderer,
                                                                mtlVertexDescriptor: mtlVertexDescriptor)
         } catch { fatalError("Unable to compile glass pipeline: \(error)") }
@@ -388,6 +397,8 @@ actor Renderer {
         handVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
         handIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
         modelVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
+        modelBlendVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
+        modelBlendIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
         modelIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
         overlayVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
         overlayIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
@@ -1147,13 +1158,16 @@ actor Renderer {
 
     // The vitals glass backing: entityVertex (head-locked quad) + glassFragment,
     // alpha-blended so the panel is translucent over the world (HUD layout B).
+    // Also the translucent entity pass (entityBlendFragment): same vertex
+    // stage and blend state, different fragment.
     static func buildGlassPipeline(device: MTLDevice, layerRenderer: LayerRenderer,
-                                   mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
+                                   mtlVertexDescriptor: MTLVertexDescriptor,
+                                   fragment: String = "glassFragment", label: String = "GlassPipeline") throws -> MTLRenderPipelineState {
         let library = device.makeDefaultLibrary()
         let desc = MTLRenderPipelineDescriptor()
-        desc.label = "GlassPipeline"
+        desc.label = label
         desc.vertexFunction = library?.makeFunction(name: "entityVertex")
-        desc.fragmentFunction = library?.makeFunction(name: "glassFragment")
+        desc.fragmentFunction = library?.makeFunction(name: fragment)
         desc.vertexDescriptor = mtlVertexDescriptor
         desc.rasterSampleCount = device.rasterSampleCount
         desc.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
@@ -1551,6 +1565,13 @@ actor Renderer {
         let (gen, v, idx) = appModel.modelHandoff.read()
         if gen == lastModelGen { return }   // producer hasn't posted new geometry; keep the buffers
         lastModelGen = gen
+        let (_, bv, bi) = appModel.modelHandoff.readBlend()
+        modelBlendIndexCount = 0
+        if !bi.isEmpty {
+            upload(bv, into: &modelBlendVertexBuffer)
+            upload(bi, into: &modelBlendIndexBuffer)
+            modelBlendIndexCount = bi.count
+        }
         guard !idx.isEmpty else { modelIndexCount = 0; return }
         upload(v, into: &modelVertexBuffer)
         upload(idx, into: &modelIndexBuffer)
@@ -2055,6 +2076,16 @@ actor Renderer {
                                                 indexType: .uint32,
                                                 indexBuffer: modelIndexBuffer,
                                                 indexBufferOffset: 0)
+        }
+        // use_texture_alpha mobs (slimes): blended over what's behind them,
+        // depth-tested but not written, like the engine's blended material.
+        if modelBlendIndexCount > 0, let mtex = modelTextureArray {
+            renderEncoder.setRenderPipelineState(entityBlendPipelineState)
+            renderEncoder.setDepthStencilState(liquidDepthState)
+            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            renderEncoder.setVertexBuffer(modelBlendVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
+            renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: modelBlendIndexCount,
+                                                indexType: .uint32, indexBuffer: modelBlendIndexBuffer, indexBufferOffset: 0)
         }
 
         // Underwater tint: last, so it casts the whole view (world, entities,

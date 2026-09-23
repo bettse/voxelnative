@@ -108,6 +108,10 @@ public final class ActiveObjects {
         /// armor_groups.immortal: punches do no damage, so no hit flash
         /// (content_cao.cpp directReportPunch flashes only on damage != 0).
         public var immortal = false
+        /// ObjectProperties.use_texture_alpha: the engine draws these with a
+        /// blended material (content_cao.cpp), so a slime's 194/255 shell shows
+        /// its core and face instead of an opaque green box.
+        public var useTextureAlpha = false
         // From ObjectProperties: the floating name over the object, and the
         // texture modifier the engine overlays briefly when it takes damage.
         public var nametag: String = ""
@@ -461,7 +465,7 @@ public final class ActiveObjects {
         _ = r.u16()                       // breath_max
         if !r.overrun { o.eyeHeight = r.f32() }   // eye_height (nodes)
         _ = r.f32()                       // zoom_fov
-        _ = r.u8()                        // use_texture_alpha
+        o.useTextureAlpha = r.u8() != 0   // use_texture_alpha: blended, not cut out (slimes)
         o.damageTexMod = r.string16()
         // (shaded, show_on_minimap, nametag_bgcolor and later fields: not needed)
     }
