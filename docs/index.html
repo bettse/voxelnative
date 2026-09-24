@@ -104,7 +104,7 @@
   <div class="wrap">
     <h2>What it is</h2>
     <p class="lead-dim">A from-scratch Swift + Metal reimplementation of the Luanti network client. Not the engine ported, not a stream: a new client that talks the same wire protocol.</p>
-    <p class="lead-dim">It speaks the Luanti UDP protocol directly: SRP login, zstd map-block streaming, node and item definitions, media download, entities, formspecs, HUD. An unmodified server sees it as just another client and hands over the whole game. The world is rendered per-eye with Compositor Services, meshed live as blocks stream in, and you walk around, dig, place, and open inventories with the PSVR2 Sense controllers (or a Bluetooth keyboard and mouse).</p>
+    <p class="lead-dim">It speaks the Luanti UDP protocol directly: SRP login, zstd map-block streaming, node and item definitions, media download, entities, formspecs, HUD. An unmodified server sees it as just another client and hands over the whole game. The world is rendered per-eye with Compositor Services, meshed live as blocks stream in, and you walk around, dig, place, and open inventories with the PSVR2 Sense controllers (or a Bluetooth keyboard, with gaze to aim and a pinch to click).</p>
     <p class="lead-dim">It connects to any Luanti server. I build and test it against <a href="https://git.minetest.land/VoxeLibre/VoxeLibre">VoxeLibre</a> (the Minecraft-ish flagship game), so that's where the polish is, but the protocol layer doesn't care which game you run.</p>
   </div>
 </section>
@@ -116,7 +116,7 @@
       <li><b>Live world streaming</b> and meshing: cubes, nodeboxes, plants, meshes (chests, beds), rails, liquids, glass, with day/night sky and fog.</li>
       <li><b>Per-eye rendering</b> through Compositor Services, with reprojection, not a flat window in space.</li>
       <li><b>Dig, place, and craft</b>: tool capabilities and wear, chests, furnaces, anvils, and other station formspecs shown as spatial panels you point at.</li>
-      <li><b>PSVR2 Sense controllers</b> for locomotion, look, and interaction (keyboard + mouse also work).</li>
+      <li><b>PSVR2 Sense controllers</b> for locomotion, look, and interaction (a Bluetooth keyboard with gaze and pinch also works).</li>
       <li><b>Entities</b>: mobs, dropped items, projectiles, XP orbs, nametags, with animation and bone attachments.</li>
       <li><b>Positional audio</b> as real 3D sources (HRTF), matching Luanti's OpenAL setup.</li>
       <li>Plus the smaller stuff: particles, weather, damage feedback, armor, status effects, the experience bar.</li>

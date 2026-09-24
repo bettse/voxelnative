@@ -20,7 +20,8 @@ but the protocol layer is game-agnostic and will connect to any Luanti server.
 
 The client renders the real world in stereo with Compositor Services, streams
 and meshes live map blocks, and lets you walk around, dig, place, and poke at
-inventories using the PSVR2 Sense controllers (or a BLE keyboard and mouse).
+inventories using the PSVR2 Sense controllers (or a Bluetooth keyboard plus
+gaze and pinch).
 
 ## 🚀 Why a whole new client
 
@@ -63,8 +64,9 @@ map, and renders it live in the headset. Highlights:
   sneaking, swimming, climbing ladders/climbables, and collision against real
   node collision boxes.
 - 🖐️ **Input**: PSVR2 Sense controllers (6DoF, sticks, triggers, grips,
-  buttons, and haptic feedback on dig/hit/damage where the controller supports it), with a BLE keyboard and BLE mouse/trackpad as
-  alternatives.
+  buttons, and haptic feedback on dig/hit/damage where the controller supports it). A Bluetooth
+  keyboard works as the alternative, using desktop Luanti's keys, with gaze to aim and a pinch to
+  click. Mice and trackpads don't reach a fully immersive app on visionOS, so they aren't supported.
 
 Still a work in progress and rough in places, but the core loop of joining a
 server and playing is real. 🛠️
@@ -146,8 +148,8 @@ what streamed in. It's a separate package target and isn't part of the app.
 - 🥽 Apple Vision Pro running visionOS 26+ (the app targets visionOS 26).
 - 🖥️ A Mac with Xcode 26 and `xcodegen` for building and deploying.
 - 🌐 A reachable Luanti / VoxeLibre server (a local dev server works great).
-- 🎮 Optional: PSVR2 Sense controllers for the best experience. A BLE keyboard
-  and mouse also work.
+- 🎮 Optional: PSVR2 Sense controllers for the best experience. A Bluetooth
+  keyboard also works (gaze aims, pinch clicks); mice and trackpads don't.
 
 ## 🔗 Key references
 
