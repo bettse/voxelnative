@@ -1891,6 +1891,7 @@ actor Renderer {
             modelBlendVertexBuffer, modelBlendIndexBuffer,
             pointerVertexBuffer, pointerIndexBuffer,
         ]
+        if #available(visionOS 26.0, *) { perFrame.append(contentsOf: drawable.trackingAreasTextures as [any MTLAllocation]) }
         if let tex = textureArray { perFrame.append(tex) }
         if let mtex = modelTextureArray { perFrame.append(mtex) }
         if capture { ensureCaptureTexture(like: drawable.colorTextures[0]); if let ct = captureTexture { perFrame.append(ct) } }
@@ -2231,8 +2232,32 @@ actor Renderer {
             }
         }
 
+        encodeTrackingArea(drawable, commandBuffer: commandBuffer)
         drawable.encodePresent(commandBuffer: commandBuffer)
 
+    }
+
+    /// Mark the whole view as one tracking area. visionOS 26 hit-tests look-and-
+    /// pinch and trackpad pointer input against the tracking areas a Metal
+    /// immersive app draws (drawable.h: "tracking areas ID used for hover
+    /// effects and indirect gestures"). With none drawn, onSpatialEvent never
+    /// fired and a paired trackpad did nothing in game. Clearing the tracking
+    /// texture to one area's value covers every pixel; no geometry needed.
+    private func encodeTrackingArea(_ drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer) {
+        guard #available(visionOS 26.0, *) else { return }
+        let textures = drawable.trackingAreasTextures
+        guard !textures.isEmpty else { return }
+        let area = drawable.addTrackingArea(identifier: LayerRenderer.Drawable.TrackingArea.Identifier(1))
+        let value = Double(area.renderValue.rawValue)
+        for tex in textures {
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = tex
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].storeAction = .store
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: value, green: 0, blue: 0, alpha: 0)
+            if tex.textureType == .type2DArray { pass.renderTargetArrayLength = tex.arrayLength }
+            commandBuffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        }
     }
 
     func renderLoop() {

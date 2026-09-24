@@ -30,6 +30,17 @@ extension ImmersiveSpaceContent: CompositorLayerConfiguration {
             foveationEnabled ? [.foveationEnabled] : []
         let supportedLayouts = capabilities.supportedLayouts(options: options)
         configuration.layout = supportedLayouts.contains(.layered) ? .layered : .dedicated
+        // Tracking areas: visionOS 26 delivers look-and-pinch and trackpad
+        // pointer input only over tracking areas the app draws (the renderer
+        // clears one area over the whole view each frame). Integer format, the
+        // smallest one offered.
+        if #available(visionOS 26.0, *) {
+            let formats = capabilities.supportedTrackingAreasFormats
+            if let f = [MTLPixelFormat.r8Uint, .r16Uint].first(where: formats.contains) ?? formats.first {
+                configuration.trackingAreasFormat = f
+            }
+            print("[input] tracking area formats=\(formats.map(\.rawValue)) chosen=\(configuration.trackingAreasFormat.rawValue)"); fflush(stdout)
+        }
     }
 }
 
