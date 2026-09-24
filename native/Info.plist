@@ -40,6 +40,14 @@
         </dict>
     </array>
     <key>GCSupportsControllerUserInteraction</key><true/>
+    <!-- Playing needs PSVR2 Sense controllers or a Bluetooth keyboard: hands
+         alone can aim and pinch but can't walk. This marks the app as
+         controller-required on visionOS (App Store badge), and depends on
+         the two keys above. -->
+    <key>GCRequiresControllerUserInteraction</key>
+    <dict>
+        <key>visionOS</key><true/>
+    </dict>
     <!-- Boot into the 2D window (the launcher / login), not the immersive
          space. The immersive world opens only when the app calls
          openImmersiveSpace after Connect; its style is set in App.swift. -->
