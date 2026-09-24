@@ -44,7 +44,6 @@ final class GameInput {
         var lookYaw: Float = 0  // MOUSE X: a direct yaw delta (radians) this frame
         // Keyboard-only actions (desktop Luanti keys with no controller button):
         var drop = false        // Q: drop the wielded stack (sneak held: one item)
-        var chat = false        // T: open chat
         var hotbarSlot = -1     // 1-9: select that hotbar slot (-1 = none)
         var enterPrimary = false   // Enter: left-click the gazed panel slot or keyboard key (take / put all)
         var enterSecondary = false // Shift+Enter: right-click it (put one)
@@ -343,7 +342,7 @@ final class GameInput {
             if tn != 0 { s.turn = tn }
             // Desktop Luanti's default keys (defaultsettings.cpp), so desktop
             // habits carry over: E is aux1 (VoxeLibre sprint), I the inventory,
-            // Q drop, T chat, 1-9 / B / N the hotbar. F and R dig and place (a
+            // Q drop, 1-9 / B / N the hotbar (no T: the app has no chat). F and R dig and place (a
             // look-and-pinch also digs, via PointerInput; no route right-click
             // places), Left Control sprints too, and [ ] still step the hotbar.
             let shift = k(.leftShift) || k(.rightShift)
@@ -354,7 +353,6 @@ final class GameInput {
             if k(.keyR)         { s.place = true }       // place / use
             if k(.keyI)         { s.inventory = true }   // toggle inventory
             if k(.keyQ)         { s.drop = true }
-            if k(.keyT)         { s.chat = true }
             // Esc opens/closes the Kogane menu (the keyboard has no right X) and
             // still cancels: it closes the inventory or the text keyboard first.
             if k(.escape)       { s.escape = true; s.cancel = true; s.koganeMenu = true }

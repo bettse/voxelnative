@@ -136,7 +136,7 @@ final class WorldSession {
     // confused more than helped) (#240). Stored, not computed: it was read per
     // option per tick while the menu was open, rebuilding the array each time.
     private let koganeOptions: [String] = {
-        var o = ["Resume", "Chat", "Exit to menu", "Quit game"]
+        var o = ["Resume", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
         if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 2) }
         return o
     }()
@@ -672,7 +672,15 @@ final class WorldSession {
             self.openFormspec(spec, "", inventory: true)
             self.invHeld = held
         }
-        client.onChat = { [weak self] _, sender, text in self?.addChat(sender: sender, text: text) }
+        // Chat from the server (other players, system and death messages) is
+        // not shown or kept: no chat in the app means no user-generated content
+        // to moderate (App Store 1.2). The sim still logs it, because the test
+        // scenes drive the dev server with chat commands and read the replies.
+        client.onChat = { _, sender, text in
+            #if targetEnvironment(simulator)
+            print("[chat] \(sender.isEmpty ? "" : sender + ": ")\(text)"); fflush(stdout)
+            #endif
+        }
         client.onSky = { [weak self] s in
             #if targetEnvironment(simulator)
             // -vrdev.fakeSkybox: mcl_weather re-sends the overworld sky every
@@ -2316,15 +2324,10 @@ final class WorldSession {
         // desktop (Esc only opens the Kogane menu once nothing else is up).
         if gi.cancel && !prevCancel, inventoryOpen, !keyboardOpen { toggleInventory() }
         prevCancel = gi.cancel
-        // Q drops the wielded stack (Shift+Q one item), T opens chat: desktop
-        // keys with no controller button. Not while a panel or keyboard is up.
-        if !inventoryOpen, !keyboardOpen {
-            if gi.drop && !prevDropKey { dropWielded(single: gi.sneak) }
-            if gi.chat && !prevChatKey {
-                openKeyboard(prefill: "") { [weak self] t in self?.client.sendChat(t) }
-            }
-        }
-        prevDropKey = gi.drop; prevChatKey = gi.chat
+        // Q drops the wielded stack (Shift+Q one item), a desktop key with no
+        // controller button. Not while a panel or keyboard is up.
+        if !inventoryOpen, !keyboardOpen, gi.drop && !prevDropKey { dropWielded(single: gi.sneak) }
+        prevDropKey = gi.drop
         if gi.dismissChat && !prevDismissChat { dismissChat() }
         prevDismissChat = gi.dismissChat
         var move = gi.move
@@ -2869,9 +2872,6 @@ final class WorldSession {
         // everything else closes it.
         let opt = koganeSel >= 0 && koganeSel < koganeOptions.count ? koganeOptions[koganeSel] : "Resume"
         switch opt {
-        case "Chat":
-            koganeMenuOpen = false
-            openKeyboard(prefill: "") { [weak self] t in self?.client.sendChat(t) }
         case "Bug note":
             koganeMenuOpen = false
             screenshotFlag.request()               // capture the bug as seen, before the keyboard covers it
@@ -3523,7 +3523,7 @@ final class WorldSession {
     private func panelClicks(_ gi: GameInput.State) -> (primary: Bool, secondary: Bool) {
         (gi.dig || gi.enterPrimary, gi.place || gi.enterSecondary)
     }
-    private var prevHotbarSlot = -1, prevCancel = false, prevDropKey = false, prevChatKey = false
+    private var prevHotbarSlot = -1, prevCancel = false, prevDropKey = false
     private static let invCell: Float = 0.054, invPitch: Float = 0.062   // metres (1 node = 1 m); ~0.8 m wide panel
 
     private func inventoryStack(_ s: InvSlot) -> Client.ItemStack? {
