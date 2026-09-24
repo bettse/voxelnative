@@ -2003,6 +2003,11 @@ final class WorldSession {
         if gi.hotbarNext && !prevHotbarNext { client.setWieldIndex((client.wieldIndex + 1) % hb); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout) }
         if gi.hotbarPrev && !prevHotbarPrev { client.setWieldIndex((client.wieldIndex + hb - 1) % hb); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout) }
         prevHotbarNext = gi.hotbarNext; prevHotbarPrev = gi.hotbarPrev
+        // Keyboard 1-9 picks a hotbar slot directly, like desktop.
+        if gi.hotbarSlot >= 0, gi.hotbarSlot != prevHotbarSlot, gi.hotbarSlot < hb {
+            client.setWieldIndex(gi.hotbarSlot); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout)
+        }
+        prevHotbarSlot = gi.hotbarSlot
         // Sim-only: -vrdev.openInventory 1 opens the panel a few seconds in, so
         // its layout can be screenshotted without a controller. The whole aid
         // block is simulator-only: on device it was 14 UserDefaults reads per
@@ -2307,6 +2312,19 @@ final class WorldSession {
         #endif
         if gi.inventory && !prevInventory { toggleInventory() }
         prevInventory = gi.inventory
+        // Esc closes an open inventory or container, like desktop (the Kogane
+        // menu only opens from Esc once nothing else is up).
+        if gi.menu && !prevMenuKey, inventoryOpen, !keyboardOpen { toggleInventory() }
+        prevMenuKey = gi.menu
+        // Q drops the wielded stack (Shift+Q one item), T opens chat: desktop
+        // keys with no controller button. Not while a panel or keyboard is up.
+        if !inventoryOpen, !keyboardOpen {
+            if gi.drop && !prevDropKey { dropWielded(single: gi.sneak) }
+            if gi.chat && !prevChatKey {
+                openKeyboard(prefill: "") { [weak self] t in self?.client.sendChat(t) }
+            }
+        }
+        prevDropKey = gi.drop; prevChatKey = gi.chat
         if gi.dismissChat && !prevDismissChat { dismissChat() }
         prevDismissChat = gi.dismissChat
         var move = gi.move
@@ -3494,6 +3512,7 @@ final class WorldSession {
     private var invCountLayers: [Int: Int] = [:]                          // count -> model-texture layer
     private var invTileCache: [String: String?] = [:]                     // item name -> atlas tile
     private var invPrevDig = false, invPrevPlace = false
+    private var prevHotbarSlot = -1, prevMenuKey = false, prevDropKey = false, prevChatKey = false
     private static let invCell: Float = 0.054, invPitch: Float = 0.062   // metres (1 node = 1 m); ~0.8 m wide panel
 
     private func inventoryStack(_ s: InvSlot) -> Client.ItemStack? {
@@ -4078,8 +4097,11 @@ final class WorldSession {
         // by forcing the hovered slot (#81). overPanel true so a release stays put.
         if let ov = simInvHoverOverride { invHover = (ov >= 0 && ov < invSlots.count) ? ov : nil; overPanel = true }
         #endif
-        let primary = gi.dig && !invPrevDig, secondary = gi.place && !invPrevPlace
-        invPrevDig = gi.dig; invPrevPlace = gi.place
+        // Keyboard Enter / Shift+Enter click the gazed slot like the trigger /
+        // grip (take or put the whole stack / put one).
+        let take = gi.dig || gi.panelTake, one = gi.place || gi.panelOne
+        let primary = take && !invPrevDig, secondary = one && !invPrevPlace
+        invPrevDig = take; invPrevPlace = one
         guard primary || secondary else { return }
         // Tap an info-form tab caption or textlist row (achievements/Help): submit
         // the field so the server re-sends the form on that tab / with that entry

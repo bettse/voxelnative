@@ -10,6 +10,9 @@ struct ImmersiveSpaceContent: CompositorContent {
             print("CompositorLayer closure: starting render loop"); fflush(stdout)
             appModel.observeLifecycle()   // clean disconnect/reconnect on app leave/return
             appModel.startSession()   // auto-connect + stream
+            // Trackpad/mouse clicks reach an immersive space as spatial events,
+            // not GCMouse; route them to the game input.
+            layerRenderer.onSpatialEvent = { events in PointerInput.shared.handle(events) }
             Renderer.startRenderLoop(layerRenderer, appModel: appModel, arSession: ARKitSession())
         }
     }

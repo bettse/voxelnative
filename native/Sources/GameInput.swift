@@ -1,5 +1,6 @@
 import Foundation
 import GameController
+import SwiftUI
 import CoreHaptics
 import simd
 
@@ -42,6 +43,12 @@ final class GameInput {
         var menuNavY: Float = 0 // EITHER stick Y, for menu navigation
         var menuSelect = false  // EITHER trigger, for menu confirm
         var lookYaw: Float = 0  // MOUSE X: a direct yaw delta (radians) this frame
+        // Keyboard-only actions (desktop Luanti keys with no controller button):
+        var drop = false        // Q: drop the wielded stack (sneak held: one item)
+        var chat = false        // T: open chat
+        var hotbarSlot = -1     // 1-9: select that hotbar slot (-1 = none)
+        var panelTake = false   // Enter in a panel: left-click the gazed slot (take / put all)
+        var panelOne = false    // Shift+Enter in a panel: right-click it (put one)
     }
 
     private(set) var connected = false
@@ -341,18 +348,31 @@ final class GameInput {
             if mx != 0 { s.move.x = mx }
             if my != 0 { s.move.y = my; s.menuNavY = my }
             if tn != 0 { s.turn = tn }
+            // Desktop Luanti's default keys (defaultsettings.cpp), so desktop
+            // habits carry over: E is aux1 (VoxeLibre sprint), I the inventory,
+            // Q drop, T chat, 1-9 / B / N the hotbar. F and R stand in for the
+            // mouse buttons (the trackpad doesn't reach the game), Left Control
+            // sprints too, and [ ] still step the hotbar.
+            let shift = k(.leftShift) || k(.rightShift)
             if k(.spacebar)     { s.jump = true }
-            if k(.leftShift)    { s.sneak = true }
-            if k(.leftControl)  { s.fast = true }       // sprint (mcl_sprint aux1)
+            if shift            { s.sneak = true }
+            if k(.keyE) || k(.leftControl) { s.fast = true }
             if k(.keyF)         { s.dig = true }         // attack / mine (gaze-aimed)
             if k(.keyR)         { s.place = true }       // place / use
-            if k(.keyE)         { s.inventory = true }   // toggle inventory
+            if k(.keyI)         { s.inventory = true }   // toggle inventory
+            if k(.keyQ)         { s.drop = true }
+            if k(.keyT)         { s.chat = true }
             // Esc opens/closes the Kogane menu (the keyboard has no right X) and
             // still cancels: it closes the inventory or the text keyboard first.
             if k(.escape)       { s.menu = true; s.koganeMenu = true }
-            if k(.openBracket)  { s.hotbarPrev = true }  // [ prev slot
-            if k(.closeBracket) { s.hotbarNext = true }  // ] next slot
+            if k(.openBracket) || k(.keyB)  { s.hotbarPrev = true }
+            if k(.closeBracket) || k(.keyN) { s.hotbarNext = true }
+            let digits: [GCKeyCode] = [.one, .two, .three, .four, .five, .six, .seven, .eight, .nine]
+            if let n = digits.firstIndex(where: { k($0) }) { s.hotbarSlot = n }
             if k(.keyF) || k(.returnOrEnter) { s.menuSelect = true }  // confirm in menus
+            // Enter clicks the gazed inventory slot: plain = take / put the whole
+            // stack, Shift = put one (desktop's left / right click).
+            if k(.returnOrEnter) { if shift { s.panelOne = true } else { s.panelTake = true } }
             keyboardPresent = true
         } else {
             keyboardPresent = false
@@ -375,6 +395,46 @@ final class GameInput {
         } else {
             mousePresent = false
         }
+        // Trackpad clicks that arrive as spatial pointer events (the route
+        // visionOS actually uses in an immersive space) dig / confirm too.
+        if PointerInput.shared.take() { s.dig = true; s.menuSelect = true }
         return s
+    }
+}
+
+/// Trackpad/mouse clicks as visionOS delivers them to a full immersive space:
+/// as spatial events on the LayerRenderer (kind .pointer), not through
+/// GCMouse, which never fired for Eric's keyboard trackpad. The renderer's
+/// onSpatialEvent writes here; GameInput.poll reads it like a mouse button.
+final class PointerInput: @unchecked Sendable {
+    static let shared = PointerInput()
+    private let lock = NSLock()
+    private var down = false, clicked = false
+    private var seenKinds = Set<String>()
+
+    /// Called on the main actor from LayerRenderer.onSpatialEvent.
+    func handle(_ events: SpatialEventCollection) {
+        for e in events {
+            let kind = "\(e.kind)"
+            lock.lock()
+            let first = seenKinds.insert(kind).inserted
+            lock.unlock()
+            if first { print("[input] first spatial event kind=\(kind) phase=\(e.phase)"); fflush(stdout) }
+            guard e.kind == .pointer else { continue }
+            lock.lock()
+            switch e.phase {
+            case .active: down = true; clicked = true
+            default: down = false
+            }
+            lock.unlock()
+        }
+    }
+
+    /// Held, or clicked since the last read (a quick tap still counts once).
+    func take() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let v = down || clicked
+        clicked = false
+        return v
     }
 }
