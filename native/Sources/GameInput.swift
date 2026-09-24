@@ -420,13 +420,18 @@ final class PointerInput: @unchecked Sendable {
             let first = seenKinds.insert(kind).inserted
             lock.unlock()
             if first { print("[input] first spatial event kind=\(kind) phase=\(e.phase)"); fflush(stdout) }
-            guard e.kind == .pointer else { continue }
+            // Look-and-pinch (indirectPinch) and a trackpad/mouse pointer both
+            // click the gazed thing. A pinch is how a keyboard-only player selects
+            // without a free key, and a trackpad click may arrive as either kind.
+            guard e.kind == .pointer || e.kind == .indirectPinch else { continue }
             lock.lock()
+            let began = !down && e.phase == .active
             switch e.phase {
             case .active: down = true; clicked = true
             default: down = false
             }
             lock.unlock()
+            if began { print("[input] press kind=\(kind)"); fflush(stdout) }
         }
     }
 

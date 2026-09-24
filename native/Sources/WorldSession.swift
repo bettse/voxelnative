@@ -2849,6 +2849,13 @@ final class WorldSession {
             return true
         }
         prevKoganeNav = 0
+        // Esc (keyboard: menu + koganeMenu together) clears chat / the join
+        // message first when any is showing; the next Esc opens the menu. The
+        // controller's X (koganeMenu alone) opens it as before.
+        if menuBtnEdge, gi.menu, !inventoryOpen, chatVisible {
+            dismissChat()
+            return false
+        }
         if (koganeFocused && triggerEdge) || (menuBtnEdge && !inventoryOpen) {
             koganeMenuOpen = true; koganeSel = 0; koganeOpenCooldown = 0.6
             gi.dig = false                            // open the menu instead of digging
@@ -7586,6 +7593,9 @@ final class WorldSession {
     private func dismissChat() {
         for i in chatRing.indices { chatRing[i].born = -1e9 }
     }
+    /// Seconds a chat line (join message / MOTD included) stays up.
+    private static let chatLife: Double = 9
+    private var chatVisible: Bool { chatRing.contains { chatClock - $0.born < Self.chatLife } }
 
     private func addChat(sender: String, text: String) {
         let line = sender.isEmpty ? text : "\(sender): \(text)"
@@ -7654,7 +7664,7 @@ final class WorldSession {
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
         let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
         let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
-        let life: Double = 9
+        let life = Self.chatLife
         // Most-recent last: order by born so newer sits on top of the stack.
         let active = (0..<Self.chatSlots)
             .filter { chatClock - chatRing[$0].born < life }
