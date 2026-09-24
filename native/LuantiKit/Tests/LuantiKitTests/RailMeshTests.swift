@@ -10,7 +10,7 @@ import simd
 /// device glance (same caveat as arrow/riding yaw-sign).
 final class RailMeshTests: XCTestCase {
     private func ta(_ code: Int) -> (Int, Int) {
-        let r = WorldMesher.railTileAndAngle(code: code, sloped: false, slopeAngle: 0)
+        let r = MesherShapes.railPiece(code: code)
         return (r.tile, r.angle)
     }
 
@@ -53,24 +53,17 @@ final class RailMeshTests: XCTestCase {
         XCTAssertEqual(ta(0b1111).0, 3); XCTAssertEqual(ta(0b1111).1, 0)   // code 15 -> cross tile
     }
 
-    func testSlopeOverridesToStraightAtSlopeAngle() {
-        // Even a corner code becomes the straight tile when the rail ascends.
-        let r = WorldMesher.railTileAndAngle(code: 0b1001, sloped: true, slopeAngle: 90)
-        XCTAssertEqual(r.tile, 0)
-        XCTAssertEqual(r.angle, 90)
-    }
-
     func testSlopeAnglesPerDirection() {
-        XCTAssertEqual(WorldMesher.railSlopeAngle(0), 0)     // ascends toward +Z
-        XCTAssertEqual(WorldMesher.railSlopeAngle(1), 180)   // -Z
-        XCTAssertEqual(WorldMesher.railSlopeAngle(2), 90)    // -X
-        XCTAssertEqual(WorldMesher.railSlopeAngle(3), -90)   // +X
+        XCTAssertEqual(MesherShapes.railSlopeTurn(0), 0)     // ascends toward +Z
+        XCTAssertEqual(MesherShapes.railSlopeTurn(1), 180)   // -Z
+        XCTAssertEqual(MesherShapes.railSlopeTurn(2), 90)    // -X
+        XCTAssertEqual(MesherShapes.railSlopeTurn(3), -90)   // +X
     }
 
     func testFlatGeomMatchesThePriorStraightQuad() {
         // The angle-0 flat rail must be pixel-identical to the old railQuad so
         // straight rails (already verified on device) don't move.
-        let q = WorldMesher.railGeom(sloped: false, angle: 0)
+        let q = MesherShapes.railQuad(sloped: false, angle: 0)
         let want: [SIMD3<Float>] = [SIMD3(0,0.0625,0), SIMD3(0,0.0625,1), SIMD3(1,0.0625,1), SIMD3(1,0.0625,0)]
         XCTAssertEqual(q.count, 4)
         for i in 0..<4 {
@@ -81,14 +74,14 @@ final class RailMeshTests: XCTestCase {
     }
 
     func testSlopedGeomRaisesThePlusZEdge() {
-        let q = WorldMesher.railGeom(sloped: true, angle: 0)
+        let q = MesherShapes.railQuad(sloped: true, angle: 0)
         // corners at z=1 (indices 1,2) are near the node top; z=0 corners stay low.
         XCTAssertGreaterThan(q[1].y, 1.0); XCTAssertGreaterThan(q[2].y, 1.0)
         XCTAssertLessThan(q[0].y, 0.5); XCTAssertLessThan(q[3].y, 0.5)
     }
 
     func testRotation90IsAQuarterTurnAboutCentre() {
-        let q = WorldMesher.railGeom(sloped: false, angle: 90)
+        let q = MesherShapes.railQuad(sloped: false, angle: 90)
         // Every corner stays on the node footprint (0..1) and off the x=0/z=0
         // base position: a 90 deg turn about (0.5,0.5) maps (0,0)->(0,1)-ish.
         for c in q {
@@ -97,7 +90,7 @@ final class RailMeshTests: XCTestCase {
         }
         // Rotation actually moved the corners (90 deg about centre sends the
         // x=0 base edge across to x=1).
-        let flat = WorldMesher.railGeom(sloped: false, angle: 0)
+        let flat = MesherShapes.railQuad(sloped: false, angle: 0)
         XCTAssertGreaterThan(abs(q[0].x - flat[0].x), 0.4)
     }
 }

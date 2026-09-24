@@ -10,34 +10,34 @@ final class FireMeshTests: XCTestCase {
 
     func testIsolatedFireDrawsTheFullFlame() {
         // No neighbours: basic fire = 4 leaning sides + 2 centre diagonals.
-        XCTAssertEqual(WorldMesher.firelikeQuads(none()).count, 6)
+        XCTAssertEqual(MesherShapes.flames(none()).count, 6)
     }
 
     func testFireOnAFloorDrawsTheFullFlame() {
         var s = none(); s[4] = true          // -Y solid (floor below)
-        XCTAssertEqual(WorldMesher.firelikeQuads(s).count, 6)
+        XCTAssertEqual(MesherShapes.flames(s).count, 6)
     }
 
     func testFireOnASingleWallDrawsJustThatFace() {
         // A wall on +Z, no floor, not isolated: only the +Z-facing flame, no
         // centre diagonals (basic is false).
         var s = none(); s[0] = true          // +Z solid
-        XCTAssertEqual(WorldMesher.firelikeQuads(s).count, 1)
+        XCTAssertEqual(MesherShapes.flames(s).count, 1)
     }
 
     func testFireUnderACeilingHangsFromEachSide() {
         // Ceiling only (+Y), no floor, no walls: four hanging quads, no centre.
         var s = none(); s[1] = true          // +Y solid
-        XCTAssertEqual(WorldMesher.firelikeQuads(s).count, 4)
+        XCTAssertEqual(MesherShapes.flames(s).count, 4)
     }
 
     func testTwoWallsDrawTwoFaces() {
         var s = none(); s[0] = true; s[2] = true   // +Z and +X walls, no floor
-        XCTAssertEqual(WorldMesher.firelikeQuads(s).count, 2)
+        XCTAssertEqual(MesherShapes.flames(s).count, 2)
     }
 
     func testEachQuadHasFourCornersInTheNodeFootprint() {
-        for q in WorldMesher.firelikeQuads(none()) {
+        for q in MesherShapes.flames(none()).map(MesherShapes.flameCorners) {
             XCTAssertEqual(q.count, 4)
             // Leaning/centre flames stay within a generous box around the node.
             for c in q {
@@ -50,8 +50,8 @@ final class FireMeshTests: XCTestCase {
 
     func testRotationTurnsTheQuad() {
         // The same quad at 0 and 90 degrees occupies different footprints.
-        let a = WorldMesher.firelikeQuad(rotation: 0, opening: -10, offsetH: 0.4)
-        let b = WorldMesher.firelikeQuad(rotation: 90, opening: -10, offsetH: 0.4)
+        let a = MesherShapes.flameCorners(.init(yaw: 0, tilt: -10, out: 0.4))
+        let b = MesherShapes.flameCorners(.init(yaw: 90, tilt: -10, out: 0.4))
         XCTAssertGreaterThan(abs(a[0].x - b[0].x) + abs(a[0].z - b[0].z), 0.3)
     }
 }

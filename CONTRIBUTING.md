@@ -21,10 +21,6 @@ protocol or a behavior works is fine, and so is matching that behavior; write
 the code yourself. If you're unsure whether something counts, say so in the PR
 and we'll sort it out.
 
-The exception is the handful of mesher routines already marked as ported from
-the engine (see "License" in the [README](README.md)). Changes to those stay
-LGPL only until they're rewritten.
-
 ## Before you open a PR
 
 - Build with `native/sim.sh` and run `native/simtests.sh` (it drives the

@@ -2,23 +2,22 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// Facedir rotates the tile as well as selecting it (mapblock_mesh dir_to_tile):
-/// a sideways log's bark grain runs along the log axis. Spot-check the ported
-/// rotation table and the UV rotation math.
+/// Facedir turns the tile as well as selecting it: a sideways log's bark
+/// grain runs along the log axis. Spot-check the derived turns against what a
+/// desktop client shows, and the UV rotation math.
 final class FacedirTileRotTests: XCTestCase {
-    func testTableMatchesEngineSpotChecks() {
-        // dir_i for +X face is 1, -X is 7, +Y is 2 (see faceDirI).
-        // Engine dir_to_tile rows (rotation column):
-        //  facedir 1: [0,0,3,0,0,0,1,0] -> +X(1)=0, -X(7)=0, +Y(2)=3
-        XCTAssertEqual(WorldMesher.facedirTileRot[1][1], 0)
-        XCTAssertEqual(WorldMesher.facedirTileRot[1][2], 3)
-        XCTAssertEqual(WorldMesher.facedirTileRot[1][6], 1)
-        //  facedir 4 (tipped onto +Z): [0,3,0,2,0,0,2,1]
-        XCTAssertEqual(WorldMesher.facedirTileRot[4][1], 3)   // +X
-        XCTAssertEqual(WorldMesher.facedirTileRot[4][3], 2)   // +Z
-        XCTAssertEqual(WorldMesher.facedirTileRot[4][7], 1)   // -X
-        //  facedir 0 is all identity.
-        XCTAssertEqual(WorldMesher.facedirTileRot[0], [0,0,0,0,0,0,0,0])
+    // WorldMesher face order: +Y -Y +Z -Z +X -X.
+    func testTurnsMatchDesktopSpotChecks() {
+        // facedir 1 (turned about Y): top turns 3, bottom 1, sides unturned.
+        XCTAssertEqual(WorldMesher.tileTurns[1][4], 0)   // +X
+        XCTAssertEqual(WorldMesher.tileTurns[1][0], 3)   // +Y
+        XCTAssertEqual(WorldMesher.tileTurns[1][1], 1)   // -Y
+        // facedir 4 (tipped onto +Z).
+        XCTAssertEqual(WorldMesher.tileTurns[4][4], 3)   // +X
+        XCTAssertEqual(WorldMesher.tileTurns[4][2], 2)   // +Z
+        XCTAssertEqual(WorldMesher.tileTurns[4][5], 1)   // -X
+        // facedir 0 is all identity.
+        XCTAssertEqual(WorldMesher.tileTurns[0], [0, 0, 0, 0, 0, 0])
     }
 
     func testRotUVTurnsTheCorners() {

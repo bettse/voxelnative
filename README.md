@@ -182,14 +182,7 @@ whose network protocol this client reimplements in Swift; the MIT side is there
 so the app can ship on the App Store, whose terms don't mix well with the LGPL.
 Contributions are accepted under both; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-**Exception:** three routines in
-`native/LuantiKit/Sources/LuantiKit/WorldMesher.swift` were ported from the
-engine's `content_mapblock.cpp` (plantlike quads, firelike flames, and raillike
-nodes, each marked "ported from" in its comment). Those are derived from
-LGPL-2.1+ code, so they're available under the LGPL only until they're
-rewritten.
-
-The rest is written from scratch against the protocol and the engine's
+The code is written from scratch against the protocol and the engine's
 observable behavior. It bundles no game content: VoxeLibre and Luanti textures,
 sounds, models, and Lua are downloaded from the server you connect to and
 remain under their own licenses (CC BY-SA 3.0/4.0, GPL, etc.). Third-party

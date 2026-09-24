@@ -34,24 +34,8 @@ public enum WorldMesher {
         return SIMD2(p.z, 1 - p.y)                       // -X
     }
 
-    // Plantlike quads, ported from the engine's drawPlantlikeQuad/drawPlantlike
-    // (content_mapblock.cpp): one quad is a vertical rectangle `scale` nodes
-    // wide (visual_scale, centred on the node) and scale*height tall from the
-    // node floor, turned about the node's vertical axis by `rotDeg`, with the
-    // meshoptions styles built from 2-4 such quads. The old cross ran corner
-    // to corner, which made every plant 1.41 wide and stretched its texture.
-    // Corner order matches `uv`: bottom-left, bottom-right, top-right, top-left.
-    static func plantQuad(rotDeg: Float, scale: Float, height: Float,
-                          offsetZ: Float = 0, topOnly: Bool = false,
-                          offset: SIMD3<Float> = .zero) -> [SIMD3<Float>] {
-        let hw = 0.5 * scale, top = scale * height
-        var v = [SIMD3<Float>(-hw, 0, 0), SIMD3(hw, 0, 0), SIMD3(hw, top, 0), SIMD3(-hw, top, 0)]
-        for i in 0..<4 where !topOnly || i >= 2 { v[i].z += offsetZ }   // engine offsets the top pair for HASH2
-        let r = rotDeg * .pi / 180, c = cos(r), sn = sin(r)
-        return v.map { p in SIMD3(0.5 + p.x * c - p.z * sn, p.y, 0.5 + p.x * sn + p.z * c) + offset }
-    }
-
-    /// The engine's PLANT_STYLE_* quad sets (meshoptions style 0-4): rotation
+    /// meshoptions plant styles 0-4 as sets of cards (MesherShapes.plantCard):
+    /// rotation
     /// degrees, Z offset in nodes, and whether only the top edge is offset.
     private static let plantStyles: [[(rot: Float, off: Float, topOnly: Bool)]] = [
         [(46, 0, false), (-44, 0, false)],                                          // 0 cross "x"
@@ -77,7 +61,7 @@ public enum WorldMesher {
     /// texture stretches over the whole height, like Luanti). Rooted plants with
     /// leveled param2 (kelp) grow param2/16 nodes tall.
     static func plantQuadsTall(_ height: Float, scale: Float = 1) -> [[SIMD3<Float>]] {
-        [plantQuad(rotDeg: 46, scale: scale, height: height), plantQuad(rotDeg: -44, scale: scale, height: height)]
+        [MesherShapes.plantCard(rotDeg: 46, scale: scale, height: height), MesherShapes.plantCard(rotDeg: -44, scale: scale, height: height)]
     }
 
     /// A tall rooted plant (kelp) as one quad pair per node of height, each
@@ -85,7 +69,7 @@ public enum WorldMesher {
     /// the texture repeats once per node with its top at every whole node below
     /// the plant's top; our world sampler clamps (repeat would bleed tile edges
     /// on cubes), so we cut at those same boundaries instead. Returns
-    /// (corners, uvs) in plantQuad's corner order.
+    /// (corners, uvs) in plantCard's corner order.
     static func plantQuadsTallTiled(_ height: Float, scale: Float = 1) -> [([SIMD3<Float>], [SIMD2<Float>])] {
         var out: [([SIMD3<Float>], [SIMD2<Float>])] = []
         var top = height
@@ -93,7 +77,7 @@ public enum WorldMesher {
             let seg = min(1, top), y0 = top - seg
             let uvs = [SIMD2<Float>(0, seg), SIMD2(1, seg), SIMD2(1, 0), SIMD2(0, 0)]
             for rot: Float in [46, -44] {
-                out.append((plantQuad(rotDeg: rot, scale: scale, height: seg, offset: SIMD3(0, y0 * scale, 0)), uvs))
+                out.append((MesherShapes.plantCard(rotDeg: rot, scale: scale, height: seg, offset: SIMD3(0, y0 * scale, 0)), uvs))
             }
             top = y0
         }
@@ -120,51 +104,10 @@ public enum WorldMesher {
         return v + SIMD3(0.5, 0.5, 0.5)
     }
 
-    // Firelike (NDT_FIRELIKE): flames lean outward on the floor and climb any
-    // adjacent solid wall. Ported from Luanti's drawFirelikeNode/drawFirelikeQuad
-    // (content_mapblock.cpp). Neighbour indices follow D6D: 0 +Z, 1 +Y, 2 +X,
-    // 3 -Z, 4 -Y, 5 -X. The exact rotation sense under the Z-mirror wants a
-    // device glance, same as rails.
+    // Firelike neighbours, in the order MesherShapes.flames reads them:
+    // +Z, +Y, +X, -Z, -Y, -X.
     static let fireDirs: [SIMD3<Int>] = [SIMD3(0,0,1), SIMD3(0,1,0), SIMD3(1,0,0),
                                          SIMD3(0,0,-1), SIMD3(0,-1,0), SIMD3(-1,0,0)]
-
-    /// One flame quad: a node-tall quad tilted out by `opening` degrees, pushed
-    /// out `offsetH` and up `offsetV`, then turned to face `rotation`. Returned in
-    /// node-local 0..1 coords. offsets/scale in node units (Luanti's BS = 1 here).
-    static func firelikeQuad(rotation: Float, opening: Float, offsetH: Float, offsetV: Float = 0) -> [SIMD3<Float>] {
-        let s: Float = 0.5
-        let corners: [SIMD3<Float>] = [SIMD3(-s, s, 0), SIMD3(s, s, 0), SIMD3(s, -s, 0), SIMD3(-s, -s, 0)]
-        let oa = opening * .pi / 180, c1 = cos(oa), s1 = sin(oa)
-        let rr = rotation * .pi / 180, c2 = cos(rr), s2 = sin(rr)
-        return corners.map { p in
-            let y1 = p.y * c1 - p.z * s1          // rotateYZBy(opening)
-            var z = p.y * s1 + p.z * c1
-            z += offsetH
-            let x = p.x * c2 - z * s2              // rotateXZBy(rotation)
-            let z2 = p.x * s2 + z * c2
-            return SIMD3(x + 0.5, y1 + offsetV + 0.5, z2 + 0.5)   // centred -> local
-        }
-    }
-
-    /// The flame quads for a fire node given which of its 6 neighbours are solid
-    /// (indexed by D6D). Floor-backed or isolated fire draws the full flame (4
-    /// leaning sides + 2 centre diagonals); otherwise flames only face solid
-    /// walls, and a ceiling above makes them hang down.
-    static func firelikeQuads(_ solid: [Bool]) -> [[SIMD3<Float>]] {
-        let basic = solid[4] || !solid.contains(true)   // floor (-Y) or isolated
-        let bottom = solid[1]                            // ceiling (+Y)
-        var out: [[SIMD3<Float>]] = []
-        func side(_ face: Int, _ rot: Float) {
-            if basic || solid[face] { out.append(firelikeQuad(rotation: rot, opening: -10, offsetH: 0.4)) }
-            else if bottom { out.append(firelikeQuad(rotation: rot, opening: 70, offsetH: 0.47, offsetV: 0.484)) }
-        }
-        side(0, 0); side(5, 90); side(3, 180); side(2, 270)   // +Z, -X, -Z, +X
-        if basic {
-            out.append(firelikeQuad(rotation: 45, opening: 0, offsetH: 0))
-            out.append(firelikeQuad(rotation: -45, opening: 0, offsetH: 0))
-        }
-        return out
-    }
 
     // Torchlike: a small centered crossed pair. The torch texture is centered
     // with transparent margins, so the alpha cutout carves out the stick+flame.
@@ -173,67 +116,6 @@ public enum WorldMesher {
         [SIMD3(0.3,0,0.3), SIMD3(0.7,0,0.7), SIMD3(0.7,0.7,0.7), SIMD3(0.3,0.7,0.3)],
         [SIMD3(0.7,0,0.3), SIMD3(0.3,0,0.7), SIMD3(0.3,0.7,0.7), SIMD3(0.7,0.7,0.3)],
     ]
-
-    // Raillike: a flat quad just above the floor, connecting to neighbouring
-    // rails. A rail picks one of four tiles by which of its 4 horizontal
-    // neighbours are rails (straight/curved/T-junction/crossing) and rotates it,
-    // and slopes up when a rail sits one node higher in a direction. Ported from
-    // Luanti's MapblockMeshGenerator::drawRaillikeNode (content_mapblock.cpp).
-    //
-    // Neighbour order = bit position: 0 +Z, 1 -Z, 2 -X, 3 +X. Same order as
-    // Luanti's rail_direction so the rail_kinds table below indexes by the 4-bit
-    // connection code directly.
-    static let railDirs: [SIMD3<Int>] = [SIMD3(0,0,1), SIMD3(0,0,-1), SIMD3(-1,0,0), SIMD3(1,0,0)]
-    private static let railSlopeAngles = [0, 180, 90, -90]
-    // (tile index into faces 0..3 = straight/curved/junction/cross, Y angle deg).
-    // Verbatim from Luanti's rail_kinds[16]; comment shows the set bits (+x -x -z +z).
-    private static let railKinds: [(tile: Int, angle: Int)] = [
-        (0,   0), // .  .  .  .
-        (0,   0), // .  .  . +Z
-        (0,   0), // .  . -Z  .
-        (0,   0), // .  . -Z +Z
-        (0,  90), // . -X  .  .
-        (1, 180), // . -X  . +Z
-        (1, 270), // . -X -Z  .
-        (2, 180), // . -X -Z +Z
-        (0,  90), // +X  .  .  .
-        (1,  90), // +X  .  . +Z
-        (1,   0), // +X  . -Z  .
-        (2,   0), // +X  . -Z +Z
-        (0,  90), // +X -X  .  .
-        (2,  90), // +X -X  . +Z
-        (2, 270), // +X -X -Z  .
-        (3,   0), // +X -X -Z +Z
-    ]
-
-    /// Rail tile + Y rotation for a 4-bit neighbour code (bit 0 +Z, 1 -Z, 2 -X,
-    /// 3 +X). A sloped rail always uses the straight tile at the slope's angle.
-    static func railTileAndAngle(code: Int, sloped: Bool, slopeAngle: Int) -> (tile: Int, angle: Int) {
-        sloped ? (0, slopeAngle) : railKinds[code & 15]
-    }
-
-    /// Rail slope angle for neighbour direction index 0..3 (a rail one node up in
-    /// that direction makes this rail ascend toward it).
-    static func railSlopeAngle(_ dir: Int) -> Int { railSlopeAngles[dir] }
-
-    /// The rail quad in node-local 0..1 coords. Flat sits `y0` above the floor;
-    /// sloped rises on the +Z edge to the node top. Rotated by `angle` about the
-    /// node centre (matches Luanti's rotateXZBy). Corner order (x,z) is
-    /// (0,0),(0,1),(1,1),(1,0) so the shared uv table lays the tile upright.
-    static func railGeom(sloped: Bool, angle: Int) -> [SIMD3<Float>] {
-        let y0: Float = 0.0625
-        let hi: Float = sloped ? 1.0 + y0 : y0
-        var q = [SIMD3<Float>(0, y0, 0), SIMD3(0, hi, 1), SIMD3(1, hi, 1), SIMD3(1, y0, 0)]
-        if angle % 360 != 0 {
-            let r = Float(angle) * .pi / 180, cs = cos(r), sn = sin(r)
-            q = q.map { c in
-                let x = c.x - 0.5, z = c.z - 0.5
-                // Irrlicht rotateXZBy: x' = x*cos - z*sin, z' = x*sin + z*cos.
-                return SIMD3(x * cs - z * sn + 0.5, c.y, x * sn + z * cs + 0.5)
-            }
-        }
-        return q
-    }
 
     // Signlike: a single flat quad hugging the wall the node is mounted to
     // (ladders, wall signs). wm is param2's wallmounted value (& 7):
@@ -286,39 +168,29 @@ public enum WorldMesher {
         }
     }
 
-    // Texture rotation (R0..R3 = 0/90/180/270) for a facedir'd cube face,
-    // straight from the engine's dir_to_tile[24][8] (mapblock_mesh.cpp): a
-    // sideways log's bark turns so the grain runs along the log's axis, a
-    // rotated pillar's cap lines up, etc. Indexed [facedir][dir_i] where
-    // dir_i = (nx + 2ny + 3nz) & 7 for the world face normal.
-    static let facedirTileRot: [[UInt8]] = [
-        [0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 3, 0, 0, 0, 1, 0],
-        [0, 0, 2, 0, 0, 0, 2, 0],
-        [0, 0, 1, 0, 0, 0, 3, 0],
-        [0, 3, 0, 2, 0, 0, 2, 1],
-        [0, 3, 0, 1, 0, 1, 2, 1],
-        [0, 3, 0, 0, 0, 2, 2, 1],
-        [0, 3, 0, 3, 0, 3, 2, 1],
-        [0, 1, 2, 2, 0, 0, 0, 3],
-        [0, 1, 2, 3, 0, 3, 0, 3],
-        [0, 1, 2, 0, 0, 2, 0, 3],
-        [0, 1, 2, 1, 0, 1, 0, 3],
-        [0, 3, 3, 1, 0, 3, 3, 3],
-        [0, 2, 3, 1, 0, 3, 3, 0],
-        [0, 1, 3, 1, 0, 3, 3, 1],
-        [0, 0, 3, 1, 0, 3, 3, 2],
-        [0, 1, 1, 3, 0, 1, 1, 1],
-        [0, 2, 1, 3, 0, 1, 1, 0],
-        [0, 3, 1, 3, 0, 1, 1, 3],
-        [0, 0, 1, 3, 0, 1, 1, 2],
-        [0, 2, 2, 2, 0, 2, 2, 2],
-        [0, 2, 3, 2, 0, 2, 1, 2],
-        [0, 2, 0, 2, 0, 2, 0, 2],
-        [0, 2, 1, 2, 0, 2, 3, 2]
-    ]
-    // dir_i for our six faces (order matches `faces`): +Y -Y +Z -Z +X -X.
-    static let faceDirI: [Int] = [2, 6, 3, 5, 1, 7]
+    // Texture turn (0..3 quarter turns, R0..R3) for a facedir'd cube face, so
+    // a sideways log's bark runs along the log and a turned pillar's cap lines
+    // up. Each face has a reference "up" for its texture: +Y on the sides, +Z
+    // on top, -Z underneath. Rotate the source face's up by the facedir; the
+    // turn is how many quarter turns that lands from the world face's own up,
+    // counted clockwise looking at the face. Tabulated once, [facedir][face].
+    static let tileTurns: [[UInt8]] = {
+        let refUp: [SIMD3<Float>] = [SIMD3(0,0,1), SIMD3(0,0,-1), SIMD3(0,1,0), SIMD3(0,1,0), SIMD3(0,1,0), SIMD3(0,1,0)]
+        let normals = faces.map { SIMD3<Float>(Float($0.n.x), Float($0.n.y), Float($0.n.z)) }
+        func same(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Bool { simd_length(a - b) < 0.01 }
+        return (0..<24).map { fd in
+            (0..<6).map { w in
+                guard let src = normals.indices.first(where: { same(rotateFacedir(normals[$0], UInt8(fd)), normals[w]) })
+                else { return 0 }
+                let landed = rotateFacedir(refUp[src], UInt8(fd))
+                let up = refUp[w], cw = simd_cross(up, normals[w])
+                if same(landed, cw) { return 1 }
+                if same(landed, -up) { return 2 }
+                if same(landed, -cw) { return 3 }
+                return 0
+            }
+        }
+    }()
 
     // Node ids already reported by noteDarkSample (#359). The mesher runs on
     // one serial queue, so plain statics are enough; capped so a bad world
@@ -1003,7 +875,7 @@ public enum WorldMesher {
                             var yrng = PseudoRandom(seed: UInt32(truncatingIfNeeded: qi | g.x << 16 | g.z << 8 | g.y << 24))
                             o.y = -Float(yrng.draw() % 16) / 16 * 0.125
                         }
-                        var quad = WorldMesher.plantQuad(rotDeg: q.rot + rot, scale: s, height: 1, offsetZ: q.off, topOnly: q.topOnly, offset: o)
+                        var quad = MesherShapes.plantCard(rotDeg: q.rot + rot, scale: s, height: 1, shift: q.off, topOnly: q.topOnly, offset: o)
                         if wallPlant { quad = quad.map { WorldMesher.wallmountedPlant($0, p2 & 0x07) } }
                         // Smooth light per corner (engine blendLightColor on plants):
                         // the base of a flower in a shaded corner goes dark while its
@@ -1050,7 +922,7 @@ public enum WorldMesher {
                         let nid = cNodeId(SIMD3(g.x + d.x, g.y + d.y, g.z + d.z))
                         solid[i] = nid != WorldMap.CONTENT_AIR && nid != WorldMap.CONTENT_IGNORE && nid != id
                     }
-                    for q in WorldMesher.firelikeQuads(solid) { emitQuad(q, base: g, layer: layer, shade: 1.0, light: light, liquid: false, tint: tint) }
+                    for q in MesherShapes.flames(solid).map(MesherShapes.flameCorners) { emitQuad(q, base: g, layer: layer, shade: 1.0, light: light, liquid: false, tint: tint) }
                 case .rail:
                     let light = Float(world.nodeLightLit(g))
                     // A neighbour connects if it's the same node or any raillike.
@@ -1059,16 +931,17 @@ public enum WorldMesher {
                         return nid == id || renderKind(nid, ms) == .rail
                     }
                     var code = 0, sloped = false, slopeAngle = 0
-                    for (dir, d) in WorldMesher.railDirs.enumerated() {
+                    for (dir, d) in MesherShapes.railDirs.enumerated() {
                         let up = SIMD3(g.x + d.x, g.y + 1, g.z + d.z)
                         let level = SIMD3(g.x + d.x, g.y, g.z + d.z)
                         let down = SIMD3(g.x + d.x, g.y - 1, g.z + d.z)
-                        if isRail(up) { sloped = true; slopeAngle = WorldMesher.railSlopeAngle(dir) }
+                        if isRail(up) { sloped = true; slopeAngle = MesherShapes.railSlopeTurn(dir) }
                         if isRail(up) || isRail(level) || isRail(down) { code |= 1 << dir }
                     }
-                    let (tileIdx, angle) = WorldMesher.railTileAndAngle(code: code, sloped: sloped, slopeAngle: slopeAngle)
+                    // A sloped rail is always the straight piece, turned to climb.
+                    let (tileIdx, angle) = sloped ? (0, slopeAngle) : MesherShapes.railPiece(code: code)
                     let layer = Float(atlas.layer(id: id, face: tileIdx))
-                    emitQuad(WorldMesher.railGeom(sloped: sloped, angle: angle), base: g, layer: layer, shade: 1.0, light: light, liquid: false)
+                    emitQuad(MesherShapes.railQuad(sloped: sloped, angle: angle), base: g, layer: layer, shade: 1.0, light: light, liquid: false)
                 case .sign:
                     let wm = Int(block.param2[nodeIdx]) & 0x07
                     let layer = Float(atlas.layer(id: id, face: 0))
@@ -1150,7 +1023,7 @@ public enum WorldMesher {
                         let srcTile = WorldMesher.cubeTile(fi, fd)
                         // Facedir also ROTATES the tile (not just picks it), so
                         // log grain / pillar caps line up (mapblock_mesh dir_to_tile).
-                        let uvRot = fd == 0 ? 0 : WorldMesher.facedirTileRot[Int(fd)][WorldMesher.faceDirI[fi]]
+                        let uvRot = fd == 0 ? 0 : WorldMesher.tileTurns[Int(fd)][fi]
                         let layer = Float(atlas.layer(id: id, face: srcTile))
                         let lights = SIMD4<Float>(smoothLight(np: np, normal: f.n, corner: f.c[0]),
                                                   smoothLight(np: np, normal: f.n, corner: f.c[1]),
