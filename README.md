@@ -174,15 +174,27 @@ what streamed in. It's a separate package target and isn't part of the app.
 
 ## 📜 License
 
-The code in this repository is licensed under the **GNU Lesser General Public
-License v2.1 or later** (LGPL-2.1+) — see [`LICENSE`](LICENSE). That matches
-the Luanti / Minetest engine (also LGPL-2.1+) whose network protocol this client
-reimplements from scratch in Swift.
+The code in this repository is dual licensed under the **GNU Lesser General
+Public License v2.1 or later** ([`LICENSE-LGPL`](LICENSE-LGPL)) **or the MIT
+license** ([`LICENSE-MIT`](LICENSE-MIT)), at your option
+(`LGPL-2.1-or-later OR MIT`). The LGPL side matches the Luanti / Minetest engine
+whose network protocol this client reimplements in Swift; the MIT side is there
+so the app can ship on the App Store, whose terms don't mix well with the LGPL.
+Contributions are accepted under both; see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-This is a clean-room reimplementation of the Luanti wire protocol, not a
-derivative of the engine's C++ source. It bundles no game content: VoxeLibre and
-Luanti textures, sounds, models, and Lua are downloaded from the server you
-connect to and remain under their own licenses (CC BY-SA 3.0/4.0, GPL, etc.).
+**Exception:** three routines in
+`native/LuantiKit/Sources/LuantiKit/WorldMesher.swift` were ported from the
+engine's `content_mapblock.cpp` (plantlike quads, firelike flames, and raillike
+nodes, each marked "ported from" in its comment). Those are derived from
+LGPL-2.1+ code, so they're available under the LGPL only until they're
+rewritten.
+
+The rest is written from scratch against the protocol and the engine's
+observable behavior. It bundles no game content: VoxeLibre and Luanti textures,
+sounds, models, and Lua are downloaded from the server you connect to and
+remain under their own licenses (CC BY-SA 3.0/4.0, GPL, etc.). Third-party
+code: [BigInt](https://github.com/attaswift/BigInt) (MIT), zstd (BSD), and
+stb_vorbis (public domain / MIT).
 The only game assets committed here are a couple of small mesh files under
 `native/LuantiKit/Tests/.../Fixtures/` used by the unit tests; those are from
 VoxeLibre (© its authors, CC BY-SA 4.0) and are included for testing only.

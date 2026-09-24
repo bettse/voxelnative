@@ -51,7 +51,7 @@
     </dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect to a Luanti game server on your local network.</string>
-	<!-- Dictation on the in-game keyboard (bug notes, chat): the immersive
+	<!-- Dictation on the in-game keyboard (bug notes, sign text, form fields): the immersive
 	     Metal space has no UIKit text field, so the system keyboard can't
 	     appear there; the mic key transcribes speech instead. -->
 	<key>NSMicrophoneUsageDescription</key>

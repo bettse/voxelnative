@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxelNative Privacy Policy</title>
+<meta name="description" content="What the VoxelNative app collects (nothing) and what it sends to the Luanti server you connect to.">
+<style>
+  :root {
+    --bg:#111418; --bg2:#171b20; --line:#282e36; --line2:#333b45;
+    --text:#e8eaed; --dim:#a3adb8; --faint:#7c8894;
+    --accent:#e0a24a; --link:#79b8ff;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--link); }
+  code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 22px; }
+  .btn { display:inline-block; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:600; font-size:15px; }
+  .btn.solid { background:var(--text); color:#11141a; }
+  .btn.line { border:1px solid var(--line2); color:var(--text); }
+
+  /* hero: text left, real screenshot right (asymmetric, no centered template) */
+  .hero { border-bottom:1px solid var(--line); }
+  .hero .wrap { display:grid; grid-template-columns:1.05fr 1fr; gap:40px; align-items:center; padding:70px 22px 56px; }
+  .hero h1 { font-size:44px; line-height:1.05; margin:0 0 14px; letter-spacing:-.5px; }
+  .hero .kicker { color:var(--faint); font-size:14px; margin:0 0 18px; }
+  .hero p { color:var(--dim); font-size:18px; margin:0 0 24px; max-width:36ch; }
+  .hero .buttons a { margin-right:10px; }
+  .hero figure { margin:0; }
+  .hero img { width:100%; border-radius:10px; border:1px solid var(--line); display:block; }
+  .hero figcaption { color:var(--faint); font-size:12.5px; margin-top:8px; }
+  @media (max-width:760px){ .hero .wrap{ grid-template-columns:1fr; gap:26px; padding:44px 22px; } .hero h1{ font-size:34px; } }
+
+  /* honest note about the AI-assisted code, right under the fold */
+  .note { background:var(--bg2); border-left:3px solid var(--accent); border-radius:0 8px 8px 0; padding:14px 18px; margin:26px 0; color:var(--dim); font-size:14.5px; }
+  .note strong { color:var(--text); }
+
+  section { padding:44px 0; border-bottom:1px solid var(--line); }
+  h2 { font-size:24px; margin:0 0 14px; letter-spacing:-.3px; }
+  p { max-width:70ch; }
+  .lead-dim { color:var(--dim); }
+  ul.list { color:var(--dim); padding-left:20px; }
+  ul.list li { margin:7px 0; }
+  ul.list b { color:var(--text); font-weight:600; }
+
+  video { width:100%; border-radius:10px; border:1px solid var(--line); display:block; background:#000; }
+  .cap { color:var(--faint); font-size:13px; margin-top:8px; }
+
+  .shots { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px; }
+  .shots figure { margin:0; }
+  .shots img { width:100%; border-radius:8px; border:1px solid var(--line); display:block; }
+  .shots figcaption { color:var(--faint); font-size:13px; margin-top:7px; }
+
+  pre { background:#0c0f13; border:1px solid var(--line); border-radius:10px; padding:15px 17px; overflow-x:auto; font-size:13.5px; color:#d5dde5; }
+  footer { padding:34px 22px 60px; color:var(--faint); font-size:13.5px; }
+  footer p { max-width:80ch; }
+</style>
+</head>
+<body>
+
+<section>
+  <div class="wrap">
+    <p class="kicker" style="color:var(--faint);font-size:14px"><a href="./">VoxelNative</a> · Privacy policy</p>
+    <h2>Privacy policy</h2>
+    <p class="lead-dim">Last updated September 23, 2026.</p>
+    <p><strong>Short version:</strong> VoxelNative doesn't collect anything. There are no accounts, no analytics, no ads, no tracking, and no server run by me. The app talks only to the Luanti game server you type in.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What goes to the game server you pick</h2>
+    <ul class="list">
+      <li><b>Your player name and password.</b> The login uses Luanti's standard SRP handshake, so the password itself is never sent, only a proof that you know it.</li>
+      <li><b>What you do in the game:</b> your position, where you look, what you dig, place and craft, and your inventory moves. That's how any Luanti client plays.</li>
+      <li>That server is run by whoever runs it, not by me. What it logs or keeps is up to its operator and their own policy.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What stays on your Vision Pro</h2>
+    <ul class="list">
+      <li><b>Your saved servers</b> (address, port, player name and password) and your settings (volume, view distance).</li>
+      <li><b>Downloaded game media</b> (textures, sounds, models) cached so the next join is faster.</li>
+      <li><b>A diagnostic log</b> in the app's Documents folder. It never leaves the device unless you copy it off yourself.</li>
+      <li>Deleting the app deletes all of this.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Sensors and permissions</h2>
+    <ul class="list">
+      <li><b>Head and world tracking</b> render the world from where you're looking.</li>
+      <li><b>Hand and controller tracking</b> put your hands and controllers in the world.</li>
+      <li><b>Local network</b> lets you join a server on your home network.</li>
+      <li><b>Microphone and speech recognition</b> are only used when you tap the mic key to dictate text (a sign, or a field in a game menu). Speech is transcribed on the device when the device supports it; otherwise Apple's speech service handles it under <a href="https://www.apple.com/legal/privacy/">Apple's privacy policy</a>. Nothing is recorded or stored.</li>
+      <li>None of this sensor data is saved or sent anywhere. The only thing the server gets is the in-game position and look direction the game needs.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Chat</h2>
+    <p class="lead-dim">The app doesn't send or show chat. Other players on a server can't message you through it, and you can't message them.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>Kids</h2>
+    <p class="lead-dim">The app doesn't knowingly collect anything from anyone, kids included, because it doesn't collect anything.</p>
+    <h2 style="margin-top:28px">Changes and contact</h2>
+    <p class="lead-dim">If this changes, this page changes, with a new date at the top. Questions go to the <a href="https://github.com/bettse/voxelnative/issues">GitHub issues</a>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><a href="./">Back to VoxelNative</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
