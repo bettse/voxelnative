@@ -65,11 +65,27 @@ final class WorldSession {
     // (Client::startAuth, src/client/client.cpp) and registers it, which is what
     // the desktop client's Register button does; the launcher lets the player set
     // their own name/password instead.
+    // Kept in the Keychain; older builds kept it in UserDefaults, so move it
+    // over. Where the Keychain isn't available (unsigned sim build) it stays in
+    // UserDefaults.
+    static let activePasswordAccount = "active"
+    static let legacyPasswordKey = "vrdev.password"
     static let password: String = {
-        let key = "vrdev.password"
-        if let p = UserDefaults.standard.string(forKey: key), !p.isEmpty { return p }
-        let p = UUID().uuidString
-        UserDefaults.standard.set(p, forKey: key)
+        let d = UserDefaults.standard
+        let legacy = d.string(forKey: legacyPasswordKey).flatMap { $0.isEmpty ? nil : $0 }
+        guard Keychain.available else {
+            if let legacy { return legacy }
+            let p = UUID().uuidString
+            d.set(p, forKey: legacyPasswordKey)
+            return p
+        }
+        #if targetEnvironment(simulator)
+        // The sim harness sets its dev-server login in UserDefaults; it wins.
+        if let legacy { Keychain.set(legacy, for: activePasswordAccount); d.removeObject(forKey: legacyPasswordKey); return legacy }
+        #endif
+        if let p = Keychain.get(activePasswordAccount), !p.isEmpty { return p }
+        let p = legacy ?? UUID().uuidString
+        if Keychain.set(p, for: activePasswordAccount) { d.removeObject(forKey: legacyPasswordKey) }
         return p
     }()
     static let walkSpeed: Float = 4.0   // m/s
@@ -162,9 +178,10 @@ final class WorldSession {
     // to submit. Reuses the inventory ray/plane pick and appendQuad.
     private struct Key { let id: String; let u: Float; let v: Float; let hw: Float; var hh: Float = 0.034 }
     private var keyboardOpen = false
-    // Bug notes use the "simple" board: no letter keys, just mic / clear /
-    // submit at controller-friendly size, since nobody types a sentence on a
-    // floating qwerty in a headset (Eric). Dictation is the only text source.
+    // Bug notes use the "simple" board: no letter keys, just clear / submit at
+    // controller-friendly size, since nobody types a sentence on a floating
+    // qwerty in a headset (Eric). Text comes from a BLE keyboard; with only
+    // controllers a note is just the context + screenshot.
     private var kbSimple = false
     private var kbCursor: SIMD3<Float>? = nil   // aim ray hit on the board (node space) for the targeting dot
     private var keyboardBuffer = ""
@@ -172,15 +189,6 @@ final class WorldSession {
     private var kbSaveOnDismiss = false       // bug note: dismissing submits instead of discarding
     private var keyboardFrame: InvFrame? = nil
     private var keyboardKeys: [Key] = []
-    // Voice dictation for the keyboard (no system keyboard in the immersive
-    // space). The recognizer's transcript arrives on the main queue; stash it
-    // under a lock and let the tick fold it into keyboardBuffer.
-    private let dictation = Dictation()
-    private var dictating = false
-    private var dictationPrefix = ""          // buffer text before dictation began
-    private var dictationCommitted = ""       // segments the recognizer already finalized this session
-    private let dictationLock = NSLock()
-    private var dictationInbox: String? = nil // full live text (prefix+committed+partial) pending apply
     private var keyLabelLayers: [String: Int] = [:]
     private var kbBufferLayer = -1          // model-texture layer holding the typed text (-1 = none yet)
     private var kbBufferDirty = true        // text changed: re-rasterise into that layer (in-place patch)
@@ -1934,6 +1942,7 @@ final class WorldSession {
             }
         }
         player.setVignette(vig)
+        input.textEntry = keyboardOpen
         var gi = input.poll()
         #if targetEnvironment(simulator)
         // -vrdev.flyTest 1: free_move parity (#291). Grant fly, double-tap
@@ -5746,7 +5755,7 @@ final class WorldSession {
         // The pause menu goes after the XP level, server HUD and nametags: the
         // overlay has no depth test, so later quads paint over earlier ones and
         // the level digits used to sit on top of the menu panel (device shot).
-        // The keyboard (bug-note dictation) and panels still draw over the menu.
+        // The keyboard (bug notes) and panels still draw over the menu.
         appendKogane(gaze: aimDir, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         appendKeyboard(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         appendInventoryPanel(eye: eye, cosY: cy, sinY: sy, billboards: &billboards, v: &ov, idx: &oi)
@@ -7051,40 +7060,6 @@ final class WorldSession {
     /// so it sits just proud of the block instead of z-fighting it.
     /// Rasterise a short white string centred in a transparent square via
     /// CoreText, for the death overlay (no glyph atlas needed for one label).
-    /// Bake an SF Symbol (white, black outline like the text) into an RGBA
-    /// canvas for a key/button label; nil if UIKit can't produce the glyph.
-    static func renderSymbolRGBA(_ name: String, canvas: Int) -> [UInt8]? {
-        #if canImport(UIKit)
-        let cfg = UIImage.SymbolConfiguration(pointSize: CGFloat(canvas) * 0.5, weight: .bold)
-        guard let img = UIImage(systemName: name, withConfiguration: cfg) else { return nil }
-        // A tinted symbol's raw cgImage is still the untinted template, so
-        // draw through UIKit (which honours the tint), then copy that bitmap
-        // into the same CG layout the text baker uses.
-        let side = CGFloat(canvas) * 0.62
-        let rect = CGRect(x: (CGFloat(canvas) - side) / 2, y: (CGFloat(canvas) - side) / 2, width: side, height: side)
-        let o = max(1.0, CGFloat(canvas) * 0.012)
-        let fmt = UIGraphicsImageRendererFormat(); fmt.scale = 1; fmt.opaque = false
-        let ui = UIGraphicsImageRenderer(size: CGSize(width: canvas, height: canvas), format: fmt).image { _ in
-            for dx in [-o, 0, o] { for dy in [-o, 0, o] where !(dx == 0 && dy == 0) {
-                img.withTintColor(.black, renderingMode: .alwaysOriginal).draw(in: rect.offsetBy(dx: dx, dy: dy))
-            } }
-            img.withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: rect)
-        }
-        guard let cg = ui.cgImage else { return nil }
-        let cs = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
-                                  bytesPerRow: canvas * 4, space: cs,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: canvas, height: canvas))
-        guard let base = ctx.data else { return nil }
-        var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
-        memcpy(&px, base, px.count)
-        return px
-        #else
-        return nil
-        #endif
-    }
 
     static func renderTextRGBA(_ text: String, canvas: Int, fontFrac: CGFloat = 0.20) -> [UInt8]? {
         let cs = CGColorSpaceCreateDeviceRGB()
@@ -7311,16 +7286,9 @@ final class WorldSession {
         // Force the text layer to re-rasterise to the fresh (usually empty) buffer:
         // it only redraws when dirty, so without this a reopened bug note kept
         // SHOWING the previous note's text even though keyboardBuffer was "" (Eric,
-        // "still shows previous dictation"). The submit was already correct; only
+        // "still shows previous text"). The submit was already correct; only
         // the on-screen field lagged. (#332)
         kbBufferDirty = true
-        // Start with a clean dictation slate: a previous note's transcript (or a
-        // final result that landed just after it closed) was carrying over into
-        // the next note's field (Eric). Stop any lingering recognizer, drop the
-        // pending transcript, and reset the prefix to the fresh buffer.
-        stopDictation()
-        dictationPrefix = prefill; dictationCommitted = ""
-        dictationLock.lock(); dictationInbox = nil; dictationLock.unlock()
         layoutKeyboard()
         let eye = player.rayOrigin()
         // Center on where the player is FACING (body/head forward), not the
@@ -7339,13 +7307,12 @@ final class WorldSession {
         print("[kbd] open"); fflush(stdout)
     }
 
-    private func closeKeyboard() { stopDictation(); keyboardOpen = false; keyboardFrame = nil; keyboardDone = nil; kbCursor = nil; print("[kbd] closed"); fflush(stdout) }
+    private func closeKeyboard() { keyboardOpen = false; keyboardFrame = nil; keyboardDone = nil; kbCursor = nil; print("[kbd] closed"); fflush(stdout) }
     /// Done / save-on-dismiss: hand the text to the opener's completion. The
     /// completion has to be captured BEFORE closeKeyboard() nils it; the old
     /// `closeKeyboard(); keyboardDone?(t)` ordering meant every keyboard result
     /// (bug notes, sign text, chat) was silently dropped on device.
     private func submitKeyboard() {
-        stopDictation()
         let t = keyboardBuffer, done = keyboardDone
         closeKeyboard()
         print("[kbd] submit \(t.count) chars"); fflush(stdout)
@@ -7354,13 +7321,11 @@ final class WorldSession {
 
     private func layoutKeyboard() {
         if kbSimple {
-            // Three fat targets under the transcript field: mic (toggle
-            // dictation), clear, submit. Sized so the controller ray lands on
-            // them without hunting.
+            // Two fat targets under the text field: clear, submit. Sized so the
+            // controller ray lands on them without hunting.
             let y: Float = -0.06
-            keyboardKeys = [Key(id: "mic",    u: -0.28, v: y, hw: 0.11, hh: 0.075),
-                            Key(id: "clear",  u: 0,     v: y, hw: 0.11, hh: 0.075),
-                            Key(id: "submit", u: 0.28,  v: y, hw: 0.11, hh: 0.075)]
+            keyboardKeys = [Key(id: "clear",  u: -0.16, v: y, hw: 0.11, hh: 0.075),
+                            Key(id: "submit", u: 0.16,  v: y, hw: 0.11, hh: 0.075)]
             return
         }
         let rows = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm/,."]
@@ -7373,10 +7338,9 @@ final class WorldSession {
                 keys.append(Key(id: String(ch), u: u, v: (1.5 - Float(r)) * p, hw: p * 0.45))
             }
         }
-        // bottom row: mic (dictation), space (wide), backspace, done
+        // bottom row: space (wide), backspace, done
         let by = (1.5 - 4) * p
-        keys.append(Key(id: "mic",   u: -3.6 * p, v: by, hw: p * 0.9))
-        keys.append(Key(id: "space", u: -1.5 * p, v: by, hw: p * 1.5))
+        keys.append(Key(id: "space", u: -2.1 * p, v: by, hw: p * 2.1))
         keys.append(Key(id: "back",  u: 0.9 * p,  v: by, hw: p * 0.9))
         keys.append(Key(id: "done",  u: 2.6 * p,  v: by, hw: p * 0.9))
         keyboardKeys = keys
@@ -7384,17 +7348,12 @@ final class WorldSession {
 
     private func handleKeyboardInput(_ gi: GameInput.State) {
         guard let fr = keyboardFrame else { return }
-        // Fold in any speech transcript that landed since last tick (dictation
-        // callbacks run on the main queue). Live text is prefix + transcript.
-        dictationLock.lock(); let heard = dictationInbox; dictationInbox = nil; dictationLock.unlock()
-        // Only fold the transcript while actively dictating. A result that lands
-        // after the user stopped (tapped a key, submitted, reopened the board)
-        // must not clobber the field -- that was the carry-over between notes.
-        if dictating, let heard {
-            // The callback already assembled prefix + banked segments + the live
-            // partial, so saying "period" (which finalizes a segment) can't wipe
-            // what came before it.
-            keyboardBuffer = heard
+        // Text typed on a BLE keyboard since the last tick.
+        for k in gi.typed {
+            switch k {
+            case .char(let c): keyboardBuffer.append(c)
+            case .backspace: if !keyboardBuffer.isEmpty { keyboardBuffer.removeLast() }
+            }
             kbBufferDirty = true
         }
         let (o, d) = inventoryRay()
@@ -7412,8 +7371,8 @@ final class WorldSession {
                 kbHover = keyboardKeys.firstIndex { abs($0.u - u) <= $0.hw && abs($0.v - v) <= $0.hh + 0.002 }
             }
         }
-        // Enter presses the gazed key/button too (bug-note mic / clear / submit,
-        // chat keys), same as the trigger.
+        // Enter presses the gazed key/button too, same as the trigger; with
+        // nothing gazed it submits, so typing then Enter just works.
         let pressHeld = gi.dig || gi.enterPrimary || gi.enterSecondary
         let press = pressHeld && !kbPrevPress
         kbPrevPress = pressHeld
@@ -7430,53 +7389,18 @@ final class WorldSession {
             if kbSaveOnDismiss, !keyboardBuffer.isEmpty { submitKeyboard(); return }
             closeKeyboard(); return
         }
-        guard press, let hi = kbHover else { return }
+        guard press else { return }
+        guard let hi = kbHover else {
+            if gi.enterPrimary { submitKeyboard() }
+            return
+        }
         switch keyboardKeys[hi].id {
-        case "mic": toggleDictation()
         case "done", "submit": submitKeyboard()
-        case "clear": stopDictation(); keyboardBuffer = ""; dictationPrefix = ""; dictationCommitted = ""; kbBufferDirty = true
-        // A manual edit ends dictation so the live transcript stops overwriting it.
-        case "back": stopDictation(); if !keyboardBuffer.isEmpty { keyboardBuffer.removeLast(); kbBufferDirty = true }
-        case "space": stopDictation(); keyboardBuffer.append(" "); kbBufferDirty = true
-        default: stopDictation(); keyboardBuffer.append(keyboardKeys[hi].id); kbBufferDirty = true
+        case "clear": keyboardBuffer = ""; kbBufferDirty = true
+        case "back": if !keyboardBuffer.isEmpty { keyboardBuffer.removeLast(); kbBufferDirty = true }
+        case "space": keyboardBuffer.append(" "); kbBufferDirty = true
+        default: keyboardBuffer.append(keyboardKeys[hi].id); kbBufferDirty = true
         }
-    }
-
-    /// Toggle voice dictation. Start: remember the current text as the prefix,
-    /// then stream the transcript after it. Stop: keep whatever was heard.
-    private func toggleDictation() {
-        if dictating { stopDictation(); return }
-        dictationPrefix = keyboardBuffer; dictationCommitted = ""
-        dictation.onTranscript = { [weak self] text, isFinal in
-            guard let self else { return }
-            // Assemble the field from three parts: what was typed before dictation,
-            // every segment the recognizer has already finalized this session, and
-            // the current live partial. When a segment finalizes (a pause, or a
-            // punctuation word like "period"), bank it into `committed` so the next
-            // segment starts fresh without erasing it. (These run on the main queue.)
-            func join(_ a: String, _ b: String) -> String {
-                a.isEmpty ? b : (b.isEmpty ? a : a + " " + b)
-            }
-            if isFinal { self.dictationCommitted = join(self.dictationCommitted, text) }
-            let live = join(join(self.dictationPrefix, self.dictationCommitted), isFinal ? "" : text)
-            self.dictationLock.lock(); self.dictationInbox = live; self.dictationLock.unlock()
-        }
-        dictation.onStop = { [weak self] err in
-            self?.dictating = false
-            if let err { print("[kbd] dictation stopped: \(err)"); fflush(stdout) }
-        }
-        dictating = true   // optimistic so the key lights immediately
-        dictation.start { [weak self] ok, reason in
-            guard let self else { return }
-            if !ok { self.dictating = false; print("[kbd] dictation failed: \(reason ?? "?")"); fflush(stdout) }
-            else { print("[kbd] dictation started"); fflush(stdout) }
-        }
-    }
-
-    private func stopDictation() {
-        guard dictating else { return }
-        dictating = false
-        dictation.stop()
     }
 
     /// Draw the keyboard: backdrop, the current text, and every key (label +
@@ -7508,13 +7432,13 @@ final class WorldSession {
         }
         // Output field. The text used to be rendered square (renderTextRGBA)
         // and stretched onto a 6:1 quad, so glyphs were distorted and a long
-        // dictated sentence shrank to a smear (Eric). Now: renderTextFilled
+        // sentence shrank to a smear (Eric). Now: renderTextFilled
         // fills the canvas and reports the text's aspect, the quad is sized to
         // that aspect at a fixed readable height (no distortion), left-aligned
         // in the field, and when the text is wider than the field it shows the
         // TAIL so the words you just said are the ones you can read.
         // Rebake into the SAME layer: setting the index to a sentinel here used to
-        // register a fresh "#kbbuf" layer per keystroke / dictation partial, which
+        // register a fresh "#kbbuf" layer per keystroke, which
         // grew the array and made ensureModelTextures re-upload every layer
         // (~75 MB per key with a busy inventory) besides leaking the old slice.
         if kbBufferLayer == -1 || kbBufferDirty {
@@ -7542,21 +7466,14 @@ final class WorldSession {
         // keys
         for (i, k) in keyboardKeys.enumerated() {
             let hovered = kbHover == i
-            // Mic key glows red while dictating so it reads as "recording".
             let cellTint: Float
-            if k.id == "mic" && dictating { cellTint = Self.packTint(220, 60, 60) }
-            else if hovered { cellTint = Self.packTint(232, 184, 64) }
+            if hovered { cellTint = Self.packTint(232, 184, 64) }
             else { cellTint = Self.packTint(96, 98, 118) }
             appendQuad(center: at(k.u, k.v), right: oR, up: oU, hw: k.hw, hh: k.hh,
                        layer: highlightLayer, tint: cellTint, v: &v, idx: &idx)
             if keyLabelLayers[k.id] == nil {
-                // The mic is an SF Symbol (a real microphone glyph), the rest text.
-                let px: [UInt8]?
-                if k.id == "mic" { px = Self.renderSymbolRGBA("mic.fill", canvas: ModelTextureHandoff.size) }
-                else {
-                    let label = k.id == "space" ? "space" : (k.id == "back" ? "<-" : (k.id == "done" ? "done" : (k.id == "clear" ? "Clear" : (k.id == "submit" ? "Submit" : k.id))))
-                    px = Self.renderTextRGBA(label, canvas: ModelTextureHandoff.size, fontFrac: 0.46)
-                }
+                let label = k.id == "space" ? "space" : (k.id == "back" ? "<-" : (k.id == "done" ? "done" : (k.id == "clear" ? "Clear" : (k.id == "submit" ? "Submit" : k.id))))
+                let px = Self.renderTextRGBA(label, canvas: ModelTextureHandoff.size, fontFrac: 0.46)
                 if let px { keyLabelLayers[k.id] = registerRGBALayer("#key_\(k.id)", px) }
             }
             if let layer = keyLabelLayers[k.id] {

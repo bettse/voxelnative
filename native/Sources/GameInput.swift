@@ -47,7 +47,21 @@ final class GameInput {
         var hotbarSlot = -1     // 1-9: select that hotbar slot (-1 = none)
         var enterPrimary = false   // Enter: left-click the gazed panel slot or keyboard key (take / put all)
         var enterSecondary = false // Shift+Enter: right-click it (put one)
+        var typed: [TypedKey] = [] // text entry only: keys typed since the last poll
     }
+
+    /// A key typed into the in-game text panel from a BLE keyboard.
+    enum TypedKey: Equatable { case char(Character), backspace }
+
+    /// Set by WorldSession while the text panel is open: the keyboard types
+    /// text instead of driving the game (so I doesn't toggle the inventory and
+    /// Q doesn't drop mid-word). Esc and Enter still work.
+    var textEntry = false
+    // Typed keys arrive through keyChangedHandler (a press can come and go
+    // between polls), so queue them and drain once per poll.
+    private let typedLock = NSLock()
+    private var typedQueue: [TypedKey] = []
+    private weak var hookedKeyboard: GCKeyboard?
 
     private(set) var connected = false
     private(set) var keyboardPresent = false   // a BLE keyboard is an alternate input (WASD etc.)
@@ -328,8 +342,18 @@ final class GameInput {
         // A BLE keyboard is an alternative to the Sense controllers: gaze still
         // aims, the keyboard drives movement + actions. Applied after the sticks
         // so a key press wins only when actually held (either input works).
-        if let kb = GCKeyboard.coalesced?.keyboardInput {
+        if let board = GCKeyboard.coalesced, let kb = board.keyboardInput {
             @inline(__always) func k(_ c: GCKeyCode) -> Bool { kb.button(forKeyCode: c)?.isPressed ?? false }
+            if hookedKeyboard !== board { hookTyping(board); hookedKeyboard = board }
+            typedLock.lock(); let typed = typedQueue; typedQueue = []; typedLock.unlock()
+            if textEntry {
+                s.typed = typed
+                let shift = k(.leftShift) || k(.rightShift)
+                if k(.escape) { s.escape = true; s.cancel = true }
+                if k(.returnOrEnter) { s.menuSelect = true; if shift { s.enterSecondary = true } else { s.enterPrimary = true } }
+                keyboardPresent = true
+                return s
+            }
             var mx: Float = 0, my: Float = 0, tn: Float = 0
             if k(.keyW) || k(.upArrow)   { my += 1 }   // forward
             if k(.keyS) || k(.downArrow) { my -= 1 }   // back
@@ -390,6 +414,40 @@ final class GameInput {
         // visionOS actually uses in an immersive space) dig / confirm too.
         if PointerInput.shared.take() { s.dig = true; s.menuSelect = true }
         return s
+    }
+}
+
+extension GameInput {
+    /// Queue printable keys (and backspace) as they're pressed. GCKeyCode's raw
+    /// value is the USB HID usage, US layout.
+    fileprivate func hookTyping(_ board: GCKeyboard) {
+        board.keyboardInput?.keyChangedHandler = { [weak self] input, _, code, pressed in
+            guard pressed, let self else { return }
+            let shift = (input.button(forKeyCode: .leftShift)?.isPressed ?? false)
+                     || (input.button(forKeyCode: .rightShift)?.isPressed ?? false)
+            guard let key = Self.typedKey(hid: Int(code.rawValue), shift: shift) else { return }
+            self.typedLock.lock(); self.typedQueue.append(key); self.typedLock.unlock()
+        }
+    }
+
+    static func typedKey(hid: Int, shift: Bool) -> TypedKey? {
+        switch hid {
+        case 0x04...0x1D:
+            let c = Character(UnicodeScalar(UInt8(0x61 + hid - 0x04)))
+            return .char(shift ? Character(c.uppercased()) : c)
+        case 0x1E...0x27:
+            let i = hid - 0x1E
+            return .char(Array(shift ? "!@#$%^&*()" : "1234567890")[i])
+        case 0x2A: return .backspace
+        case 0x2C: return .char(" ")
+        default: break
+        }
+        let punct: [Int: (Character, Character)] = [
+            0x2D: ("-", "_"), 0x2E: ("=", "+"), 0x2F: ("[", "{"), 0x30: ("]", "}"),
+            0x31: ("\\", "|"), 0x33: (";", ":"), 0x34: ("'", "\""), 0x35: ("`", "~"),
+            0x36: (",", "<"), 0x37: (".", ">"), 0x38: ("/", "?")]
+        guard let p = punct[hid] else { return nil }
+        return .char(shift ? p.1 : p.0)
     }
 }
 
