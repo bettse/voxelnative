@@ -59,6 +59,12 @@ final class GameInput {
     // accumulate deltas off whatever queue fires them and drain once per poll.
     private let mouseLock = NSLock()
     private var mouseAccumX: Float = 0
+    // Button state latched from the press handlers: a trackpad click can come
+    // and go between two polls, and the device may not be GCMouse.current.
+    private var mouseLeftDown = false, mouseRightDown = false
+    private var mouseLeftClicked = false, mouseRightClicked = false
+    private var hookedMouse: GCMouse?
+    private var mouseMoveLogged = false, mouseButtonLogged = false
     // Turn per unit of mouse deltaX. Tuned low; feels like a slow desktop sens
     // and is easy to bump on device if it's sluggish.
     private static let mouseYawPerDelta: Float = 0.0022
@@ -110,6 +116,9 @@ final class GameInput {
         nc.addObserver(forName: .GCMouseDidConnect, object: nil, queue: .main) { [weak self] note in
             (note.object as? GCMouse).map { self?.hookMouse($0) }
         }
+        nc.addObserver(forName: .GCMouseDidDisconnect, object: nil, queue: .main) { [weak self] note in
+            if let self, (note.object as? GCMouse) === self.hookedMouse { self.hookedMouse = nil }
+        }
         GCMouse.current.map { hookMouse($0) }
     }
 
@@ -117,11 +126,32 @@ final class GameInput {
     /// drains them. Only deltaX is used (yaw turn); deltaY is dropped because the
     /// head owns pitch and a software pitch would slide the aim off the view.
     private func hookMouse(_ m: GCMouse) {
-        m.mouseInput?.mouseMovedHandler = { [weak self] _, dx, _ in
+        hookedMouse = m
+        m.mouseInput?.mouseMovedHandler = { [weak self] _, dx, dy in
             guard let self else { return }
-            self.mouseLock.lock(); self.mouseAccumX += dx; self.mouseLock.unlock()
+            self.mouseLock.lock(); self.mouseAccumX += dx
+            let first = !self.mouseMoveLogged; self.mouseMoveLogged = true
+            self.mouseLock.unlock()
+            if first { print("[input] mouse first move dx=\(dx) dy=\(dy)"); fflush(stdout) }
         }
-        print("[input] mouse hooked vendor=\(m.vendorName ?? "?")"); fflush(stdout)
+        // Latch presses from the handlers so a quick tap-to-click registers even
+        // if it's released before the next poll.
+        m.mouseInput?.leftButton.pressedChangedHandler = { [weak self] _, _, pressed in
+            self?.noteMouseButton(left: true, pressed: pressed)
+        }
+        m.mouseInput?.rightButton?.pressedChangedHandler = { [weak self] _, _, pressed in
+            self?.noteMouseButton(left: false, pressed: pressed)
+        }
+        print("[input] mouse hooked vendor=\(m.vendorName ?? "?") input=\(m.mouseInput != nil) right=\(m.mouseInput?.rightButton != nil)"); fflush(stdout)
+    }
+
+    private func noteMouseButton(left: Bool, pressed: Bool) {
+        mouseLock.lock()
+        if left { mouseLeftDown = pressed; if pressed { mouseLeftClicked = true } }
+        else { mouseRightDown = pressed; if pressed { mouseRightClicked = true } }
+        let first = !mouseButtonLogged; mouseButtonLogged = true
+        mouseLock.unlock()
+        if first { print("[input] mouse first button left=\(left) pressed=\(pressed)"); fflush(stdout) }
     }
 
     // MARK: - Haptics (#357)
@@ -317,7 +347,9 @@ final class GameInput {
             if k(.keyF)         { s.dig = true }         // attack / mine (gaze-aimed)
             if k(.keyR)         { s.place = true }       // place / use
             if k(.keyE)         { s.inventory = true }   // toggle inventory
-            if k(.escape)       { s.menu = true }        // exit / menu
+            // Esc opens/closes the Kogane menu (the keyboard has no right X) and
+            // still cancels: it closes the inventory or the text keyboard first.
+            if k(.escape)       { s.menu = true; s.koganeMenu = true }
             if k(.openBracket)  { s.hotbarPrev = true }  // [ prev slot
             if k(.closeBracket) { s.hotbarNext = true }  // ] next slot
             if k(.keyF) || k(.returnOrEnter) { s.menuSelect = true }  // confirm in menus
@@ -328,11 +360,17 @@ final class GameInput {
         // A BLE mouse/trackpad: deltaX (drained from the handler) turns the view,
         // left button digs, right button places. deltaY is intentionally ignored
         // (the head owns pitch). Works alongside a keyboard or the controllers.
-        if let mi = GCMouse.current?.mouseInput {
-            mouseLock.lock(); let dx = mouseAccumX; mouseAccumX = 0; mouseLock.unlock()
+        if let mi = (hookedMouse ?? GCMouse.current)?.mouseInput {
+            mouseLock.lock()
+            let dx = mouseAccumX; mouseAccumX = 0
+            // Held, or pressed at any point since the last poll.
+            let left = mouseLeftDown || mouseLeftClicked || mi.leftButton.isPressed
+            let right = mouseRightDown || mouseRightClicked || mi.rightButton?.isPressed == true
+            mouseLeftClicked = false; mouseRightClicked = false
+            mouseLock.unlock()
             if dx != 0 { s.lookYaw = dx * Self.mouseYawPerDelta }
-            if mi.leftButton.isPressed  { s.dig = true; s.menuSelect = true }
-            if mi.rightButton?.isPressed == true { s.place = true }
+            if left  { s.dig = true; s.menuSelect = true }
+            if right { s.place = true }
             mousePresent = true
         } else {
             mousePresent = false
