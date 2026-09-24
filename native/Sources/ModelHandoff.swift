@@ -18,8 +18,8 @@ final class ModelHandoff {
     private var bi: [UInt32] = []
     // One generation per stream, bumped only when that stream's bytes change,
     // so the renderer (90Hz vs the ~62.5Hz producer) skips re-uploading
-    // unchanged geometry (#163). Separate counters: a walking mob used to
-    // force the open inventory panel's overlay to re-upload every tick.
+    // unchanged geometry (#163), and a walking mob doesn't re-upload an open
+    // inventory panel's overlay.
     private var gen = 0, ogen = 0, bgen = 0
     func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = [],
               blendVerts: [Float] = [], blendIndices: [UInt32] = []) {

@@ -40,6 +40,21 @@ public enum Formspec {
         return out
     }
 
+    /// The drawn-only parts every form path needs (labels, image[]/item_image[],
+    /// background[]), already converted to real coordinates for a legacy form,
+    /// so the open, refresh and info-form paths can't drift apart on it.
+    public struct Visuals { public var labels: [Label]; public var images: [Image]; public var backgrounds: [Background] }
+    public static func parseVisuals(_ spec: String, legacy: Bool) -> Visuals {
+        var v = Visuals(labels: parseLabels(spec), images: parseImages(spec) + parseItemImages(spec),
+                        backgrounds: parseBackgrounds(spec))
+        if legacy {
+            v.labels = v.labels.map(Legacy.convert)
+            v.images = v.images.map(Legacy.convert)
+            v.backgrounds = v.backgrounds.map(Legacy.convert)
+        }
+        return v
+    }
+
     /// A form with no_prepend[] (VoxeLibre's creative inventory and books) opts
     /// out of the server's formspec prepend, stone panel included.
     public static func wantsPrepend(_ body: String) -> Bool { !body.contains("no_prepend[") }
@@ -533,7 +548,7 @@ public enum Formspec {
             let x = legacy ? t.gx * Legacy.spacing.x : t.gx
             let top = legacy ? t.gy * Legacy.spacing.y + 0.404 : t.gy
             let w = legacy ? t.w * Legacy.spacing.x : t.w
-            let lines = wrap(t.text, width: max(10, Int(w / 0.2)))
+            let lines = wrap(t.text, width: max(10, Int(w / charWidth)))
             for (i, line) in lines.prefix(maxRows).enumerated() {
                 out.append(Label(gx: x + 0.1, gy: top + 0.25 + Float(i) * 0.4, text: line, color: nil))
             }
@@ -546,6 +561,10 @@ public enum Formspec {
         }
         return out
     }
+
+    /// Rough width of one label character in form units, for wrapping and for
+    /// sizing the panel around text (the panel's font isn't measured).
+    public static let charWidth: Float = 0.2
 
     /// A `textarea[x,y;w,h;name;label;default]`'s box and its visible text
     /// (label, then default, joined), for read-only display in info forms.
@@ -758,12 +777,10 @@ public enum Formspec {
         /// into gy. Image buttons span their cells like images; plain buttons
         /// are centered in h image-heights.
         public static func convert(_ b: PositionedButton) -> PositionedButton {
-            var o = b
             let image = !b.texture.isEmpty || !b.itemName.isEmpty
             let hh = image ? b.h * spacing.y - (spacing.y - 1) : b.h
-            o = PositionedButton(gx: x(b.gx), gy: y(b.gy) + hh / 2 - 0.5, w: span(b.w), name: b.name, label: b.label,
-                                 exit: b.exit, texture: b.texture, itemName: b.itemName, color: b.color, h: hh)
-            return o
+            return PositionedButton(gx: x(b.gx), gy: y(b.gy) + hh / 2 - 0.5, w: span(b.w), name: b.name, label: b.label,
+                                    exit: b.exit, texture: b.texture, itemName: b.itemName, color: b.color, h: hh)
         }
         /// Legacy fields subtract the padding back out (getElementBasePos then
         /// pos -= padding) and center in their h; Field has no h, so assume one

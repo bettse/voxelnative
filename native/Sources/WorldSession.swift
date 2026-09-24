@@ -186,7 +186,7 @@ final class WorldSession {
     private var kbBufferDirty = true        // text changed: re-rasterise into that layer (in-place patch)
     private var kbBufferAspect: Float = 1   // width/height of the baked output text (renderTextFilled)
     private var kbHover: Int? = nil
-    private var kbPrevDig = false
+    private var kbPrevPress = false
     private var kbPrevCancel = false        // edge-detect the cancel (menu/inventory) button so the press that OPENED the keyboard doesn't instantly close it (#238)
     #if targetEnvironment(simulator)
     private var koganeSimClock: Float = 0       // sim-only: auto-opens the menu so it can be screenshotted
@@ -2312,10 +2312,10 @@ final class WorldSession {
         #endif
         if gi.inventory && !prevInventory { toggleInventory() }
         prevInventory = gi.inventory
-        // Esc closes an open inventory or container, like desktop (the Kogane
-        // menu only opens from Esc once nothing else is up).
-        if gi.menu && !prevMenuKey, inventoryOpen, !keyboardOpen { toggleInventory() }
-        prevMenuKey = gi.menu
+        // The Menu button / Esc closes an open inventory or container, like
+        // desktop (Esc only opens the Kogane menu once nothing else is up).
+        if gi.cancel && !prevCancel, inventoryOpen, !keyboardOpen { toggleInventory() }
+        prevCancel = gi.cancel
         // Q drops the wielded stack (Shift+Q one item), T opens chat: desktop
         // keys with no controller button. Not while a panel or keyboard is up.
         if !inventoryOpen, !keyboardOpen {
@@ -2753,7 +2753,7 @@ final class WorldSession {
         #endif
         if gi.snap && !prevSnap { screenshotFlag.request(); print("[shot] requested"); fflush(stdout) }
         if inventoryOpen { handleInventoryInput(gi); act.dig = false; act.place = false }   // trigger/grip belong to the panel
-        else { invPrevDig = gi.dig; invPrevPlace = gi.place }
+        else { (invPrevPrimary, invPrevSecondary) = panelClicks(gi) }
         prevSnap = gi.snap
         if gi.snap { act.dig = false; act.place = false }
         let pA = perf.now()
@@ -2815,7 +2815,7 @@ final class WorldSession {
         let menuBtnEdge = gi.koganeMenu && !prevKoganeMenuBtn   // right X: open the menu without looking up
         prevKoganeMenuBtn = gi.koganeMenu
         prevKoganeTrigger = trigger
-        let cancel = gi.place || gi.menu
+        let cancel = gi.place || gi.cancel
         let cancelEdge = cancel && !prevKoganeCancel
         prevKoganeCancel = cancel
 
@@ -2849,10 +2849,9 @@ final class WorldSession {
             return true
         }
         prevKoganeNav = 0
-        // Esc (keyboard: menu + koganeMenu together) clears chat / the join
-        // message first when any is showing; the next Esc opens the menu. The
-        // controller's X (koganeMenu alone) opens it as before.
-        if menuBtnEdge, gi.menu, !inventoryOpen, chatVisible {
+        // Esc clears chat / the join message first when any is showing; the
+        // next Esc opens the menu. The controller's X opens it as before.
+        if menuBtnEdge, gi.escape, !inventoryOpen, chatVisible {
             dismissChat()
             return false
         }
@@ -3028,7 +3027,7 @@ final class WorldSession {
         // Dead: no digging/placing; any action button respawns (no text death
         // screen yet, so the red cast + this is the whole death UX for now).
         if dead {
-            var btn = gi.jump || gi.place || gi.dig || gi.menu
+            var btn = gi.jump || gi.place || gi.dig || gi.cancel
             #if targetEnvironment(simulator)
             // Headless runs have no button to press: respawn automatically so a
             // harness never runs (and screenshots) through the red death cast.
@@ -3518,8 +3517,13 @@ final class WorldSession {
     private var invCursor: SIMD3<Float>? = nil                           // ray hit on the panel plane (node space)
     private var invCountLayers: [Int: Int] = [:]                          // count -> model-texture layer
     private var invTileCache: [String: String?] = [:]                     // item name -> atlas tile
-    private var invPrevDig = false, invPrevPlace = false
-    private var prevHotbarSlot = -1, prevMenuKey = false, prevDropKey = false, prevChatKey = false
+    private var invPrevPrimary = false, invPrevSecondary = false
+    /// Held state of the panel's primary (take / put all) and secondary (put one)
+    /// clicks: trigger / grip, or Enter / Shift+Enter on a keyboard.
+    private func panelClicks(_ gi: GameInput.State) -> (primary: Bool, secondary: Bool) {
+        (gi.dig || gi.enterPrimary, gi.place || gi.enterSecondary)
+    }
+    private var prevHotbarSlot = -1, prevCancel = false, prevDropKey = false, prevChatKey = false
     private static let invCell: Float = 0.054, invPitch: Float = 0.062   // metres (1 node = 1 m); ~0.8 m wide panel
 
     private func inventoryStack(_ s: InvSlot) -> Client.ItemStack? {
@@ -3676,27 +3680,19 @@ final class WorldSession {
     private func refreshOpenNodeFormspec() {
         guard formspecOpen, let ctx = formspecContext, let fs = client.world.nodeFormspec(ctx) else { return }
         let spec = Formspec.flattenContainers((Formspec.wantsPrepend(fs) ? client.formspecPrepend : "") + fs)
-        formspecImages = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
-        formspecBackgrounds = Formspec.parseBackgrounds(spec)
-        formspecLabelsRaw = Formspec.parseLabels(spec)
-        // Same conversion as openFormspec: the brewing stand re-sends its
-        // legacy-coordinate form every brew tick, and without this its art
-        // and icons snapped back to raw units on the first update.
-        if Formspec.Legacy.applies(to: fs) {
-            formspecImages = formspecImages.map(Formspec.Legacy.convert)
-            formspecBackgrounds = formspecBackgrounds.map(Formspec.Legacy.convert)
-            formspecLabelsRaw = formspecLabelsRaw.map(Formspec.Legacy.convert)
-        }
+        // The brewing stand re-sends its legacy-coordinate form every brew tick,
+        // so this path converts too (parseVisuals), same as openFormspec.
+        let vis = Formspec.parseVisuals(spec, legacy: Formspec.Legacy.applies(to: fs))
+        formspecImages = vis.images; formspecBackgrounds = vis.backgrounds; formspecLabelsRaw = vis.labels
         layoutInventory()
     }
 
     /// Open a non-inventory info form (achievements / announcements / doc Help)
-    /// read-only in the spatial panel: tab captions, textlist rows and hypertext
-    /// are flattened to positioned text (Formspec.infoFormLabels), plus any
-    /// image[] (the achievement icon) and background art. No item lists, so it's
-    /// text-only for now; close it by clicking off the panel, which sends the
-    /// form's quit like any other. Tab switching / row selection is a follow-up
-    /// (the parsers already carry the field names) (#339).
+    /// in the spatial panel: tab captions, textlist rows, textarea and hypertext
+    /// text become positioned labels (Formspec.infoFormLabels), plus any image[]
+    /// (the achievement icon) and background art. Tabs and textlist rows are
+    /// tappable (infoTargets, #346); clicking off the panel sends the form's
+    /// quit like any other (#339).
     private func openInfoFormspec(spec: String, name: String, legacy: Bool) {
         // A re-send of the SAME form (tab switch, row select echo) should keep
         // the panel where it is instead of re-anchoring in front of the player
@@ -3705,25 +3701,17 @@ final class WorldSession {
         formspecContext = nil            // player form (show_formspec), not a node's meta form
         formspecElements = []
         formspecRings = []
-        // Achievements and Help are old-coordinate forms: convert their own
-        // elements the way openFormspec does, and hand the flag to the
-        // textlist/hypertext flattening so rows land in the same units.
-        var labels = Formspec.parseLabels(spec)
-        var images = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
-        var backgrounds = Formspec.parseBackgrounds(spec)
-        if legacy {
-            labels = labels.map(Formspec.Legacy.convert)
-            images = images.map(Formspec.Legacy.convert)
-            backgrounds = backgrounds.map(Formspec.Legacy.convert)
-        }
-        formspecLabelsRaw = labels + Formspec.infoFormLabels(spec, legacy: legacy)
+        // Achievements and Help are old-coordinate forms: the flag converts
+        // their labels/images/backgrounds and the textlist/hypertext rows alike.
+        let vis = Formspec.parseVisuals(spec, legacy: legacy)
+        formspecLabelsRaw = vis.labels + Formspec.infoFormLabels(spec, legacy: legacy)
         formspecFields = []
         formspecButtons = []
         invWidgets = []
         formspecInfoTargets = Formspec.infoTargets(spec, legacy: legacy)
-        formspecImages = images
+        formspecImages = vis.images
         formspecTooltips = [:]
-        formspecBackgrounds = backgrounds
+        formspecBackgrounds = vis.backgrounds
         formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
         formspecName = name
         formspecOpen = true; inventoryOpen = true; formspecIsInventory = false
@@ -3745,8 +3733,8 @@ final class WorldSession {
         }
         formspecIsInventory = inventory
         // The server's per-player formspec prepend carries the global stone
-        // background9 panel + styles; Luanti prepends it to every formspec, so we
-        // do too before parsing (#244).
+        // background9 panel + styles; Luanti prepends it to every formspec
+        // except those with no_prepend[] (Formspec.wantsPrepend), so we do too (#244).
         let rawSpec = (Formspec.wantsPrepend(rawSpec0) ? client.formspecPrepend : "") + rawSpec0
         // Log the raw spec (prepend + body) so a device capture shows the exact
         // slot/label/background coords the server sent -- needed to pin the
@@ -3756,6 +3744,7 @@ final class WorldSession {
         // Bake container[]/container_end[] offsets into element positions so the
         // parsers below stay container-unaware (enchanting table rows, #234).
         let spec = Formspec.flattenContainers(rawSpec)
+        let legacy = Formspec.Legacy.applies(to: rawSpec0)   // old coordinates: the body decides, not the prepend
         let lists = Formspec.parseLists(spec, context: formspecContext)
         guard !lists.isEmpty else {
             // No item grids: a text dialog (sign, command block). If it's a pure
@@ -3776,7 +3765,7 @@ final class WorldSession {
             // read-only in the panel so it's legible, instead of the one-button
             // notice that dropped everything but a single button (#339).
             if Formspec.isInfoForm(spec) {
-                openInfoFormspec(spec: spec, name: name, legacy: Formspec.Legacy.applies(to: rawSpec0))
+                openInfoFormspec(spec: spec, name: name, legacy: legacy)
                 return
             }
             // A button dialog (bed sleep form, death screen): show a notice and
@@ -3792,29 +3781,28 @@ final class WorldSession {
         }
         formspecElements = lists
         formspecRings = Formspec.parseListrings(spec, context: formspecContext)   // shift-click order (#208)
-        let legacy = Formspec.Legacy.applies(to: rawSpec0)
-        formspecLabelsRaw = Formspec.parseLabels(spec)   // station name + slot captions (#176)
+        // Station name + slot captions (#176), furnace fire/arrow gauges (#223),
+        // item_image[] icons like beacon payment / trade hints (#232), stone
+        // panel + station art (#244).
+        let vis = Formspec.parseVisuals(spec, legacy: legacy)
+        formspecLabelsRaw = vis.labels
         // A list-form can also carry an editable field (anvil rename) or a button;
         // surface them as tappable boxes in the panel instead of dropping them (#229).
         formspecFields = formspecContext != nil ? Formspec.parseFieldsPositioned(spec) : []
         formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)   // + stonecutter recipes (#235)
-        // Static images: furnace fire/arrow gauges (#223) + item_image[] icons
-        // like the beacon payment row / trade hints (#232).
-        formspecImages = Formspec.parseImages(spec) + Formspec.parseItemImages(spec)
+        formspecImages = vis.images
         formspecTooltips = Formspec.parseTooltips(spec)   // hover text (enchant cost, #236)
-        formspecBackgrounds = Formspec.parseBackgrounds(spec)   // stone panel + station art (#244)
+        formspecBackgrounds = vis.backgrounds
         formspecCheckboxes = Formspec.parseCheckboxes(spec)   // toggles (#237)
         checkboxState = Dictionary(formspecCheckboxes.map { ($0.name, $0.selected) }, uniquingKeysWith: { a, _ in a })
         // Old-coordinate forms (villager trade, brewing stand) go into the
         // real-coordinate units the layout below assumes; left alone, their
-        // item grid spilled past the background art.
+        // item grid spilled past the background art. (parseVisuals already
+        // converted labels/images/backgrounds.)
         if legacy {
             formspecElements = formspecElements.map(Formspec.Legacy.convert)
-            formspecLabelsRaw = formspecLabelsRaw.map(Formspec.Legacy.convert)
             formspecFields = formspecFields.map(Formspec.Legacy.convert)
             formspecButtons = formspecButtons.map(Formspec.Legacy.convert)
-            formspecImages = formspecImages.map(Formspec.Legacy.convert)
-            formspecBackgrounds = formspecBackgrounds.map(Formspec.Legacy.convert)
             formspecCheckboxes = formspecCheckboxes.map(Formspec.Legacy.convert)
         }
         formspecName = name              // remembered so close sends the named-form quit (#130)
@@ -4065,9 +4053,9 @@ final class WorldSession {
             for i in invImages { grow(i.u, i.v, i.hw, i.hh) }
             for w in invWidgets { grow(w.u, w.v, w.hw, w.hh) }
             // Labels are left-anchored at u; reach right by a rough text width
-            // (~0.2 cell per character) so a long textlist row stays on the panel.
+            // (Formspec.charWidth) so a long textlist row stays on the panel.
             for l in invLabels {
-                let w = Float(l.text.count) * 0.2 * p
+                let w = Float(l.text.count) * Formspec.charWidth * p
                 grow(l.u + w * 0.5, l.v, w * 0.5, p * 0.5)
             }
         }
@@ -4106,9 +4094,9 @@ final class WorldSession {
         #endif
         // Keyboard Enter / Shift+Enter click the gazed slot like the trigger /
         // grip (take or put the whole stack / put one).
-        let take = gi.dig || gi.panelTake, one = gi.place || gi.panelOne
-        let primary = take && !invPrevDig, secondary = one && !invPrevPlace
-        invPrevDig = take; invPrevPlace = one
+        let (take, one) = panelClicks(gi)
+        let primary = take && !invPrevPrimary, secondary = one && !invPrevSecondary
+        invPrevPrimary = take; invPrevSecondary = one
         guard primary || secondary else { return }
         // Tap an info-form tab caption or textlist row (achievements/Help): submit
         // the field so the server re-sends the form on that tab / with that entry
@@ -4275,7 +4263,7 @@ final class WorldSession {
             return
         }
         guard let h = hover, let stack = inventoryStack(h) else { return }
-        // Shift-click quick-move: left grip (gi.fast) held + a right-trigger TAP
+        // Shift-click quick-move: left grip, or E / Ctrl on a keyboard (gi.fast), held + a primary TAP
         // on a filled slot, nothing in hand -> send the stack to its logical
         // destination instead of picking it up, like holding shift on desktop
         // (#208). Only on the primary tap; left grip does nothing else in the panel.
@@ -4798,10 +4786,6 @@ final class WorldSession {
         #endif
     }
 
-    /// Draw the server's generic HUD elements (Hud::drawLuaElements): images
-    /// sized by texture px * scale (negative scale = percent of screen) and
-    /// anchored by align (-1..1), text in its `number` colour, waypoints at the
-    /// projected world position. Sorted by z_index so vignettes go underneath.
     /// Server HUD elements we replace or deliberately leave out.
     static func hudAlwaysSkipped(_ e: Client.HudElement) -> Bool {
         // VoxeLibre adds its own crosshair image; we deliberately draw no
@@ -4820,6 +4804,10 @@ final class WorldSession {
         return false
     }
 
+    /// Draw the server's generic HUD elements (Hud::drawLuaElements): images
+    /// sized by texture px * scale (negative scale = percent of screen) and
+    /// anchored by align (-1..1), text in its `number` colour, waypoints at the
+    /// projected world position. Sorted by z_index so vignettes go underneath.
     private func appendServerHUD(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
                                  v: inout [Float], idx: inout [UInt32]) {
         // Sorted view cached by hudGeneration: the server keeps ~80 pre-created
@@ -5823,11 +5811,6 @@ final class WorldSession {
     private var mobMissLogged: Set<String> = []
     private var modelDropLogged: Set<String> = []   // mobs that fell back to a white billboard (#72)
 
-    /// Head-locked health hearts in the lower-left periphery. Each heart is a
-    /// small camera-facing billboard placed on a gaze-relative ray (fixed
-    /// azimuth/elevation offsets from where the head looks), so the row travels
-    /// with the head and stays low and to the left instead of centred. hp is
-    /// 0..20; each heart shows two HP (full / half / dim empty).
     /// Where the offhand item sits in the vitals band: on the XP level's row
     /// (-0.22, above the XP bar at -0.28), just right of the digits at az 0,
     /// and above any health-boost or absorption rows. Just above the hearts
@@ -5887,6 +5870,11 @@ final class WorldSession {
         }
     }
 
+    /// Head-locked health hearts in the lower-left periphery. Each heart is a
+    /// small camera-facing billboard placed on a gaze-relative ray (fixed
+    /// azimuth/elevation offsets from where the head looks), so the row travels
+    /// with the head and stays low and to the left instead of centred. hp is
+    /// 0..20; each heart shows two HP (full / half / dim empty).
     private func appendHealthHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
         // Follow the heart statbar's icon (poison green, wither black, frost
@@ -7347,7 +7335,7 @@ final class WorldSession {
         // is still held this frame; seed the edge-trackers as pressed so the
         // keyboard doesn't read that same hold as a key click or a cancel and
         // slam shut immediately (#238: it opened and closed in one frame).
-        kbPrevDig = true; kbPrevCancel = true
+        kbPrevPress = true; kbPrevCancel = true
         print("[kbd] open"); fflush(stdout)
     }
 
@@ -7426,13 +7414,13 @@ final class WorldSession {
         }
         // Enter presses the gazed key/button too (bug-note mic / clear / submit,
         // chat keys), same as the trigger.
-        let pressHeld = gi.dig || gi.panelTake || gi.panelOne
-        let press = pressHeld && !kbPrevDig
-        kbPrevDig = pressHeld
-        // Right O / left grip cancels without submitting -- but only on a FRESH
+        let pressHeld = gi.dig || gi.enterPrimary || gi.enterSecondary
+        let press = pressHeld && !kbPrevPress
+        kbPrevPress = pressHeld
+        // Right O, the Menu button, or Esc cancels without submitting -- but only on a FRESH
         // press: edge-detect it so the menu/inventory button still held from
         // opening the keyboard doesn't cancel it on frame one (#238).
-        let cancelHeld = gi.inventory || gi.menu
+        let cancelHeld = gi.inventory || gi.cancel
         let cancel = cancelHeld && !kbPrevCancel
         kbPrevCancel = cancelHeld
         if cancel {

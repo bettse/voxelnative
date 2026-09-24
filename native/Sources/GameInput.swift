@@ -17,28 +17,27 @@ import simd
 /// = drop the wielded stack (WorldSession.gateDropChord), menu = exit, both
 /// grips (left + right) = screenshot.
 ///
-/// A BLE keyboard is an alternative to the controllers (gaze aims): WASD/arrows
-/// move, Left/Right arrows turn, Space jump, Left-Shift sneak, Left-Ctrl sprint,
-/// F dig, R place, E inventory, [ / ] hotbar, Esc menu, Enter confirm.
-///
-/// A BLE mouse/trackpad supplements either input: moving it turns the view (yaw),
-/// left button digs, right button places. Vertical mouse motion is ignored -- the
-/// tracked head owns pitch, so a software pitch would slide the aim off the view.
+/// A BLE keyboard is an alternative to the controllers (gaze aims), on desktop
+/// Luanti's keys; the full map is the keyboard block in poll(). Look-and-pinch
+/// (PointerInput) clicks like Enter. A paired mouse/trackpad reaches the game
+/// only if visionOS delivers it: GCMouse deltas turn the view, its buttons (or a
+/// pointer spatial event) dig.
 final class GameInput {
     struct State {
         var move = SIMD2<Float>(0, 0)
         var turn: Float = 0
         var dig = false
         var place = false
-        var menu = false
+        var cancel = false      // controller Menu button or Esc: back out of a panel, keyboard or menu
+        var escape = false      // keyboard Esc (also sets cancel + koganeMenu)
         var jump = false
-        var fast = false
+        var fast = false        // sprint (aux1); in a panel also the quick-move modifier (left grip / E / Ctrl)
         var sneak = false
         var snap = false        // both grips: take a screenshot
         var hotbarPrev = false  // LEFT face button (square / Button A on the left Sense)
         var hotbarNext = false  // LEFT face button (triangle / Button B on the left Sense)
         var inventory = false   // RIGHT O (Button B): toggle the inventory panel
-        var koganeMenu = false  // RIGHT X (Button A): open the Kogane menu
+        var koganeMenu = false  // RIGHT X (Button A) or Esc: open the Kogane menu
         var dismissChat = false // RIGHT stick click: clear the join/chat lines
         var menuNavY: Float = 0 // EITHER stick Y, for menu navigation
         var menuSelect = false  // EITHER trigger, for menu confirm
@@ -47,8 +46,8 @@ final class GameInput {
         var drop = false        // Q: drop the wielded stack (sneak held: one item)
         var chat = false        // T: open chat
         var hotbarSlot = -1     // 1-9: select that hotbar slot (-1 = none)
-        var panelTake = false   // Enter in a panel: left-click the gazed slot (take / put all)
-        var panelOne = false    // Shift+Enter in a panel: right-click it (put one)
+        var enterPrimary = false   // Enter: left-click the gazed panel slot or keyboard key (take / put all)
+        var enterSecondary = false // Shift+Enter: right-click it (put one)
     }
 
     private(set) var connected = false
@@ -71,7 +70,6 @@ final class GameInput {
     private var mouseLeftDown = false, mouseRightDown = false
     private var mouseLeftClicked = false, mouseRightClicked = false
     private var hookedMouse: GCMouse?
-    private var mouseMoveLogged = false, mouseButtonLogged = false
     // Turn per unit of mouse deltaX. Tuned low; feels like a slow desktop sens
     // and is easy to bump on device if it's sluggish.
     private static let mouseYawPerDelta: Float = 0.0022
@@ -134,12 +132,9 @@ final class GameInput {
     /// head owns pitch and a software pitch would slide the aim off the view.
     private func hookMouse(_ m: GCMouse) {
         hookedMouse = m
-        m.mouseInput?.mouseMovedHandler = { [weak self] _, dx, dy in
+        m.mouseInput?.mouseMovedHandler = { [weak self] _, dx, _ in
             guard let self else { return }
-            self.mouseLock.lock(); self.mouseAccumX += dx
-            let first = !self.mouseMoveLogged; self.mouseMoveLogged = true
-            self.mouseLock.unlock()
-            if first { print("[input] mouse first move dx=\(dx) dy=\(dy)"); fflush(stdout) }
+            self.mouseLock.lock(); self.mouseAccumX += dx; self.mouseLock.unlock()
         }
         // Latch presses from the handlers so a quick tap-to-click registers even
         // if it's released before the next poll.
@@ -156,9 +151,7 @@ final class GameInput {
         mouseLock.lock()
         if left { mouseLeftDown = pressed; if pressed { mouseLeftClicked = true } }
         else { mouseRightDown = pressed; if pressed { mouseRightClicked = true } }
-        let first = !mouseButtonLogged; mouseButtonLogged = true
         mouseLock.unlock()
-        if first { print("[input] mouse first button left=\(left) pressed=\(pressed)"); fflush(stdout) }
     }
 
     // MARK: - Haptics (#357)
@@ -285,7 +278,7 @@ final class GameInput {
                 if gp.rightShoulder.isPressed { s.place = true; rightGrip = true }   // right grip
                 if gp.leftShoulder.isPressed { s.fast = true; leftGrip = true }     // left grip = sprint
                 if gp.leftThumbstickButton?.isPressed == true { s.sneak = true }
-                if gp.buttonMenu.isPressed { s.menu = true }
+                if gp.buttonMenu.isPressed { s.cancel = true }
                 if gp.buttonX.isPressed { s.hotbarPrev = true }   // left square -> prev hotbar
                 if gp.buttonY.isPressed { s.hotbarNext = true }   // left triangle -> next hotbar
                 if gp.buttonB.isPressed { s.inventory = true }    // right O -> inventory
@@ -329,7 +322,7 @@ final class GameInput {
                 if p.buttons["Button A"]?.isPressed == true { s.koganeMenu = true }   // right X
                 if p.buttons["Thumbstick Button"]?.isPressed == true { s.dismissChat = true }   // right stick click -> clear chat
             }
-            if p.buttons["Button Menu"]?.isPressed == true { s.menu = true }
+            if p.buttons["Button Menu"]?.isPressed == true { s.cancel = true }
         }
         if debug { fflush(stdout) }
         if leftGrip && rightGrip { s.snap = true }   // both grips = screenshot
@@ -350,9 +343,9 @@ final class GameInput {
             if tn != 0 { s.turn = tn }
             // Desktop Luanti's default keys (defaultsettings.cpp), so desktop
             // habits carry over: E is aux1 (VoxeLibre sprint), I the inventory,
-            // Q drop, T chat, 1-9 / B / N the hotbar. F and R stand in for the
-            // mouse buttons (the trackpad doesn't reach the game), Left Control
-            // sprints too, and [ ] still step the hotbar.
+            // Q drop, T chat, 1-9 / B / N the hotbar. F and R dig and place (a
+            // look-and-pinch also digs, via PointerInput; no route right-click
+            // places), Left Control sprints too, and [ ] still step the hotbar.
             let shift = k(.leftShift) || k(.rightShift)
             if k(.spacebar)     { s.jump = true }
             if shift            { s.sneak = true }
@@ -364,7 +357,7 @@ final class GameInput {
             if k(.keyT)         { s.chat = true }
             // Esc opens/closes the Kogane menu (the keyboard has no right X) and
             // still cancels: it closes the inventory or the text keyboard first.
-            if k(.escape)       { s.menu = true; s.koganeMenu = true }
+            if k(.escape)       { s.escape = true; s.cancel = true; s.koganeMenu = true }
             if k(.openBracket) || k(.keyB)  { s.hotbarPrev = true }
             if k(.closeBracket) || k(.keyN) { s.hotbarNext = true }
             let digits: [GCKeyCode] = [.one, .two, .three, .four, .five, .six, .seven, .eight, .nine]
@@ -372,7 +365,7 @@ final class GameInput {
             if k(.keyF) || k(.returnOrEnter) { s.menuSelect = true }  // confirm in menus
             // Enter clicks the gazed inventory slot: plain = take / put the whole
             // stack, Shift = put one (desktop's left / right click).
-            if k(.returnOrEnter) { if shift { s.panelOne = true } else { s.panelTake = true } }
+            if k(.returnOrEnter) { if shift { s.enterSecondary = true } else { s.enterPrimary = true } }
             keyboardPresent = true
         } else {
             keyboardPresent = false
@@ -402,24 +395,19 @@ final class GameInput {
     }
 }
 
-/// Trackpad/mouse clicks as visionOS delivers them to a full immersive space:
-/// as spatial events on the LayerRenderer (kind .pointer), not through
-/// GCMouse, which never fired for Eric's keyboard trackpad. The renderer's
-/// onSpatialEvent writes here; GameInput.poll reads it like a mouse button.
+/// Look-and-pinch and pointer clicks, which visionOS delivers to an immersive
+/// space as LayerRenderer spatial events (hooked up in App.swift) rather than
+/// through GCMouse. They only arrive over the tracking area
+/// Renderer.encodeTrackingArea draws. GameInput.poll reads this like a mouse button.
 final class PointerInput: @unchecked Sendable {
     static let shared = PointerInput()
     private let lock = NSLock()
     private var down = false, clicked = false
-    private var seenKinds = Set<String>()
 
     /// Called on the main actor from LayerRenderer.onSpatialEvent.
     func handle(_ events: SpatialEventCollection) {
         for e in events {
             let kind = "\(e.kind)"
-            lock.lock()
-            let first = seenKinds.insert(kind).inserted
-            lock.unlock()
-            if first { print("[input] first spatial event kind=\(kind) phase=\(e.phase)"); fflush(stdout) }
             // Look-and-pinch (indirectPinch) and a trackpad/mouse pointer both
             // click the gazed thing. A pinch is how a keyboard-only player selects
             // without a free key, and a trackpad click may arrive as either kind.
