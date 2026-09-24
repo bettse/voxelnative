@@ -247,8 +247,11 @@ struct ContentView: View {
                 Text("PSVR2 Sense").font(.callout).foregroundStyle(.secondary)
                 controllerPill("Left", on: appModel.leftControllerOn)
                 controllerPill("Right", on: appModel.rightControllerOn)
+                // A paired BLE keyboard stands in for the pair (gaze aims, keys
+                // move/act), so show it when it's there to explain why Play works.
+                if appModel.keyboardOn { controllerPill("Keyboard", on: true) }
                 if !controllerGate {
-                    Text("turn both controllers on to connect").font(.footnote).foregroundStyle(.secondary)
+                    Text("turn both controllers on, or pair a keyboard, to connect").font(.footnote).foregroundStyle(.secondary)
                 }
             }
             if connecting {
