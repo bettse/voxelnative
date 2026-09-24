@@ -49,6 +49,9 @@
         <string>UIWindowSceneSessionRoleApplication</string>
         <key>UIApplicationSupportsMultipleScenes</key><true/>
     </dict>
+	<!-- The only cryptography is the Luanti login handshake (SRP) and content
+	     hashes, which are exempt, so skip the export-compliance question. -->
+	<key>ITSAppUsesNonExemptEncryption</key><false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Connect to a Luanti game server on your local network.</string>
 </dict>
