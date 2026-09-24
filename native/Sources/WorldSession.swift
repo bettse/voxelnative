@@ -1323,6 +1323,40 @@ final class WorldSession {
             default: break
             }
         }
+        // -vrdev.headroomTest 1: bed respawn in a 2-high cave. VoxeLibre puts
+        // the feet at the CENTRE of the spawn node, half a node above the floor,
+        // so the head starts inside the ceiling. Desktop falls the half node;
+        // we used to hold the player there, head in the rock, unable to move.
+        // Build a 2-high pocket locally and drop the player in the same way.
+        if UserDefaults.standard.bool(forKey: "vrdev.headroomTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                client.sendChat("/grantme all"); simTeleportToPad()
+                simDigPhase = 10; simDigTimer = 0
+            case 10 where simDigTimer > 6 && player.physics().grounded && player.physics().feet.y > 100:
+                guard let brick = client.nodes.id(for: "mcl_core:stonebrick") else {
+                    print("[headroomtest] RESULT missing node defs pass=false"); fflush(stdout); simDigPhase = 99; break
+                }
+                let f = player.physics().feet
+                let cy = Int(floor(f.y - 0.1)) + 4, cx = Int(floor(f.x)) + 4, cz = Int(floor(f.z))
+                for dx in -1...1 { for dz in -1...1 {
+                    for y in [cy, cy + 3] {   // floor and ceiling, two air nodes between
+                        let n = SIMD3(cx + dx, y, cz + dz); client.world.setNode(n, param0: brick); markNodeDirty(n)
+                    }
+                } }
+                var cf = SIMD3(Float(cx) + 0.5, Float(cy + 1) + 0.5, Float(cz) + 0.5)   // node centre, like the server
+                let cdt: Float = 1.0 / 60
+                for _ in 0..<60 { cf = collideMove(feet: cf, delta: SIMD3(0, -4 * cdt, 0), grounded: false).feet }
+                let landed = abs(cf.y - Float(cy + 1)) < 0.05
+                let moved = collideMove(feet: cf, delta: SIMD3(0.5, 0, 0), grounded: true).feet
+                let walks = moved.x - cf.x > 0.4
+                let pass = landed && walks
+                print("[headroomtest] RESULT feet=\(cf.y) floorTop=\(cy + 1) landed=\(landed) walks=\(walks) pass=\(pass)"); fflush(stdout)
+                simDigPhase = 2
+            default: break
+            }
+        }
         // -vrdev.iceTest 1: slippery parity (#269). Lay a local 21x21 ice patch under
         // the sim player, auto-walk for 3 s, then stop: on ice the speed must
         // ramp up slowly (accel 2.4/(3+1) = 0.6 node/s^2) and coast on after the
@@ -4484,13 +4518,16 @@ final class WorldSession {
     }
     private var nodeIconCache: [String: NodeIcon?] = [:]
     /// The three camera-facing faces at yaw 45 + pitch 30, unit half-size:
-    /// left (-Z=5), right (+X=2), top (+Y=0). Order is draw order (top last
-    /// so it wins the flattened overlap).
+    /// the front tile (5) on the left, the right tile (2) on the right, top (0).
+    /// The sides sit on the -X and +Z planes, the two that face the viewer
+    /// after iso(); the +X/-Z planes are the far ones and drew the inside of
+    /// the cube. Corners run bottom-left, bottom-right, top-right, top-left
+    /// as seen. Order is draw order (top last so it wins the flattened overlap).
     private static let cubeIconFaces: [(fi: Int, shade: Float, dep: Float)] = [
         (5, packTint(184, 184, 184), -0.010), (2, packTint(140, 140, 140), -0.010), (0, packTint(255, 255, 255), -0.014)]
     private static let cubeIconCorners: [[SIMD3<Float>]] = [
-        [SIMD3(1, -1, -1), SIMD3(-1, -1, -1), SIMD3(-1, 1, -1), SIMD3(1, 1, -1)],
-        [SIMD3(1, -1, 1), SIMD3(1, -1, -1), SIMD3(1, 1, -1), SIMD3(1, 1, 1)],
+        [SIMD3(-1, -1, -1), SIMD3(-1, -1, 1), SIMD3(-1, 1, 1), SIMD3(-1, 1, -1)],
+        [SIMD3(-1, -1, 1), SIMD3(1, -1, 1), SIMD3(1, 1, 1), SIMD3(-1, 1, 1)],
         [SIMD3(-1, 1, -1), SIMD3(-1, 1, 1), SIMD3(1, 1, 1), SIMD3(1, 1, -1)]]
 
     private func resolveNodeIcon(_ name: String) -> NodeIcon? {
@@ -8573,6 +8610,18 @@ final class WorldSession {
         // is steppable, so it must NOT trigger the limited-move/eject path, or you
         // can't walk from one carpet onto the next and spawn-on-carpet traps you
         // (the igloo bug, #242). Those fall through to the normal step-up below.
+        // A ceiling poking into the top half of the body only: VoxeLibre's bed
+        // respawn puts the feet at the spawn node's centre, half a node up, so
+        // in a 2-high cave the head starts in the rock. Desktop ignores a box
+        // it's already deep inside and just falls; here, drop straight down
+        // under the ceiling when there's room, instead of the stuck path below.
+        let startBox = playerBox(feet)
+        let overhead = solids.filter { $0.overlaps(startBox) }
+        if !overhead.isEmpty, overhead.allSatisfy({ $0.lo.y > feet.y + playerHeight * 0.5 }) {
+            var under = feet
+            under.y = overhead.map(\.lo.y).min()! - playerHeight - 1e-3
+            if under.y < feet.y, !solids.contains(where: { $0.overlaps(playerBox(under)) }) { feet = under }
+        }
         let embedBox = playerBox(feet)
         if solids.contains(where: { $0.overlaps(embedBox) && $0.hi.y > feet.y + playerStep }) {
             func embeddedCount(_ f: SIMD3<Float>) -> Int {
