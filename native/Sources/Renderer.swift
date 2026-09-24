@@ -573,7 +573,7 @@ actor Renderer {
         // clip (no controller needed). Uses monotonic uptime so it's time-based.
         let spin = d.double(forKey: "vrdev.spin")
         let yaw = Float(d.double(forKey: "vrdev.yaw")) * .pi / 180
-                + (spin != 0 ? Float(ProcessInfo.processInfo.systemUptime * spin) * .pi / 180 : 0)
+                + (spin != 0 ? Float(AppClock.seconds * spin) * .pi / 180 : 0)
         if pitch == 0 && yaw == 0 { return matrix_identity_float4x4 }
         // Yaw about the world up axis, then pitch about the head's right axis;
         // +pitch tilts the forward (-Z) ray up toward +Y.
@@ -819,7 +819,7 @@ actor Renderer {
             // Animate: a quick drop-and-pop when the wield changes, and a
             // continuous swing while digging. Both ride on top of the grip so the
             // resting pose (offset/tilt/size) is unchanged.
-            let now = CACurrentMediaTime()
+            let now = AppClock.seconds
             let key: (Int, Int32) = {
                 switch w {
                 case .block(let l): return (hud.wieldIndex, l.first ?? -1)
@@ -1357,7 +1357,7 @@ actor Renderer {
         self.uniforms[0].skyRayToWorld = (mirror * r).transpose
         let sd = rs.sunDir
         let sdRot = mirror * r * SIMD4<Float>(sd, 0)
-        let tSec = Float(ProcessInfo.processInfo.systemUptime.truncatingRemainder(dividingBy: 100000))
+        let tSec = Float(AppClock.seconds.truncatingRemainder(dividingBy: 100000))
         // Unit length here, once: skyFragment dots against it per pixel.
         let sdUnit = simd_normalize(SIMD3<Float>(sdRot.x, sdRot.y, sdRot.z))
         self.uniforms[0].sunDir = SIMD4<Float>(sdUnit.x, sdUnit.y, sdUnit.z, tSec)
@@ -1396,7 +1396,7 @@ actor Renderer {
     private var animLastFrame: [Int: Int] = [:]
     private func stepTileAnimation() {
         guard !animLayers.isEmpty, let tex = textureArray else { return }
-        let now = CACurrentMediaTime()
+        let now = AppClock.seconds
         let edge = TextureAtlas.tile, need = edge * edge * 4
         for a in animLayers where a.frames.count > 1 && a.layer < tex.arrayLength {
             let idx = Int(now / Double(a.secPerFrame)) % a.frames.count

@@ -2404,7 +2404,7 @@ final class WorldSession {
         // Double-tap jump toggles free_move when the server granted "fly"
         // (Game::toggleFreeMove's privilege check); a single tap still jumps.
         if gi.jump && !flyPrevJump && !inventoryOpen {
-            let now = ProcessInfo.processInfo.systemUptime
+            let now = AppClock.seconds
             if now - flyLastTap < 0.35, client.privileges.contains("fly") {
                 flying.toggle(); flyLastTap = -10
                 addChat(sender: "", text: flying ? "Flying on" : "Flying off")
@@ -2963,7 +2963,7 @@ final class WorldSession {
             fh.seekToEndOfFile(); try? fh.write(contentsOf: data); try? fh.close()
         } else { try? data.write(to: url) }
         noticeText = "Bug note saved"
-        noticeExpiry = ProcessInfo.processInfo.systemUptime + 2.5   // a quick confirmation, not a sticky banner
+        noticeExpiry = AppClock.seconds + 2.5   // a quick confirmation, not a sticky banner
         print("[bugnote] \(context) -- \(body)"); fflush(stdout)
     }
 
@@ -5402,11 +5402,11 @@ final class WorldSession {
         }
     }
 
-    /// ProcessInfo.systemUptime read once per postEntities (an ObjC singleton
-    /// fetch + message send per spinning entity otherwise).
+    /// AppClock.seconds read once per postEntities, so every spinning entity
+    /// in a frame shares one reading.
     private var frameUptime: TimeInterval = 0
     private func postEntities() {
-        frameUptime = ProcessInfo.processInfo.systemUptime
+        frameUptime = AppClock.seconds
         guard atlasBuilt else { return }
         frameHeadXform = player.headXform()   // one locked read for the whole pass
         // Snapshot the entity list once per tick and reuse it for both the model-
@@ -7571,7 +7571,7 @@ final class WorldSession {
     private func appendStatusBanner(v: inout [Float], idx: inout [UInt32]) {
         // Crisp filled renderer, not renderTextRGBA at a small fontFrac -- the
         // load/connect banner was the last blurry text path.
-        if noticeText != nil, noticeExpiry > 0, ProcessInfo.processInfo.systemUptime > noticeExpiry {
+        if noticeText != nil, noticeExpiry > 0, AppClock.seconds > noticeExpiry {
             noticeText = nil; noticeExpiry = 0
         }
         guard let msg = connProblem ?? noticeText ?? (terrainLoading ? "Loading terrain\u{2026}" : nil),

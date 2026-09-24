@@ -189,7 +189,7 @@ public final class MediaManager {
         // Serve anything already in the on-disk cache (keyed by the announced
         // sha1) without touching the network; only download the misses.
         var hits: [String] = []
-        let t0 = DispatchTime.now().uptimeNanoseconds
+        let t0 = ContinuousClock.now   // not DispatchTime uptime: that reads boot time, which the privacy manifest would have to justify
         for name in toGet where store[name] == nil {
             if let url = cacheURL(name), let data = try? Data(contentsOf: url) {
                 store[name] = data; requested.insert(name); hits.append(name)
@@ -198,7 +198,8 @@ public final class MediaManager {
         }
         if !hits.isEmpty {
             toGet.subtract(hits); cacheHits += hits.count
-            let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e6
+            let d = t0.duration(to: .now).components
+            let ms = Double(d.seconds) * 1000 + Double(d.attoseconds) / 1e15
             print("[media] cache hit \(hits.count) (\(cacheHits) total) in \(Int(ms)) ms"); fflush(stdout)
         }
         guard !toGet.isEmpty else { if !awaitingReply && pending.isEmpty { onComplete?() }; return }
