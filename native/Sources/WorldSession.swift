@@ -7417,8 +7417,11 @@ final class WorldSession {
                 kbHover = keyboardKeys.firstIndex { abs($0.u - u) <= $0.hw && abs($0.v - v) <= $0.hh + 0.002 }
             }
         }
-        let press = gi.dig && !kbPrevDig
-        kbPrevDig = gi.dig
+        // Enter presses the gazed key/button too (bug-note mic / clear / submit,
+        // chat keys), same as the trigger.
+        let pressHeld = gi.dig || gi.panelTake || gi.panelOne
+        let press = pressHeld && !kbPrevDig
+        kbPrevDig = pressHeld
         // Right O / left grip cancels without submitting -- but only on a FRESH
         // press: edge-detect it so the menu/inventory button still held from
         // opening the keyboard doesn't cancel it on frame one (#238).
