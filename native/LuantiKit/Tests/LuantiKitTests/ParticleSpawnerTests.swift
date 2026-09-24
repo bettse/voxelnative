@@ -43,7 +43,7 @@ final class ParticleSpawnerTests: XCTestCase {
         XCTAssertEqual(sp.amount, 50)
         XCTAssertEqual(sp.time, 2.0, accuracy: 1e-4)
         // Node units, not BS: particles.cpp keeps positions in nodes and scales
-        // by BS only to render. Dividing here shrank the weather to a tenth (#199).
+        // by BS only to render. Dividing here shrank the weather to a tenth.
         XCTAssertEqual(sp.posMin.x, 10.5, accuracy: 1e-4)  // 10 + 0.5
         XCTAssertEqual(sp.posMin.y, 20.5, accuracy: 1e-4)
         XCTAssertEqual(sp.velMin.x, -5, accuracy: 1e-4)

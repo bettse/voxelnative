@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// AO_CMD_SET_BONE_POSITION (#124): parse, interpolation state, and how an
+/// AO_CMD_SET_BONE_POSITION: parse, interpolation state, and how an
 /// override lands in the skinned pose. Rotation convention follows Irrlicht's
 /// quaternion::set(euler) feeding the same transposed-matrix path as b3d keys.
 final class BoneOverrideTests: XCTestCase {

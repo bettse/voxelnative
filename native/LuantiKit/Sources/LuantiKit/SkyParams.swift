@@ -21,7 +21,7 @@ public struct SkyParams: Equatable {
     /// (Nether/End). nil = "regular".
     public var solid: SIMD3<Float>? = nil
     /// A "skybox" SET_SKY's six textures in the API order Y+ Y- X- X+ Z+ Z-
-    /// (the End's starry box). Empty for the other types (#290).
+    /// (the End's starry box). Empty for the other types.
     public var skyboxTextures: [String] = []
 
     public var sunVisible = true

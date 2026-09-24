@@ -26,12 +26,12 @@ typedef struct
     // Day/night light already decoded through the light curve and blended per
     // VERTEX (like the engine's nodes/opengl_vertex.glsl), so the fragment
     // stage multiplies one interpolated colour instead of running two exp/pow
-    // curves per pixel. Smooth lighting (#273) gives each corner its own
+    // curves per pixel. Smooth lighting gives each corner its own
     // nibbles, so this interpolates the curved value across the face, which
     // is also what desktop does.
     float3 lit;
     half3  tint [[flat]];
-    float  fogDist;   // metres from the eye, for the distance fog (#285)
+    float  fogDist;   // metres from the eye, for the distance fog
 } ColorInOut;
 
 // The engine's fog (nodes/opengl_fragment.glsl): linear from fog_start*range
@@ -123,7 +123,7 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
 {
     ColorInOut out;
     float4 position = float4(in.position, 1.0);
-    // nodedef waving (#300), packed by the mesher as shade + 2*class. The
+    // nodedef waving, packed by the mesher as shade + 2*class. The
     // engine's nodes shader: plants (1) sway only their top vertices (uv.y
     // near 0), leaves (2) wobble the whole node on all three axes, both as
     // smooth triangle waves keyed on position so neighbours are out of phase.
@@ -171,7 +171,7 @@ vertex ColorInOut liquidVertex(Vertex in [[stage_in]],
     float t = uniforms.sunDir.w;
     // Lava (negative shade sentinel) waves slower and shallower than water.
     // Stained glass / blended nodeboxes share this stream but are flagged with
-    // shade + 2 (params.y >= 1.5); they're solid, so don't wave them (#143/#177).
+    // shade + 2 (params.y >= 1.5); they're solid, so don't wave them.
     bool lava = in.params.y < 0.0;
     bool blended = in.params.y >= 1.5;
     if (!blended) {
@@ -232,7 +232,7 @@ static inline float4 worldLit(half4 c, ColorInOut in, constant Uniforms & unifor
 }
 
 // Cutout world (leaves, plants, nodeboxes): alpha-tests, so it cannot use
-// early-Z. The solid world uses fragmentShaderOpaque below instead (#164).
+// early-Z. The solid world uses fragmentShaderOpaque below instead.
 fragment float4 fragmentShader(ColorInOut in [[stage_in]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                                texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
@@ -300,7 +300,7 @@ fragment float4 glassFragment(ColorInOut in [[stage_in]])
 }
 
 // Solid opaque blocks (NDT_NORMAL cubes): no discard, so the GPU can run depth
-// tests before the fragment shader and skip occluded surfaces (#164). Byte-for-
+// tests before the fragment shader and skip occluded surfaces. Byte-for-
 // byte the same colour as fragmentShader for a fully-opaque texel.
 [[early_fragment_tests]]
 fragment float4 fragmentShaderOpaque(ColorInOut in [[stage_in]],

@@ -147,7 +147,7 @@ public enum WorldMesher {
     // 13 4dir, 14 color4dir. Anything else has no directional rotation.
     /// A type="wallmounted" node_box carries 3 boxes (wall_top, wall_bottom,
     /// wall_side); exactly ONE is drawn, chosen by the wallmounted param2, not
-    /// all three (the plus-clump on buttons/floor heads, #212). Floor (0) uses
+    /// all three (the plus-clump on buttons/floor heads). Floor (0) uses
     /// wall_bottom, ceiling (1) wall_top, walls (2-5) wall_side rotated about Y
     /// to face the wall. (Wall facing may want a device spot-check; the box is
     /// centred on the origin so rotateFacedir's low 2 bits are a pure Y turn.)
@@ -192,7 +192,7 @@ public enum WorldMesher {
         }
     }()
 
-    // Node ids already reported by noteDarkSample (#359). The mesher runs on
+    // Node ids already reported by noteDarkSample. The mesher runs on
     // one serial queue, so plain statics are enough; capped so a bad world
     // can't flood the log. Keyed by id and checked before the name lookup:
     // sharp light edges hit this per vertex corner for the whole session.
@@ -209,7 +209,7 @@ public enum WorldMesher {
     /// day + night*16 with WHOLE banks (a node's param1 byte); a fractional
     /// night there spills 16*frac into the day nibble on decode, so a torch's
     /// 9.5 night next to day 15 read back as night 10, day 7: a dark band at
-    /// the edge of any torch light, day or night (#359, #367). The engine keeps
+    /// the edge of any torch light, day or night. The engine keeps
     /// the banks in separate bytes (mapblock_mesh.cpp); this does the same in
     /// 1/16 steps, offset past 1024 so the shader tells it from a plain byte.
     /// Exact in float32 (max 1024 + 240 + 240*256).
@@ -276,7 +276,7 @@ public enum WorldMesher {
     /// `faces`) for a plain cube under facedir `fd`: the source face whose local
     /// normal, rotated by `fd`, lands on this world face. fd==0 is the identity.
     /// Tile selection only (no per-face texture twist), which is enough for logs/
-    /// pumpkins/fronts to face the right way (#225).
+    /// pumpkins/fronts to face the right way.
     public static func cubeTile(_ worldFace: Int, _ fd: UInt8) -> Int {
         let f = faces[worldFace]
         if fd == 0 { return f.tile }
@@ -340,7 +340,7 @@ public enum WorldMesher {
 
     /// Tilt an entity's local vertex by `pitch` radians in the X-Y plane, applied
     /// before the horizontal yaw so a mesh whose long axis is X (an arrow shaft)
-    /// tips off horizontal (#128). Exactly identity at pitch 0, so entities that
+    /// tips off horizontal. Exactly identity at pitch 0, so entities that
     /// never pitch (mobs) are unchanged. Sign matches Ry's u' = c*u - s*v.
     @inline(__always)
     public static func pitchLocal(_ p: SIMD3<Float>, _ pitch: Float) -> SIMD3<Float> {
@@ -350,7 +350,7 @@ public enum WorldMesher {
     }
 
     /// Rotation about the model's X axis (server rotation.x), the Y-Z plane
-    /// counterpart of pitchLocal (#305).
+    /// counterpart of pitchLocal.
     public static func tiltLocal(_ p: SIMD3<Float>, _ pitch: Float) -> SIMD3<Float> {
         if pitch == 0 { return p }
         let c = cos(pitch), s = sin(pitch)
@@ -380,7 +380,7 @@ public enum WorldMesher {
     // draws a full opaque face coplanar with it: a solid cube OR leaves (allfaces
     // render an opaque boundary face too). Without this, a snow layer / carpet /
     // slab resting on such a neighbour draws its bottom face at the exact plane of
-    // the neighbour's top face and the two Z-fight (snow-on-leaves #220). Leaves
+    // the neighbour's top face and the two Z-fight (snow on leaves). Leaves
     // don't count as a full occluder elsewhere (you see into a cluster), so this
     // is a separate, boundary-only test.
     @inline(__always)
@@ -428,16 +428,16 @@ public enum WorldMesher {
         // One flowing-liquid corner scratch for the whole mesh, reused across
         // every liquid node/face (was reallocated per liquid node). Safe because
         // each `corners = fcorners` binding is dead before the next mutation, so
-        // no copy-on-write copy is triggered (#189).
+        // no copy-on-write copy is triggered.
         var fcorners = [SIMD3<Float>](repeating: .zero, count: 4)
-        var ftopUV = [SIMD2<Float>](repeating: .zero, count: 4)   // flowing-liquid top UV scratch, reused per top face (#329)
+        var ftopUV = [SIMD2<Float>](repeating: .zero, count: 4)   // flowing-liquid top UV scratch, reused per top face
         ov.reserveCapacity(only == nil ? (1 << 16) : 4096)   // single-block meshes stay small
-        // #164: opaque faces split into si (solid NDT_NORMAL cubes -> early-Z, no
+        // opaque faces split into si (solid NDT_NORMAL cubes -> early-Z, no
         // discard) and oi (everything with possible alpha holes -> discard pass).
         // Both index the shared ov vertex buffer.
         var emitSolid = false
 
-        // Block-pointer cache (#181): node lookups cluster within one 16^3 block
+        // Block-pointer cache: node lookups cluster within one 16^3 block
         // (a node and its 6 neighbours), so hold the last block and skip the dict
         // hash + getter on every call. Snapshot `blocks` once (COW, read-only mesh).
         // Returns exactly what WorldMap.nodeId/nodeLight/nodeParam2 would.
@@ -466,7 +466,7 @@ public enum WorldMesher {
         // nodes that share the corner on the face's outer side (the neighbour
         // plus the three beside it along the face plane), skipping opaque ones,
         // and darken by how many of the four are opaque (Luanti's ao_gamma 1.8
-        // table). Returns the packed day + night*16 value for the vertex (#273).
+        // table). Returns the packed day + night*16 value for the vertex.
         let aoAmount: [Float] = [1, 0.85, 0.68, 0.46, 0.46]
         // A sample that occludes light instead of carrying it: opaque cubes, any
         // solid drawtype (plantlike_rooted is a full base cube), and any node
@@ -499,7 +499,7 @@ public enum WorldMesher {
                 if d > hiDay { hiDay = d }
             }
             // Always-on, near-free diagnostic for the soft dark blobs on open
-            // snow (#359): a corner where one light-carrying sample is far darker
+            // snow: a corner where one light-carrying sample is far darker
             // than the rest, with no occluder to explain it, names that node once
             // per node type. It rides the loop we already run, so ordinary play
             // produces the answer in native.log with no settings flipped.
@@ -544,7 +544,7 @@ public enum WorldMesher {
         }
 
         @inline(__always)
-        // The renderer back-face culls the SOLID stream (#85), which the engine
+        // The renderer back-face culls the SOLID stream, which the engine
         // only does for NDT_NORMAL cubes (content_mapblock.cpp: backface_culling
         // = drawtype == NDT_NORMAL). Every other drawtype (leaves, plants,
         // glass, nodeboxes, meshes) lands in the cutout stream, which the
@@ -553,7 +553,7 @@ public enum WorldMesher {
         // throw half of it away.
         // nodedef waving class for the node being emitted (1 plants, 2 leaves),
         // carried to the vertex shader as shade + 2*class: shade itself is
-        // 0..1 so the shader splits them with floor(x/2) (#300). Liquids wave
+        // 0..1 so the shader splits them with floor(x/2). Liquids wave
         // in the liquid pass on their own and never set this.
         var waveShift: Float = 0
         // Append one 9-float vertex / one 6-index quad without a throwaway array
@@ -568,7 +568,7 @@ public enum WorldMesher {
         func emitQuad(_ corners: [SIMD3<Float>], base b: SIMD3<Int>, layer: Float, shade: Float, light: Float, liquid: Bool, tint: Float = 16777215, uvs: [SIMD2<Float>]? = nil) {
             emitQuad(corners, base: b, layer: layer, shade: shade, lights: SIMD4(repeating: light), liquid: liquid, tint: tint, uvs: uvs)
         }
-        // Per-corner light (smooth lighting, #273): one packed day+night*16
+        // Per-corner light (smooth lighting): one packed day+night*16
         // value per vertex; the vertex shader unpacks so the banks interpolate
         // separately across the face.
         func emitQuad(_ corners: [SIMD3<Float>], base b: SIMD3<Int>, layer: Float, shade: Float, lights: SIMD4<Float>, liquid: Bool, tint: Float = 16777215, uvRot: UInt8 = 0, uvs: [SIMD2<Float>]? = nil) {
@@ -612,10 +612,10 @@ public enum WorldMesher {
             // go to the alpha-BLEND (liquid) stream, not the cutout/discard pass
             // where its low-alpha pixels vanish -- same routing glass cubes use
             // (shade + 2.0 marks it "blended, not water" to the liquid shader).
-            // Opaque nodeboxes (doors/fences/walls) stay in the cutout stream (#177).
+            // Opaque nodeboxes (doors/fences/walls) stay in the cutout stream.
             let blended = ms.bl(id)
             // Cull a face that lies flush with the node's outer boundary when the
-            // neighbour in that direction draws a coplanar opaque face (#220). Only
+            // neighbour in that direction draws a coplanar opaque face. Only
             // for an un-rotated box: a facedir'd box (doors) moves its faces off the
             // axis, so the flush/neighbour test no longer lines up -- leave those
             // drawing every face as before.
@@ -820,7 +820,7 @@ public enum WorldMesher {
                         } else { corners = f.c }
                         // Turn the flowing top texture so its animation runs downhill,
                         // like drawLiquidTop: rotate each top-face UV by the flow
-                        // direction derived from the corner heights (#329).
+                        // direction derived from the corner heights.
                         var topUVs: [SIMD2<Float>]? = nil
                         if flowing, f.n.y > 0 {
                             let dir = WorldMesher.liquidFlowDir(h00: h00, h10: h10, h01: h01, h11: h11)
@@ -837,7 +837,7 @@ public enum WorldMesher {
                 waveShift = Float(nodes.waving(id)) * 2
                 // Solid = a fully-opaque cube face (no alpha holes, back-face
                 // culled): route to the early-Z pass. Blended (glass, goes to the
-                // liquid pass anyway) and clip cubes stay in the discard pass (#164).
+                // liquid pass anyway) and clip cubes stay in the discard pass.
                 emitSolid = rk == .cube && !ms.bl(id) && !ms.cl(id)
                 switch rk {
                 case .plant:
@@ -952,7 +952,7 @@ public enum WorldMesher {
                     if let boxes = nodes.boxes(id), !boxes.isEmpty {
                         if nodes.isWallmountedBox(id) {
                             // Wallmounted node_box: draw only the one box the
-                            // param2 selects (buttons/heads), not all three (#212).
+                            // param2 selects (buttons/heads), not all three.
                             for box in WorldMesher.wallmountedBox(boxes, param2: block.param2[nodeIdx]) {
                                 emitBox(box, base: g, id: id, light: light, tint: tint, facedir: 0)
                             }
@@ -969,7 +969,7 @@ public enum WorldMesher {
                                 let np = SIMD3(g.x + off.x, g.y + off.y, g.z + off.z)
                                 // nodeboxConnects: mutual connects_to between two
                                 // connected nodeboxes, and the target's
-                                // connect_sides gate for anything else (#299).
+                                // connect_sides gate for anything else.
                                 if nodes.nodeboxConnects(from: id, to: cNodeId(np), dir: di) {
                                     for box in arms[di] { emitBox(box, base: g, id: id, light: light, tint: tint, facedir: fd) }
                                 }
@@ -998,7 +998,7 @@ public enum WorldMesher {
                     // allfaces (leaves) mesh like cubes but don't occlude each
                     // other, so faces into non-leaf neighbours (air, glass) stay.
                     // BUT the face between two of the SAME leaf is culled: two
-                    // coplanar cull-none faces at the same depth z-fight (#204).
+                    // coplanar cull-none faces at the same depth z-fight.
                     // This matches "fast leaves"; you still see into a cluster at
                     // its air-facing edges.
                     // Stained glass (use_texture_alpha="blend") draws in the
@@ -1010,7 +1010,7 @@ public enum WorldMesher {
                     // SOURCE tile whose local normal, rotated by param2, lands on
                     // this world face -- so a horizontal log shows rings on the
                     // axis ends and bark on the sides, carved pumpkins/furnace/
-                    // dispenser fronts face the placed way (#225). allfaces/leaves
+                    // dispenser fronts face the placed way. allfaces/leaves
                     // don't use facedir. Tile selection only (no texture twist).
                     let fd = rk == .cube ? WorldMesher.meshFacedir(block.param2[nodeIdx], ms.p2t(id)) : 0
                     let overlays = ms.ov(id)       // lock-free (folded into the snapshot)
@@ -1019,7 +1019,7 @@ public enum WorldMesher {
                         let np = SIMD3(g.x + f.n.x, g.y + f.n.y, g.z + f.n.z)
                         let nid = cNodeId(np)
                         if occludes(nid, ms) { continue }
-                        if nid == id, glass || rk == .allfaces || ms.gl(id) { continue }   // same glass/leaf: cull shared face (#204, #265)
+                        if nid == id, glass || rk == .allfaces || ms.gl(id) { continue }   // same glass/leaf: cull shared face
                         let srcTile = WorldMesher.cubeTile(fi, fd)
                         // Facedir also ROTATES the tile (not just picks it), so
                         // log grain / pillar caps line up (mapblock_mesh dir_to_tile).

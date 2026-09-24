@@ -36,7 +36,7 @@ public final class Client {
     /// `meta` is the ItemStackMetadata key/value store: VoxeLibre keeps the
     /// anvil rename in "description", the bow's charge frame and enchant glint
     /// in "inventory_image", enchantments in "mcl_enchanting:enchantments",
-    /// dyed armor/banner colour in "mcl_armor:color" etc. (#271).
+    /// dyed armor/banner colour in "mcl_armor:color" etc..
     public struct ItemStack { public var name: String; public var count: Int; public var wear: Int
         public var meta: [String: String] = [:]
         public init(name: String, count: Int, wear: Int, meta: [String: String] = [:]) {
@@ -103,23 +103,23 @@ public final class Client {
     public var onMovement: ((_ walk: Float, _ fast: Float, _ crouch: Float, _ jump: Float, _ gravity: Float) -> Void)?
     /// TOCLIENT_MOVEMENT liquid fields (movement_liquid_fluidity, _smooth,
     /// _sink): VoxeLibre sets sink=23 vs the engine's 10, i.e. you sink 2.3x
-    /// faster in its water than in a default game (#274).
+    /// faster in its water than in a default game.
     public var onLiquidMovement: ((_ fluidity: Float, _ fluiditySmooth: Float, _ sink: Float) -> Void)?
     /// movement_acceleration_default in node/s^2 as the engine actually applies
     /// it: the setting is stored pre-multiplied by BS (player.cpp) and
     /// applyControl multiplies by BS again (localplayer.cpp:715), so the
     /// effective ground acceleration is the wire value x10 (VoxeLibre 2.4 -> 24).
-    /// Only slippery nodes use it here (#269): elsewhere our stick speed is
+    /// Only slippery nodes use it here: elsewhere our stick speed is
     /// applied directly, but ice scales this by 1/(slippery+1) for its glide.
     public private(set) var accelDefault: Float = 30
     /// movement_speed_climb from MOVEMENT (ladders/vines; engine default 3,
-    /// VoxeLibre's minetest.conf sets 2.35) (#299).
+    /// VoxeLibre's minetest.conf sets 2.35).
     public private(set) var speedClimb: Float = 3
     /// TOCLIENT_SHOW_FORMSPEC (0x44): a server dialog. formspec text + form name.
     public var onShowFormspec: ((_ formspec: String, _ formname: String) -> Void)?
     /// TOCLIENT_INVENTORY_FORMSPEC (0x42): the player's own inventory form
     /// (mcl_inventory's survival page with the offhand/armour slots, or the
-    /// creative browser). Empty = the server never sent one (#281).
+    /// creative browser). Empty = the server never sent one.
     public private(set) var inventoryFormspec = ""
     public var onInventoryFormspec: ((_ formspec: String) -> Void)?
     /// TOCLIENT_HUD_SET_FLAGS (0x4c) state, hud.h HUD_FLAG_*: 1 hotbar,
@@ -128,7 +128,7 @@ public final class Client {
     public private(set) var hudFlags: UInt32 = 0xFFFF_FFFF
     /// TOCLIENT_PRIVILEGES (0x41): the names the server granted us ("fly",
     /// "fast", "noclip", "interact", ...). The engine gates free_move on
-    /// "fly" (Game::toggleFreeMove checks checkPrivilege) (#291).
+    /// "fly" (Game::toggleFreeMove checks checkPrivilege).
     public private(set) var privileges: Set<String> = []
     public var onPrivileges: ((Set<String>) -> Void)?
     public var onHudFlags: ((UInt32) -> Void)?
@@ -325,7 +325,7 @@ public final class Client {
     var protoVer = 0                              // negotiated protocol version (TOCLIENT_HELLO; test-settable)
     /// Luanti centres node g on g (it spans [g-0.5, g+0.5]); our mesh, physics
     /// and raycast draw node g at [g, g+1]. Every position crossing the wire is
-    /// shifted here, once, so nothing downstream needs a +0.5 patch (#78):
+    /// shifted here, once, so nothing downstream needs a +0.5 patch:
     /// server -> us adds gridShift, us -> server subtracts it.
     public static let gridShift = SIMD3<Float>(0.5, 0.5, 0.5)
     // Invariant: only positions crossing the wire get +/- gridShift. A position
@@ -335,7 +335,7 @@ public final class Client {
     private var yaw: Float = 0, pitch: Float = 0
     private var posTimer: Double = 0
     /// Blocks the server streams within (PLAYERPOS wanted_range). Settable so a
-    /// view-distance slider can trade draw distance for GPU/thermal load (#161).
+    /// view-distance slider can trade draw distance for GPU/thermal load.
     public var wantedRange = 8 { didSet { wantedRange = max(2, min(15, wantedRange)) } }
     private let name: String
     public var playerName: String { name }
@@ -358,7 +358,7 @@ public final class Client {
     public var onXp: ((_ level: Int, _ fraction: Float) -> Void)?
 
     /// A server HUD element (HUDADD/HUDCHANGE), every field kept so the session
-    /// can draw generic image/text/waypoint elements (#103: boss bars, potion
+    /// can draw generic image/text/waypoint elements (boss bars, potion
     /// effects, vignettes). Statbars and the XP pair also have dedicated paths.
     public struct HudElement: Equatable {
         public var type = 0                        // 0 image, 1 text, 2 statbar, 3 inventory, 4 waypoint, 5 image_waypoint, 6 compass, 7 minimap, 8 hotbar
@@ -469,8 +469,8 @@ public final class Client {
     /// TOSERVER_INVENTORY_FIELDS body (string16 formname, u16 count, then
     /// string16 key + string32 value per field). Split out so tests can decode
     /// it: closing a named show_formspec form (a chest's "mcl_chests:...") sends
-    /// this with quit, which is what fires the server's on_player_receive_fields
-    /// (#130). A wrong packet here leaves chests visually open.
+    /// this with quit, which is what fires the server's on_player_receive_fields.
+    /// A wrong packet here leaves chests visually open.
     static func inventoryFieldsPacket(formname: String, fields: [String: String]) -> Data {
         let w = PacketWriter()
         w.string16(formname)
@@ -508,7 +508,7 @@ public final class Client {
     /// position/velocity in the given ranges. Positions are already in our grid.
     /// The look-related tail of ParticleParameters shared by one-shot particles
     /// and spawners (particles.cpp deSerialize / handleCommand_AddParticleSpawner):
-    /// tile animation, glow, vertical, and the node= source (#307).
+    /// tile animation, glow, vertical, and the node= source.
     public struct ParticleLook: Equatable {
         public var vertical = false
         public var collisionRemoval = false
@@ -573,7 +573,7 @@ public final class Client {
         /// collisiondetection: particles stop on walkable nodes (and with
         /// collision_removal, vanish there). Weather spawns flakes 20+ nodes
         /// above the player; underground that's inside rock, so honoring this
-        /// is what keeps snow out of caves (#275).
+        /// is what keeps snow out of caves.
         public let collisionDetection: Bool
         public init(serverId: Int, amount: Int, time: Float, posMin: SIMD3<Float>, posMax: SIMD3<Float>,
                     velMin: SIMD3<Float>, velMax: SIMD3<Float>, accMin: SIMD3<Float>, accMax: SIMD3<Float>,
@@ -653,7 +653,7 @@ public final class Client {
     public func disconnect(_ reason: String = "client disconnect") { conn.disconnect(reason) }
     public func poll(_ delta: Double) {
         conn.poll(delta)
-        drainDecodedBlocks()   // splice blocks decoded off-thread since last poll (#179/#180)
+        drainDecodedBlocks()   // splice blocks decoded off-thread since last poll
         // Advance the day locally between server updates (24000 units = a day).
         timeOfDay = (timeOfDay + timeSpeed * Float(delta) * (24000.0 / 86400.0)).truncatingRemainder(dividingBy: 24000)
         if timeOfDay < 0 { timeOfDay += 24000 }
@@ -694,7 +694,7 @@ public final class Client {
     /// (clientenvironment.cpp) and reported as a u16 hp count; the server
     /// applies it as PlayerHPChangeReason FALL, gated on enable_damage and the
     /// player's immortal armor group (VoxeLibre also zeroes it for creative),
-    /// so we don't predict the HP change locally -- TOCLIENT_HP follows (#264).
+    /// so we don't predict the HP change locally -- TOCLIENT_HP follows.
     public func sendDamage(_ hp: Int) {
         guard hp > 0 else { return }
         conn.sendMessage(Op.toserverDamage, PacketWriter().u16(min(hp, 0xFFFF)).data)
@@ -704,7 +704,7 @@ public final class Client {
     /// velocity (nodes/s). The velocity rides along in PLAYERPOS like the
     /// desktop client's m_speed: the server stores it as the player's speed,
     /// which mods read through get_velocity() (fall-damage checks, elytra,
-    /// swim/sprint animations) and which was always zero before (#270).
+    /// swim/sprint animations) and which was always zero before.
     public func setPose(pos: SIMD3<Float>, yaw: Float, pitch: Float, velocity: SIMD3<Float> = .zero) {
         spawn = pos - Client.gridShift; self.yaw = yaw; self.pitch = pitch; self.velocity = velocity
     }
@@ -850,7 +850,7 @@ public final class Client {
 
     private func handleNodeDef(_ payload: Data) {
         nodes.parseNodeDef(payload)
-        world.lightInfo = nodes.lightInfo()   // enables the client-side relight on node changes (#278)
+        world.lightInfo = nodes.lightInfo()   // enables the client-side relight on node changes
         print("[client] NODEDEF: \(nodes.count) node types t=+\(String(format: "%.1f", CFAbsoluteTimeGetCurrent() - Client.processStart))s"); fflush(stdout)
         defsReady = true
         onMessage?(Op.toclientNodeDef, payload)
@@ -885,7 +885,7 @@ public final class Client {
     /// or collide. We used to divide by 10 here and in the spawner, which put
     /// VoxeLibre's weather (rain/snow boxes 20-25 nodes overhead, 50 wide,
     /// falling 15-20 node/s) in a 5-node box 2 nodes over your head at a tenth
-    /// the speed -- the real cause of the "rain bars around the head" (#199).
+    /// the speed -- the real cause of the "rain bars around the head".
     func handleSpawnParticle(_ payload: Data) { parseParticle(payload) }   // internal for tests
 
     /// TOCLIENT_MEDIA_PUSH (0x2C): string16 sha1 (20 raw bytes), string16 name,
@@ -1386,7 +1386,7 @@ public final class Client {
         w.u16(Op.formspecApiVersion)
         conn.sendMessage(Op.toserverClientReady, w.data)
         sendPlayerPos()                            // announce our presence/range
-        // Assert our wield slot on join (#57). Luanti has no server->client wield
+        // Assert our wield slot on join. Luanti has no server->client wield
         // packet -- the client is authoritative -- so the server keeps whatever
         // PLAYERITEM we last sent, which is stale across a reconnect. Without this,
         // a server-side on_use/on_place right after join could act on the wrong
@@ -1473,7 +1473,7 @@ public final class Client {
                 // "Item <itemstring>": name [count [wear [meta]]]; name is JSON-quoted only if it needs escaping.
                 let rest = line.dropFirst(head.count).drop { $0 == " " }
                 // The meta (4th field) is a JSON string that can contain spaces,
-                // so split only the first three tokens off (#271).
+                // so split only the first three tokens off.
                 let parts = rest.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
                 var name = parts.first.map(String.init) ?? ""
                 if name.hasPrefix("\"") && name.hasSuffix("\"") && name.count >= 2 { name = String(name.dropFirst().dropLast()) }
@@ -1795,7 +1795,7 @@ public final class Client {
     /// The server's per-player formspec prepend (TOCLIENT_FORMSPEC_PREPEND, 0x61):
     /// a string prepended to every formspec, carrying the global background9 stone
     /// panel + button styles + listcolors (VoxeLibre sets it once at join). We
-    /// stash it so the panel renderer can draw the backdrop (#244).
+    /// stash it so the panel renderer can draw the backdrop.
     public private(set) var formspecPrepend = ""
     private func handleFormspecPrepend(_ payload: Data) {
         let r = PacketReader(payload)
@@ -1850,7 +1850,7 @@ public final class Client {
 
     // BLOCKDATA decode (zstd + 4096-node parse) used to run inline on the session
     // queue during poll, stalling the 16ms tick during streaming -> laggy
-    // dig/place and sprint rubber-banding (#179/#180). Now the heavy decode runs
+    // dig/place and sprint rubber-banding. Now the heavy decode runs
     // on a background queue and the cheap world splice happens back on the session
     // queue when poll() drains the finished blocks.
     private let blockDecodeQueue = DispatchQueue(label: "voxel.blockdecode", qos: .userInitiated)
@@ -1959,17 +1959,17 @@ public final class Client {
     /// Report the place/RMB key as held in the PLAYERPOS control bits. VoxeLibre's
     /// eat is a HOLD: mcl_hunger ticks an eating delay (~1.6s) off control.RMB, not
     /// a one-shot INTERACT, so a single activate never finishes a bite. The
-    /// raise-to-mouth gesture sets this while food is at the mouth (#173).
+    /// raise-to-mouth gesture sets this while food is at the mouth.
     public var placeHeld = false
     /// Sneak (control bit 6 / value 64) held. Mods read control.sneak for
     /// sneak-place and sneak-click behaviors, and the client uses sneak to force
-    /// placement instead of a node's rightclick/formspec (#178).
+    /// placement instead of a node's rightclick/formspec.
     public var sneakHeld = false
     /// Directional + aux1 (sprint) control bits for PLAYERPOS, set each tick from
     /// the stick + sprint grip, exactly as the official client reports its keys
     /// (PlayerControl::getKeysPressed). The server derives the allowed speed from
     /// these (mcl_sprint checks aux1 + up), so a client that omits them is
-    /// corrected back by MOVE_PLAYER (#180). Bits: up=1 down=2 left=4 right=8 aux1=32.
+    /// corrected back by MOVE_PLAYER. Bits: up=1 down=2 left=4 right=8 aux1=32.
     public var moveKeys: Int = 0
     /// Dig/LMB (control bit 7 / value 128) held. Mods read control.LMB (e.g.
     /// mcl_playerplus for the swing pose others see).
@@ -2034,7 +2034,7 @@ public final class Client {
         }
         // Carry the held place/sneak bits through the interact too, so re-arming
         // the eat (activate) mid-hold doesn't momentarily read RMB as released
-        // (#173) and the server sees sneak during a sneak-place (#178).
+        // and the server sees sneak during a sneak-place.
         let keys = (action == 2 ? 128 : 0) | (action == 3 ? 256 : 0) | heldKeys
         let w = PacketWriter().u8(action).u16(wieldIndex).bytes32(pt.data)
         w.raw(playerPosBlockData(keys: keys))

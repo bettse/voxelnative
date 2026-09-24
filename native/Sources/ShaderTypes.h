@@ -62,7 +62,7 @@ typedef struct
     vector_float4 skyClouds;      // x density 0..1, y height factor, z speed.x, w speed.y
     vector_float4 skyCloudColor;  // rgb (color_bright)
     float saturation;             // SET_LIGHTING; 1 = untouched
-    // Distance fog (#285), the engine's linear fog toward the horizon colour:
+    // Distance fog, the engine's linear fog toward the horizon colour:
     // fog.x = end distance in metres, fog.y = 1/(1 - fog_start) (the engine's
     // fogShadingParameter), eyePos = the head in immersive-origin space.
     vector_float4 fog;

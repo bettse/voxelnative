@@ -6,10 +6,10 @@ import simd
 /// (mattress top ~0.56 of a node, legs to the floor), NOT a full cube. This
 /// loads the REAL mcl_beds_bed_bottom.obj through OBJLoader and the mesher and
 /// checks it renders as that low box, and that two adjacent halves sit flush at
-/// the same height (the foot/head "flat halves" concern, #131). The synthetic
+/// the same height (the foot/head "flat halves" concern). The synthetic
 /// MeshNodeTests cover the transform math; this guards the real asset.
 final class BedMeshTests: XCTestCase {
-    // #164: opaque is now (vertices, solid, cutout); tests want one index list.
+    // opaque is now (vertices, solid, cutout); tests want one index list.
     private func combined(_ o: (vertices: [Float], solid: [UInt32], cutout: [UInt32])) -> WorldMesher.Mesh { (o.vertices, o.solid + o.cutout) }
     private func bedMesh() throws -> B3DLoader.Mesh {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "mcl_beds_bed_bottom",

@@ -18,7 +18,7 @@ final class ModelHandoff {
     private var bi: [UInt32] = []
     // One generation per stream, bumped only when that stream's bytes change,
     // so the renderer (90Hz vs the ~62.5Hz producer) skips re-uploading
-    // unchanged geometry (#163), and a walking mob doesn't re-upload an open
+    // unchanged geometry, and a walking mob doesn't re-upload an open
     // inventory panel's overlay.
     private var gen = 0, ogen = 0, bgen = 0
     func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = [],
@@ -67,7 +67,7 @@ final class ModelTextureHandoff {
     // Layer dimension for every model-texture layer (chat, nametags, HUD text,
     // item icons, crack). 256, not 128: a full line of chat text packed into a
     // 128px square came out with ~5px glyphs that blurred when magnified in the
-    // world (the load MOTD/join text); 256 doubles the glyph resolution (#175).
+    // world (the load MOTD/join text); 256 doubles the glyph resolution.
     static let size = 256
 
     private let lock = NSLock()
@@ -78,7 +78,7 @@ final class ModelTextureHandoff {
     /// The renderer reports how many layers its array actually has after a full
     /// (re)build. The producer compares this to its layer count and re-posts a
     /// full until they match, so a dropped/failed rebuild (device memory pressure)
-    /// self-heals instead of leaving high-index icons sampling out of range (#254).
+    /// self-heals instead of leaving high-index icons sampling out of range.
     func reportBuilt(_ n: Int) { lock.lock(); _builtCount = n; lock.unlock() }
     var builtCount: Int { lock.lock(); defer { lock.unlock() }; return _builtCount }
 
@@ -106,7 +106,7 @@ final class ModelTextureHandoff {
 
 /// Six decoded RGBA faces of a SET_SKY "skybox" (the End), tick thread ->
 /// renderer, which builds a cube texture from them. An empty post clears
-/// the box (the sky went back to regular/plain) (#290).
+/// the box (the sky went back to regular/plain).
 final class SkyboxHandoff {
     static let size = 256
     private let lock = NSLock()

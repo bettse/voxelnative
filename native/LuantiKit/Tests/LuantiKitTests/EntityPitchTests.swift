@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// Entity pitch (#128): WorldMesher.pitchLocal tilts a model vertex in the X-Y
+/// Entity pitch: WorldMesher.pitchLocal tilts a model vertex in the X-Y
 /// plane before the horizontal yaw, so an arrow (shaft along local X) tips off
 /// horizontal. Must be exactly identity at pitch 0 so mobs are unaffected.
 final class EntityPitchTests: XCTestCase {

@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// ITEMDEF tail (#121): node_placement_prediction, sound_place and range are
+/// ITEMDEF tail: node_placement_prediction, sound_place and range are
 /// read after the tool-capabilities blob and groups, in
 /// ItemDefinition::deSerialize order. Framing mirrors TOCLIENT_ITEMDEF.
 final class ItemDefTailTests: XCTestCase {
@@ -32,7 +32,7 @@ final class ItemDefTailTests: XCTestCase {
         return w.data
     }
 
-    /// #298: place_param2 and wield_scale from the tail; a short (older-server)
+    /// place_param2 and wield_scale from the tail; a short (older-server)
     /// blob without the tail parses to "no place_param2" and scale 1.
     func testPlaceParam2AndWieldScale() {
         let reg = ItemRegistry()
@@ -74,7 +74,7 @@ final class ItemDefTailTests: XCTestCase {
     func testDescriptionColorIsParsed() {
         // A renamed/enchanted item ships its display name with a leading color
         // escape. descriptionColored keeps it as a packed tint so the inventory
-        // name popup renders in color instead of invisible white (#254). The
+        // name popup renders in color instead of invisible white. The
         // plain description(for:) still returns just the stripped text.
         let reg = ItemRegistry()
         reg.parseItemDef(payload([
@@ -91,7 +91,7 @@ final class ItemDefTailTests: XCTestCase {
 
     func testUsableFlagIsParsed() {
         // A throwable (egg) has on_use -> usable=1; a plain block does not. The
-        // client fires INTERACT_USE on the attack button for usable items (#145).
+        // client fires INTERACT_USE on the attack button for usable items.
         let reg = ItemRegistry()
         reg.parseItemDef(payload([
             itemBlob(name: "mcl_throwing:egg", prediction: "", placeSound: "", range: 4, usable: true),
@@ -117,7 +117,7 @@ final class ItemDefTailTests: XCTestCase {
 
     func testFoodGroupMarksEatable() {
         // A food item carries a `food` group; the raise-to-mouth eat gesture
-        // fires only on eatables (#173). A plain block is not eatable.
+        // fires only on eatables. A plain block is not eatable.
         let w = PacketWriter()
         w.u8(6).u8(2).string16("mcl_core:apple").string16("Apple")
         w.string16("apple.png").u8(0).string16("").u8(0)
@@ -140,7 +140,7 @@ final class ItemDefTailTests: XCTestCase {
 
     func testArmorGroupsMapToSlots() {
         // Armor pieces carry armor_head/torso/legs/feet groups; shift-click
-        // quick-move routes each to its slot 1..4 (#208). A plain item has none.
+        // quick-move routes each to its slot 1..4. A plain item has none.
         func armorBlob(_ name: String, group: String) -> Data {
             let w = PacketWriter()
             w.u8(6).u8(3).string16(name).string16("Armor")          // type 3 (craftitem)

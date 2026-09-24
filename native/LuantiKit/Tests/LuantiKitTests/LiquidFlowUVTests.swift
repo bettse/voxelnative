@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// Flowing-liquid top-surface UV rotation (#329), mirroring the engine's
+/// Flowing-liquid top-surface UV rotation, mirroring the engine's
 /// drawLiquidTop: the animated water texture should run in the flow direction
 /// derived from the four corner heights.
 final class LiquidFlowUVTests: XCTestCase {
@@ -46,7 +46,7 @@ final class LiquidFlowUVTests: XCTestCase {
         XCTAssertTrue(approx(WorldMesher.flowRotUV(SIMD2(1.0, 0.5), dir), SIMD2(0.5, 1.0)))
     }
 
-    /// The per-cell translate (#334) keeps the rotated texture continuous: a
+    /// The per-cell translate keeps the rotated texture continuous: a
     /// point on the shared edge of two neighbouring cells must land on the same
     /// texel (UVs equal modulo 1) whichever cell emits it, for any flow angle.
     func testTranslateMakesNeighbouringCellsSeamless() {

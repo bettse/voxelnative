@@ -2,7 +2,7 @@ import XCTest
 @testable import LuantiKit
 
 /// Physics boxes follow MapNode::getCollisionBoxes: node_box / collision_box
-/// apply to ANY drawtype, not just the boxy ones (#303). A signlike ladder
+/// apply to ANY drawtype, not just the boxy ones. A signlike ladder
 /// with a wallmounted plate must not collide as a full cube.
 final class PhysicsBoxTests: XCTestCase {
     private func registry(_ blobs: [(Int, Data)]) -> NodeRegistry {

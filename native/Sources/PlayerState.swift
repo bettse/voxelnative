@@ -8,14 +8,14 @@ import LuantiKit
 /// All positions are in node coordinates (1 node = 1 m in-world).
 final class PlayerState {
     static let eyeHeight: Float = 1.5   // default before the server's eye_height arrives
-    // Server eye_height for our own AO (#272): 1.6 standing, 1.45 sneaking, 0.6
+    // Server eye_height for our own AO: 1.6 standing, 1.45 sneaking, 0.6
     // swimming in VoxeLibre. Eased over ~0.15 s so the view glides down into
     // the water instead of snapping a metre.
     private var _eyeTarget: Float = PlayerState.eyeHeight
     private var _eyeSmooth: Float = PlayerState.eyeHeight
     private var _eyeStamp = Date()
     private var _eyeBase: Float = PlayerState.eyeHeight   // SET_PROPERTIES eye_height
-    private var _eyeOffsetY: Float = 0                     // TOCLIENT_EYE_OFFSET first-person y (#290)
+    private var _eyeOffsetY: Float = 0                     // TOCLIENT_EYE_OFFSET first-person y
     func setEyeHeight(_ h: Float) { lock.lock(); _eyeBase = h; _eyeTarget = max(0.2, _eyeBase + _eyeOffsetY); lock.unlock() }
     /// Camera::update adds the server's first-person eye offset on top of
     /// eye_height: beds send y -1.3 nodes for the lying-down view, minecarts
@@ -114,7 +114,7 @@ final class PlayerState {
         // folded into _walk via _ovSpeed. Don't multiply by another local 1.3:
         // that made sprint 1.3*1.3 = 1.69x, faster than the server's own
         // physics allowed, so its authoritative position correction (MOVE_PLAYER)
-        // kept snapping us back (#180). So "fast" is just the (already
+        // kept snapping us back. So "fast" is just the (already
         // override-scaled) walk speed, exactly what the official client does.
         _fast = _walk
         _jump = _baseJump * _ovJump
@@ -134,7 +134,7 @@ final class PlayerState {
     static let liquidSubmergedSink: Float = -0.45 // fully under: buoyancy softens the sink (at sink=10)
     static let liquidVerticalTau: Float = 0.16 // approach time constant (strong drag)
     static let liquidSpeedFactor: Float = 0.5  // horizontal movement in liquid (~VoxeLibre)
-    // Server liquid tuning (#274). The engine applies 2*movement_liquid_sink as
+    // Server liquid tuning. The engine applies 2*movement_liquid_sink as
     // in-water gravity against a capped viscous drag; our model keeps the drag
     // shape (VR comfort: no plummeting) but scales the sink targets by
     // sink/10 (engine default 10) and swims up at movement_speed_walk, the
@@ -230,7 +230,7 @@ final class PlayerState {
     /// Ease the buoyant vertical velocity toward its target for this tick and
     /// return it, WITHOUT moving. The caller sweeps the resulting delta through
     /// the same collision as land movement, so a swimmer climbing out under an
-    /// overhang stops at the ceiling instead of rising through it (#167), and
+    /// overhang stops at the ceiling instead of rising through it, and
     /// settling lands on the column floor via the sweep (not a separate clamp).
     ///
     /// Buoyant model: a short time constant (strong drag) keeps a fast entry
@@ -284,7 +284,7 @@ final class PlayerState {
     private var _skyVisible: Float = 1     // 0 = deep underground, 1 = open sky (fog darkening)
     private var _skySolid = SIMD4<Float>(0, 0, 0, 0)   // server solid-sky (Nether/End); a>0 = on
     private var _sky = SkyParams()                        // engine defaults until the server says otherwise
-    /// Server sky look (#102). Also derives the flat-colour sky for Nether/End.
+    /// Server sky look. Also derives the flat-colour sky for Nether/End.
     func setSky(_ s: SkyParams) {
         lock.lock()
         _sky = s
@@ -300,7 +300,7 @@ final class PlayerState {
         var bodies, stars, starColor, clouds, cloudColor: SIMD4<Float>
         var saturation: Float
         var fog: SIMD4<Float>        // x distance (nodes, -1 = view range), y start (-1 = default)
-        var fogColor: SIMD4<Float>   // rgb + a>0 = server override (#285)
+        var fogColor: SIMD4<Float>   // rgb + a>0 = server override
         var sunTint: SIMD4<Float>    // rgb + w = 1 when fog_tint_type is "custom"
         var moonTint: SIMD4<Float>
     }
@@ -308,7 +308,7 @@ final class PlayerState {
         lock.lock(); let s = _sky; lock.unlock()
         return Self.skyUniforms(from: s)
     }
-    /// Pure SkyParams -> SkyUniforms packing, so the batched render read (#184)
+    /// Pure SkyParams -> SkyUniforms packing, so the batched render read
     /// can compute it while already holding the lock.
     static func skyUniforms(from s: SkyParams) -> SkyUniforms {
         func v4(_ c: SIMD3<Float>) -> SIMD4<Float> { SIMD4(c.x, c.y, c.z, 0) }
@@ -346,7 +346,7 @@ final class PlayerState {
     /// Everything the per-frame world/sky uniform update reads, grabbed under a
     /// single lock instead of six separate acquisitions (snapshot, origin,
     /// daylight, skySolid, skyUniforms, sunDir). Also a consistent snapshot: the
-    /// six used to race the tick thread independently (#184).
+    /// six used to race the tick thread independently.
     struct RenderState {
         var snap: Snapshot
         var origin: SIMD3<Float>

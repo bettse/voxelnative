@@ -13,7 +13,7 @@ final class NodeDefTests: XCTestCase {
 
     // MARK: tests
 
-    /// buildable_to (#178): grass/snow are replaceable so a placed block lands in
+    /// buildable_to: grass/snow are replaceable so a placed block lands in
     /// them; solid nodes are not. Air (id 0) defaults true.
     func testBuildableToFlagParsed() {
         let grass = NodeFixtures.node(name: "t:tallgrass", drawtype: 0, dugSound: "", walkable: false, buildableTo: true) { w in w.u8(6).u8(0) }
@@ -25,7 +25,7 @@ final class NodeDefTests: XCTestCase {
         XCTAssertTrue(reg.isBuildableTo(0), "air is replaceable")
     }
 
-    /// climbable (#209): ladders (walkable) and vines (not walkable) carry the
+    /// climbable: ladders (walkable) and vines (not walkable) carry the
     /// flag; plain nodes don't. Drives ascend/descend + fall-arrest physics.
     func testClimbableFlagParsed() {
         let ladder = NodeFixtures.node(name: "t:ladder", drawtype: 0, dugSound: "", walkable: true, climbable: true) { w in w.u8(6).u8(0) }
@@ -38,7 +38,7 @@ final class NodeDefTests: XCTestCase {
         XCTAssertFalse(reg.isClimbable(reg.id(for: "t:stone")!))
     }
 
-    /// move_resistance / liquid_viscosity feed the movement slowdown (#211):
+    /// move_resistance / liquid_viscosity feed the movement slowdown:
     /// water viscosity 1, lava 7, cobweb 14 (via move_resistance), plain 0. The
     /// registry keeps the larger of the two fields.
     func testMoveResistanceParsed() {
@@ -124,7 +124,7 @@ final class NodeDefTests: XCTestCase {
         XCTAssertTrue(reg.isRightclickable(d))
     }
 
-    /// NodeDefManager::nodeboxConnects (#299): a pane (connected nodebox,
+    /// NodeDefManager::nodeboxConnects: a pane (connected nodebox,
     /// connects to the fence) may grow an arm toward a fence only on the
     /// faces the FENCE's connect_sides allows (front/back/left/right), never
     /// up/down; a plain stone target with no connect_sides accepts any face;
@@ -186,7 +186,7 @@ final class NodeDefTests: XCTestCase {
 
     func testCollisionBoxKeptSeparateFromNodeBox() {
         // A fence draws a 1.0-tall post (node_box) but collides as a 1.5-tall
-        // post (collision_box), so you can't jump it (#214). Both must be kept.
+        // post (collision_box), so you can't jump it. Both must be kept.
         let fence = NodeFixtures.node(name: "test:fence", drawtype: 12, dugSound: "wood_dug",
                          connectsTo: [9],
                          collisionBox: { w in

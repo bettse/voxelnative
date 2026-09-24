@@ -67,7 +67,7 @@ public final class ActiveObjects {
         /// plane). This is where vl_projectile puts a projectile's flight pitch
         /// (set_rotation(0, yaw, asin(v.y))) because the arrow models point
         /// along +X, so arrows, tridents and thrown things nose along their arc
-        /// with THIS, not with rotation.x (#305).
+        /// with THIS, not with rotation.x.
         public var roll: Float = 0
         public var acc: SIMD3<Float> = .zero   // acceleration (nodes/s^2), integrated each step like GenericCAO
         public var physical = false            // ObjectProperties physical: collides with the world (items, mobs)
@@ -82,7 +82,7 @@ public final class ActiveObjects {
         public var attachParent: Int = 0   // AO id we're attached to (0 = none)
         public var attachOffset: SIMD3<Float> = .zero  // local offset from parent (nodes)
         /// Parent bone the attachment hangs off ("" = the parent's origin). The
-        /// renderer resolves it against the parent's animated model (#282).
+        /// renderer resolves it against the parent's animated model.
         public var attachBone: String = ""
         /// ATTACH_TO rotation (radians, x/y/z). While attached the child's own
         /// rotation is ignored and this is applied relative to the parent
@@ -117,7 +117,7 @@ public final class ActiveObjects {
         public var nametag: String = ""
         public var nametagColor: UInt32 = 0xFFFF_FFFF   // ARGB8
         // ObjectProperties wield_item: the itemstring a "wielditem" visual shows
-        // (dropped items are __builtin:item with this set, NOT textures) (#205).
+        // (dropped items are __builtin:item with this set, NOT textures).
         public var wieldItem: String = ""
         /// ObjectProperties.pointable: false for display-only entities (chest
         /// model, item frames), so the crosshair/dig raycast passes through them
@@ -134,7 +134,7 @@ public final class ActiveObjects {
         /// "^[brighten" (object_properties.h), overwritten by SET_PROPERTIES.
         public var damageTexMod: String = "^[brighten"
         /// Live texture modifier from AO_CMD_SET_TEXTURE_MOD, appended to every
-        /// surface's texture (mcl_mobs burning/damage/status overlays, #228).
+        /// surface's texture (mcl_mobs burning/damage/status overlays).
         public var textureMod: String = ""
         /// AO_CMD_SET_BONE_POSITION overrides by bone name (mob head swivel,
         /// fish body pitch). Applied on top of the animation when skinning.
@@ -186,7 +186,7 @@ public final class ActiveObjects {
     /// The local player's own ObjectProperties (SET_PROPERTIES on our AO):
     /// collisionbox, stepheight, eye_height. VoxeLibre swaps these per state
     /// (swimming: 0.8-tall box + 0.6 eye so you fit through 1-node gaps;
-    /// sneaking: 1.45 eye) and the client is expected to move with them (#272).
+    /// sneaking: 1.45 eye) and the client is expected to move with them.
     public var onLocalProperties: ((_ cbMin: SIMD3<Float>, _ cbMax: SIMD3<Float>, _ stepHeight: Float, _ eyeHeight: Float) -> Void)?
     /// Is this node a full solid cube? Set by the client so step() can keep
     /// physical entities on the floor (see step). nil = no floor check.
@@ -222,7 +222,7 @@ public final class ActiveObjects {
         let name = r.string16()
         let isPlayer = r.u8() != 0
         _ = r.u16()                       // id again
-        let pos = v3f(r) / ActiveObjects.BS + Client.gridShift   // server grid -> ours (#78)
+        let pos = v3f(r) / ActiveObjects.BS + Client.gridShift   // server grid -> ours
         let rot = v3f(r)                  // rotation (degrees)
         let hp = r.u16()                  // starting hp; PUNCHED diffs against it
         var ent = Entity(id: id, name: name, isPlayer: isPlayer, pos: pos, target: pos,
@@ -257,13 +257,13 @@ public final class ActiveObjects {
             let acc = v3f(r) / ActiveObjects.BS
             let rot = v3f(r)              // rotation (degrees)
             o.pitch = rot.x * .pi / 180
-            o.roll = rot.z * .pi / 180    // projectiles nose along their arc (#128/#305)
+            o.roll = rot.z * .pi / 180    // projectiles nose along their arc
             let interpolate = r.u8() != 0
             let isEnd = r.u8() != 0
             let interval = r.f32()
             o.target = pos; o.vel = vel; o.acc = acc
             // rot_translator.update(rotation, false, update_interval): ease the
-            // facing from where it is now to the new heading (#305).
+            // facing from where it is now to the new heading.
             o.yawOld = o.yaw; o.yawTarget = rot.y * .pi / 180
             // SmoothTranslator::update: the blend runs over the server's own
             // update interval (VoxeLibre mobs ~0.1-0.2 s); when the server
@@ -273,13 +273,13 @@ public final class ActiveObjects {
             o.animCounter = 0
             o.aimIsEnd = isEnd
             // do_interpolate false is a teleport (GenericCAO re-inits its
-            // pos_translator): snap, don't streak across the world (#290).
+            // pos_translator): snap, don't streak across the world.
             if !interpolate { o.pos = pos; o.yaw = o.yawTarget; o.yawOld = o.yaw }
         case ActiveObjects.SET_TEXTURE_MOD:
             let m = r.string16()
             // mcl_mobs drives visible state through this: burning ^[colorize,
             // damage ^[brighten, etc. Keep it so the renderer can append it to
-            // each surface's texture (#228). Empty clears it back to the base.
+            // each surface's texture. Empty clears it back to the base.
             // A mod-issued texture modifier cancels an engine damage flash
             // still running (content_cao.cpp: m_reset_textures_timer = -1), so
             // a mob that catches fire doesn't stay tinted.
@@ -344,8 +344,8 @@ public final class ActiveObjects {
                     // Only when not already flashing and the object defines a
                     // damage_texture_modifier (the engine default is ^[brighten;
                     // VoxeLibre players use ^[colorize:red:130). Engine base is
-                    // 0.05 s, but one quick flash is easy to miss in the headset
-                    // (#149), so floor it at 0.2 s.
+                    // 0.05 s, but one quick flash is easy to miss in the headset,
+                    // so floor it at 0.2 s.
                     var t: Float = 0.05
                     if damage >= 2 { t += 0.05 * Float(damage) }
                     o.hitFlash = min(1, max(0.2, t))
@@ -443,7 +443,7 @@ public final class ActiveObjects {
         registerSpriteCells(o)
         o.isVisible = r.u8() != 0         // false: not drawn, not pointable
         _ = r.u8()                        // makes_footstep_sound
-        o.automaticRotate = r.f32()       // rad/s constant spin (#231: spawner dolls)
+        o.automaticRotate = r.f32()       // rad/s constant spin (spawner dolls)
         let mesh = r.string16()           // mesh model filename
         if !mesh.isEmpty { o.mesh = mesh; meshes.insert(mesh) }
         // Tail, in ObjectProperties::serialize order. Every read is bounds-
@@ -460,7 +460,7 @@ public final class ActiveObjects {
         o.nametagColor = UInt32(truncatingIfNeeded: r.u32())   // ARGB8; alpha 0 = hidden
         _ = r.f32()                       // automatic_face_movement_max_rotation_per_sec
         _ = r.string16()                  // infotext
-        o.wieldItem = r.string16()        // itemstring for a "wielditem" visual (dropped items) (#205)
+        o.wieldItem = r.string16()        // itemstring for a "wielditem" visual (dropped items)
         o.glow = Int(Int8(truncatingIfNeeded: r.u8()))   // s8; -1 = full-bright/unshaded
         _ = r.u16()                       // breath_max
         if !r.overrun { o.eyeHeight = r.f32() }   // eye_height (nodes)
@@ -481,7 +481,7 @@ public final class ActiveObjects {
     /// rest: a dropped item's last server update has velocity 0 but gravity
     /// still in `acc`, and no further update ever comes, so integrating it
     /// blindly sank every drop through the floor within a second of landing
-    /// ("I don't see mined blocks", #358). Walls can still lead a mob's
+    /// ("I don't see mined blocks"). Walls can still lead a mob's
     /// reckoned target astray for one update interval; the next packet fixes it.
     public func step(_ dt: Float) {
         // `for (id, var o) in objects { ...; objects[id] = o }` iterated a copy
@@ -489,7 +489,7 @@ public final class ActiveObjects {
         // full copy-on-write of the whole entity table. Walk the keys and
         // mutate each value in place instead (perf review, idle-cost item).
         // Mutating through `objects.values[i]` edits the entry in place: no
-        // key array, no copy-out/copy-back per entity (perf #311).
+        // key array, no copy-out/copy-back per entity.
         for i in objects.values.indices {
             objects.values[i].animCounter += dt
             var o = objects.values[i]
@@ -553,7 +553,7 @@ public final class ActiveObjects {
         // follow their parent: pos = parent.pos + offset rotated by parent yaw.
         // Collect first: iterating `objects` while writing `objects[id]` held a
         // second reference to the storage, so the first write copied the whole
-        // table every tick that anything was attached (perf #311).
+        // table every tick that anything was attached.
         attachedScratch.removeAll(keepingCapacity: true)
         for (id, o) in objects where o.attachParent != 0 { attachedScratch.append(id) }
         for id in attachedScratch {
@@ -595,7 +595,7 @@ public final class ActiveObjects {
         return out
     }
 
-    /// Flash an object red for `seconds` (the PUNCHED hit-tint, #149). Called
+    /// Flash an object red for `seconds` (the PUNCHED hit-tint). Called
     /// when the local player melee-hits a mob so the feedback is immediate and
     /// doesn't wait on the server's AO_CMD_PUNCHED round-trip, which mcl_mobs
     /// doesn't always send as a clean hp diff. Never shortens a longer flash
@@ -652,7 +652,7 @@ public final class ActiveObjects {
     /// attached to it (weather rain/snow) must follow the live camera position,
     /// not this AO's stale server pos. Called every tick, so memoize: the cached
     /// id is validated by a single dict lookup and only rescans when it's gone
-    /// stale (the id changed, which is rare) (#185).
+    /// stale (the id changed, which is rare).
     private var cachedLocalPlayerId: Int = 0
     public var localPlayerId: Int {
         if cachedLocalPlayerId != 0, let o = objects[cachedLocalPlayerId], o.isPlayer, o.name == localPlayerName {
@@ -670,7 +670,7 @@ public final class ActiveObjects {
         // Anything attached to the local player is hidden too, like the engine
         // in first person (GenericCAO::setAttachment: m_is_visible =
         // !m_attached_to_local): the mcl_burning fire billboard, our own
-        // wieldview item, a riding parrot (#283). Not the vehicle we ride, which
+        // wieldview item, a riding parrot. Not the vehicle we ride, which
         // is the parent, not a child.
         let me = localPlayerId
         return objects.values.filter {

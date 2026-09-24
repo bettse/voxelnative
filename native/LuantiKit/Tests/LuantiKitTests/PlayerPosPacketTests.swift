@@ -4,7 +4,7 @@ import XCTest
 /// TOSERVER_PLAYERPOS layout (networkprotocol.h): v3s32 pos*1000, v3s32
 /// speed*1000, s32 pitch*100, s32 yaw*100, u32 keyPressed, u8 fov*80,
 /// u8 wanted_range, u8 camera_inverted, f32 movement_speed, f32 movement_dir.
-/// The client used to send a zero speed and never the jump bit (#270); mods
+/// The client used to send a zero speed and never the jump bit; mods
 /// read both (get_velocity for fall/elytra checks, control.jump for mounts).
 final class PlayerPosPacketTests: XCTestCase {
     private func s32(_ d: Data, _ off: Int) -> Int32 {

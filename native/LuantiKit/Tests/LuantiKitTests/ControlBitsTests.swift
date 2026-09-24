@@ -4,7 +4,7 @@ import XCTest
 /// TOSERVER movement key bits (Client.moveControlBits). Luanti's key bitmask is
 /// up=1, down=2, left=4, right=8, aux1(sprint)=32. mcl_sprint reads aux1+up and
 /// sets physics_override.speed itself, so the client must send the bit, not
-/// double-apply a local speed multiplier (#180).
+/// double-apply a local speed multiplier.
 final class ControlBitsTests: XCTestCase {
     private let up = 1, down = 2, left = 4, right = 8, aux1 = 32
 

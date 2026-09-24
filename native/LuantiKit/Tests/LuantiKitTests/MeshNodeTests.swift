@@ -9,7 +9,7 @@ import simd
 /// for the bed/lantern look, mirroring the convention verified against
 /// mcl_beds_bed_bottom.obj (bounds x,z in [-0.5, 0.5], y in [-0.5, 0.0625]).
 final class MeshNodeTests: XCTestCase {
-    // #164: opaque is now (vertices, solid, cutout); tests want one index list.
+    // opaque is now (vertices, solid, cutout); tests want one index list.
     private func combined(_ o: (vertices: [Float], solid: [UInt32], cutout: [UInt32])) -> WorldMesher.Mesh { (o.vertices, o.solid + o.cutout) }
     private func meshNode(id: Int, name: String, file: String, vscale: Float = 1) -> NodeRegistry {
         let blob = NodeFixtures.node(name: name, drawtype: 16, dugSound: "", mesh: file, visualScale: vscale) { w in

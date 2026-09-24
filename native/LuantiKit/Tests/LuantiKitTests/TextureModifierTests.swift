@@ -4,7 +4,7 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import LuantiKit
 
-/// Texture-modifier decode regressions. The cauldron-lava tile (#207) is a
+/// Texture-modifier decode regressions. The cauldron-lava tile is a
 /// grouped verticalframe strip with an overlay:
 ///   (mcl_core_lava_source_animation.png^[verticalframe:16:0)^cauldron_top.png
 /// It was suspected of decoding near-black. It doesn't: the lava frame shows
@@ -69,7 +69,7 @@ final class TextureModifierTests: XCTestCase {
         XCTAssertEqual(Int(out.px[e]), 90, "border should be the opaque ring colour")
     }
 
-    /// #200: a pure `strip.png^[verticalframe:N:0` pin (flowing lava) must
+    /// a pure `strip.png^[verticalframe:N:0` pin (flowing lava) must
     /// decode to the bright frame, not near-black. Guards the verticalframe
     /// crop on the modifier path against a regression.
     func testLavaStripVerticalFramePinIsBright() {

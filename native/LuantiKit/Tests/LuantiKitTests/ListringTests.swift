@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Formspec listring parsing drives desktop-parity shift-click (#208). Shift-
+/// Formspec listring parsing drives desktop-parity shift-click. Shift-
 /// clicking a slot moves the stack to the NEXT ring entry after its source list.
 final class ListringTests: XCTestCase {
     private let ctx = SIMD3<Int>(1, 2, 3)

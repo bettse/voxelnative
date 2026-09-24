@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// #178 client-parity: NODEDEF carries a sound_footstep and a node_dig_prediction
+/// Client parity: NODEDEF carries a sound_footstep and a node_dig_prediction
 /// that the client used to parse-and-discard. Footstep sounds play while walking;
 /// node_dig_prediction lets a dig show the right resulting node, not always air.
 /// Pin that both fields survive the parse and that empty ones stay nil.
@@ -19,7 +19,7 @@ final class NodeSoundPredictionTests: XCTestCase {
         // No footstep set records nothing (silence). The prediction string is
         // kept verbatim: the fixture writes "", which the engine treats as
         // "predict nothing" (real servers send the "air" default for normal
-        // nodes; VoxeLibre's waterlogged mangrove roots send "") (#297).
+        // nodes; VoxeLibre's waterlogged mangrove roots send "").
         let sid = reg.id(for: "t:stone")!
         XCTAssertNil(reg.footstepSound(sid))
         XCTAssertEqual(reg.digPrediction(sid), "")

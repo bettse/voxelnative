@@ -3,8 +3,8 @@ import simd
 import LuantiKit
 
 /// Session -> renderer drop-box for the hand-anchored HUD: the wielded item icon
-/// (drawn on the right hand, #66) and the hotbar strip (anchored to the left
-/// wrist, #57). Layers index the node texture atlas (same array the entity pass
+/// (drawn on the right hand) and the hotbar strip (anchored to the left
+/// wrist). Layers index the node texture atlas (same array the entity pass
 /// binds); uv scales the item icon's sub-rect within its 128px layer.
 struct HandHudState {
     struct Icon { var layer: Int32; var uv: SIMD2<Float>; var wear: Float = 1 }   // wear 0..1 remaining (1 = no bar)
@@ -16,11 +16,11 @@ struct HandHudState {
         case item(layer: Int32, uv: SIMD2<Float>)
         // A mesh-drawtype node (chest, bell, cauldron): its real b3d model,
         // textured with the node's single tile layer, so it doesn't render as a
-        // flat cube with the chest texture smeared on every face (#190).
+        // flat cube with the chest texture smeared on every face.
         case mesh(model: B3DLoader.Mesh, layer: Int32)
     }
     var wield: Wield?          // currently-wielded item, or nil (empty hand)
-    var digging: Bool = false  // drives the wield dig-swing animation (#136)
+    var digging: Bool = false  // drives the wield dig-swing animation
     // Light byte (low nibble = day/sky, high = night/torch) at the player's eye.
     // The wield item is shaded by this like desktop, instead of forced full-
     // bright: a held torch in a dark cave shouldn't glow white and read as if
@@ -32,9 +32,9 @@ struct HandHudState {
     var wieldWear: Float = 1   // remaining durability 0..1 (1 = full / no bar)
     // ITEMDEF wield_scale.x, applied to item (non-block) wields like the
     // engine's wieldmesh scale: VoxeLibre tools are 1.8, shields 2, rods 1.5,
-    // so they read at desktop proportions instead of toy-sized (#298).
+    // so they read at desktop proportions instead of toy-sized.
     var wieldScale: Float = 1
-    // Wielded stack count (#158): a baked digit layer in the MODEL texture array
+    // Wielded stack count: a baked digit layer in the MODEL texture array
     // (not the node atlas), drawn on the right hand for stackable items >1. -1 =
     // no count (single item or a tool). Items never have both a count and wear.
     var wieldCountLayer: Int32 = -1
@@ -45,9 +45,9 @@ struct HandHudState {
     var slotLayer: Int32
     var selectLayer: Int32
     // Plain-white atlas layer for TINTED fills (wear bars): a tint multiplies the
-    // texture, so a bar drawn on the dark slot frame came out black (#159 bug).
+    // texture, so a bar drawn on the dark slot frame came out black.
     var whiteLayer: Int32 = 0
-    // Armor as a wrist gauntlet (#108): points 0..20 and the plate atlas layers,
+    // Armor as a wrist gauntlet: points 0..20 and the plate atlas layers,
     // drawn as a band on the left forearm inboard of the hotbar. 0 = hidden.
     var armor: Int = 0
     var armorFullLayer: Int32 = 0

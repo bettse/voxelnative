@@ -26,7 +26,7 @@ final class DigParamsTests: XCTestCase {
     /// game.cpp handleDigging: the wielded tool first, and when its caps say
     /// "not diggable" the HAND is tried. VoxeLibre tools carry one dig group
     /// each (a pickaxe only pickaxey), so a pickaxe on dirt (handy+shovely)
-    /// must come back nil here and the caller falls through to the hand (#297).
+    /// must come back nil here and the caller falls through to the hand.
     func testVoxeLibrePickaxeOnDirtIsNilAndHandDigsIt() throws {
         let pick = caps(["pickaxey": .init(uses: 100, maxLevel: 3, times: [1: 1.0])])
         let hand = caps(["handy": .init(uses: 0, maxLevel: 1, times: [1: 0.75]), "shovely": .init(uses: 0, maxLevel: 1, times: [1: 0.75])])

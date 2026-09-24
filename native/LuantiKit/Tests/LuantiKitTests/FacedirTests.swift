@@ -52,7 +52,7 @@ final class FacedirTests: XCTestCase {
     }
 }
 
-/// cubeTile: the facedir tile permutation for plain cubes (#225). Every facedir
+/// cubeTile: the facedir tile permutation for plain cubes. Every facedir
 /// must map the 6 world faces onto a permutation of the 6 source tiles (a
 /// horizontal log shows rings on the axis ends, bark on the sides), and fd==0 is
 /// the identity.

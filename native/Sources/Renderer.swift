@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 // The emitters used to build a temporary array per vertex/quad
 // (`append(contentsOf: [...])`), which is a heap allocation each -- ~500-600
 // per frame at 90 Hz just for the hand HUD, plus 6 per world billboard (300
-// rain particles = +1800/frame). Same as WorldSession's pushV/pushQuad (#248).
+// rain particles = +1800/frame). Same as WorldSession's pushV/pushQuad.
 @inline(__always) private func pushV9(_ a: inout [Float], _ x: Float, _ y: Float, _ z: Float,
                                        _ u: Float, _ v: Float, _ layer: Float, _ shade: Float,
                                        _ light: Float, _ tint: Float) {
@@ -27,7 +27,7 @@ import UniformTypeIdentifiers
 /// top-left order with the standard (0,1) (1,1) (1,0) (0,0) uvs scaled by `uv`.
 /// Takes the corners as arguments so the per-quad `[corners]` / `[uvs]` array
 /// literals the emitters used to build (two mallocs per billboard per frame,
-/// ~420 billboards at 90 Hz) are gone (perf review #310).
+/// ~420 billboards at 90 Hz) are gone.
 @inline(__always) private func pushQuadV9(_ a: inout [Float], _ bl: SIMD3<Float>, _ br: SIMD3<Float>,
                                           _ tr: SIMD3<Float>, _ tl: SIMD3<Float>, uv: SIMD2<Float> = SIMD2(1, 1),
                                           layer: Float, shade: Float, light: Float, tint: Float) {
@@ -99,10 +99,10 @@ actor Renderer {
 
     let dynamicUniformBuffer: MTLBuffer
     let pipelineState: MTLRenderPipelineState
-    // #164: solid opaque blocks use a no-discard early-Z pipeline; the cutout
+    // solid opaque blocks use a no-discard early-Z pipeline; the cutout
     // (leaves/plants/nodeboxes) portion keeps the discarding `pipelineState`.
     let worldOpaquePipelineState: MTLRenderPipelineState
-    // The world is drawn PER MAPBLOCK now (#183): a dict of block -> GPU buffers
+    // The world is drawn PER MAPBLOCK now: a dict of block -> GPU buffers
     // the mesher deltas in and out, one indexed draw per block per pass. Replaces
     // the single concatenated world/liquid buffers, so a dig re-uploads only the
     // touched blocks instead of the whole world every time.
@@ -115,7 +115,7 @@ actor Renderer {
     // Flat copy of worldBlocks for the per-frame cull: rebuilt only when the
     // block set changes (consumeHandoff), so the 90 Hz path walks a contiguous
     // array instead of a 7500-entry dictionary's bucket table, and the draw
-    // passes index it instead of hashing each key three times (perf #310).
+    // passes index it instead of hashing each key three times.
     private struct BlockEntry { let key: SIMD3<Int>; let loN: SIMD3<Float>; let gpu: MeshHandoff.BlockGPU }
     private var blockList: [BlockEntry] = []
     private var blockListDirty = true
@@ -130,7 +130,7 @@ actor Renderer {
     private lazy var noCull = UserDefaults.standard.bool(forKey: "vrdev.noCull")
     #if !targetEnvironment(simulator)
     // Dedicated residency set for the block buffers, rebuilt only when the block
-    // set changes (not every frame) (#182/#183). One per in-flight slot so a
+    // set changes (not every frame). One per in-flight slot so a
     // rebuild never mutates a set the GPU is still reading; a delta arms a refresh
     // countdown so every slot gets updated over the next few frames.
     var worldResidencySets: [MTLResidencySet] = []
@@ -183,13 +183,13 @@ actor Renderer {
     private var hudScratchIdx: [UInt32] = []
     private var hudScratchGV: [Float] = []
     private static let hudGlassIdx: [UInt32] = [0, 1, 2, 0, 2, 3]
-    private nonisolated(unsafe) var accessoryLogged: Set<String> = []   // one-shot [acc] pose log per chirality (#73); under accessoryLock
-    // Hand-anchored HUD: wield item on the right hand (#66), hotbar on the left
-    // wrist (#57). Built each frame from the tracked hand/controller poses.
+    private nonisolated(unsafe) var accessoryLogged: Set<String> = []   // one-shot [acc] pose log per chirality; under accessoryLock
+    // Hand-anchored HUD: wield item on the right hand, hotbar on the left
+    // wrist. Built each frame from the tracked hand/controller poses.
     var handHudVertexBuffer: MTLBuffer
     var handHudIndexBuffer: MTLBuffer
     var handHudIndexCount: Int = 0
-    // #158: the wield stack count samples the MODEL texture array (baked digits),
+    // the wield stack count samples the MODEL texture array (baked digits),
     // not the node atlas, so it rides its own small buffer drawn with that array.
     var handHudTextVertexBuffer: MTLBuffer
     var handHudTextIndexBuffer: MTLBuffer
@@ -197,7 +197,7 @@ actor Renderer {
     var pointerVertexBuffer: MTLBuffer
     var pointerIndexBuffer: MTLBuffer
     var pointerIndexCount: Int = 0
-    // Wield animation (#136): track the wield identity to time a drop-and-pop on
+    // Wield animation: track the wield identity to time a drop-and-pop on
     // switch, and a wall clock for the continuous dig swing.
     private var lastWieldKey: (Int, Int32) = (-1, -1)
     private var wieldSwitchTime: CFTimeInterval = -1e9
@@ -214,14 +214,14 @@ actor Renderer {
     var overlayVertexBuffer: MTLBuffer
     var overlayIndexBuffer: MTLBuffer
     var overlayIndexCount: Int = 0
-    // #163: last handoff generation consumed, so the 90Hz render loop skips
+    // last handoff generation consumed, so the 90Hz render loop skips
     // re-uploading the model/overlay streams the ~62.5Hz producer hasn't changed.
     private var lastModelGen = -1
     private var lastOverlayGen = -1
     private var lastBlendGen = -1
     var modelTextureArray: MTLTexture?
     // SET_SKY "skybox" cube (the End). A 1x1 black cube stays bound when
-    // there is none so skyFragment always has a texture at its slot (#290).
+    // there is none so skyFragment always has a texture at its slot.
     var skyboxTexture: MTLTexture?
     lazy var skyboxPlaceholder: MTLTexture? = {
         let d = MTLTextureDescriptor.textureCubeDescriptor(pixelFormat: .rgba8Unorm_srgb, size: 1, mipmapped: false)
@@ -456,7 +456,7 @@ actor Renderer {
         NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.rebuildAccessories() }
         }
-        // #73: both Sense controllers connected DURING the awaits above (the hand
+        // both Sense controllers connected DURING the awaits above (the hand
         // tracking auth prompt + session start), before this observer existed, so
         // the session ran with zero accessories and no hand boxes ever showed.
         // Catch up once now.
@@ -512,7 +512,7 @@ actor Renderer {
                 let key = "\(a.accessory.inherentChirality)"
                 self.accessoryLock.lock()
                 // One-shot per key: what the accessory pose actually looks like
-                // (#73: boxes/wield don't show at held controllers though acc=2).
+                // (boxes/wield don't show at held controllers though acc=2).
                 if !self.accessoryLogged.contains(key) {
                     self.accessoryLogged.insert(key)
                     let t = a.originFromAnchorTransform.columns.3
@@ -557,7 +557,7 @@ actor Renderer {
 
     /// Extra rotation composed onto the device anchor: identity on device; in
     /// the sim an optional -vrdev.pitch / -vrdev.yaw (degrees) so a headless
-    /// screenshot can look up at the sky or turn (#119). The sim's anchor is
+    /// screenshot can look up at the sky or turn. The sim's anchor is
     /// present but untracked (so a nil-fallback never fires), hence composing.
     /// Applied to both the view matrix and the HUD/hands/raycast head so they
     /// stay consistent.
@@ -611,7 +611,7 @@ actor Renderer {
         // Draw the hand/controller box for BOTH hands, including the wielding
         // hand. Desktop hides the arm behind a first-person wield, but in VR the
         // controller IS the hand: hiding it left the wield item floating in
-        // space with nothing to ground it (#66). Showing the box makes the wield
+        // space with nothing to ground it. Showing the box makes the wield
         // read as held (the item sits just above the palm; see buildHandHud).
         accessoryLock.lock(); let xs = accessoryXforms; accessoryLock.unlock()
         for (_, m) in xs {
@@ -801,7 +801,7 @@ actor Renderer {
         // Wield + wrist hotbar + armor is ~100 quads rebuilt every frame: the
         // four scratch arrays are instance properties emptied with their
         // capacity kept, so nothing is malloced per frame (a fresh
-        // reserveCapacity(4096) was a 16 KB allocation at 90 Hz, perf #310).
+        // reserveCapacity(4096) was a 16 KB allocation at 90 Hz).
         handV.removeAll(keepingCapacity: true); handIdx.removeAll(keepingCapacity: true)
         handVt.removeAll(keepingCapacity: true); handIdxt.removeAll(keepingCapacity: true)
         var v = handV, idx = handIdx
@@ -812,11 +812,11 @@ actor Renderer {
         // the RIGHT hand/controller, so the item lives in your hand like a real
         // held tool (Eric chose hand-attached over desktop's camera-lock). The
         // grip transform sits the item forward-and-up of the fist with a tool
-        // tilt; hand-local axes are +Y up, -Z forward (matching #66's offsets).
+        // tilt; hand-local axes are +Y up, -Z forward (matching the wield offsets).
         // Numbers are a starting point to tune on device (the sim's fake hand is
         // not a real controller pose).
         if let w = hud.wield, let hand = handPose(left: false) {
-            // Animate (#136): a quick drop-and-pop when the wield changes, and a
+            // Animate: a quick drop-and-pop when the wield changes, and a
             // continuous swing while digging. Both ride on top of the grip so the
             // resting pose (offset/tilt/size) is unchanged.
             let now = CACurrentMediaTime()
@@ -880,14 +880,14 @@ actor Renderer {
             // Count and wear both sit like a wristwatch: a small patch on top of
             // the wrist (hand-local +Y), just toward the elbow, raised off the
             // surface so it doesn't sink in. Anchored to `hand`, not `grip`, so
-            // they stay on the arm instead of floating by the held item (#168).
+            // they stay on the arm instead of floating by the held item.
             // A stackable item never has wear, so the two share this spot freely.
             let watchAcross = SIMD3<Float>(1, 0, 0)          // around the wrist (band width)
             let watchAlong  = SIMD3<Float>(0, 0, 1)          // toward the elbow (band length)
             let watchCenter = SIMD3<Float>(0, 0.040, 0.055)  // top of the wrist, just above the surface
-            // Stack count (#158): a small camera-facing BILLBOARD at the wrist,
+            // Stack count: a small camera-facing BILLBOARD at the wrist,
             // not a label lying flat on the watch face. A flat label grazed the
-            // hand angle and read mirrored/upside-down (#168); a billboard is
+            // hand angle and read mirrored/upside-down; a billboard is
             // always upright and legible at any hand pose (like a hotbar-cell
             // count). Anchored at the wrist world point, oriented by the head's
             // right/up so it faces you. The text pass is cull .none, so one quad
@@ -903,7 +903,7 @@ actor Renderer {
                 emitHandRect(matrix_identity_float4x4, center: center, wAxis: hr, hAxis: hu,
                              halfW: tw, halfH: th, layer: hud.wieldCountLayer, tint: 16777215, into: &vt, idx: &idxt)
             }
-            // Durability (#159): a short band across the wrist, green->red by
+            // Durability: a short band across the wrist, green->red by
             // remaining, filled from one end like a gauge.
             if hud.wieldWear < 0.999 {
                 let rem = max(0, min(1, hud.wieldWear))
@@ -919,7 +919,7 @@ actor Renderer {
                              tint: Float(Int((1 - rem) * 255) + Int(rem * 255) * 256), into: &v, idx: &idx)
             }
         }
-        // #57: hotbar wrapped AROUND the left wrist (an arc, not a flat line).
+        // hotbar wrapped AROUND the left wrist (an arc, not a flat line).
         // Cells sit on a cylinder about the forearm axis (hand-local Z), each
         // facing radially outward; width runs around the wrist, height along the
         // arm. Radius/arc are first-cut numbers to tune on device.
@@ -941,14 +941,14 @@ actor Renderer {
                                   half: cell * 0.5, layer: hud.slotLayer, uv: SIMD2(1, 1), into: &v, idx: &idx)
                 if let ic = hud.hotbar[i] {
                     // -along: the cell's texture-top points toward the fingers, not
-                    // the elbow, so the icon reads upright on the wrist (#57). With
+                    // the elbow, so the icon reads upright on the wrist. With
                     // +along it came out upside down. The slot/select frames are
                     // symmetric so they don't care.
                     emitHandQuadFrame(m, center: base + radial * 0.001, wAxis: tangent, hAxis: -along,
                                       half: cell * 0.48, layer: ic.layer, uv: ic.uv, into: &v, idx: &idx)
                     // Per-slot wear bar along the bottom edge of the cell (green
                     // -> red by remaining), so a damaged tool reads on the ring
-                    // itself, not only when wielded (#106).
+                    // itself, not only when wielded.
                     if ic.wear < 0.999 {
                         let rem = max(0, min(1, ic.wear))
                         let bot = base + radial * 0.002 - along * (cell * 0.42)
@@ -967,7 +967,7 @@ actor Renderer {
                 }
             }
         }
-        // Armor as a wrist gauntlet (#108): a band of plate segments on the same
+        // Armor as a wrist gauntlet: a band of plate segments on the same
         // left-forearm cylinder as the hotbar, a touch tighter radius so it reads
         // as an under-layer, and shifted up-arm (toward the elbow) so it doesn't
         // collide with the hotbar. Hidden at 0 armor. filled = armor - i*2 picks
@@ -1222,7 +1222,7 @@ actor Renderer {
         // The per-frame residency set is cleared + refilled + committed once,
         // down at the draw site (removeAll immediately before addAllocations),
         // instead of committing an empty set here and a full one there: two
-        // commits per frame became one (#182). Safe because by the rebuild point
+        // commits per frame became one. Safe because by the rebuild point
         // this slot's prior frame has completed (the same endFrameEvent wait the
         // world residency set relies on).
 
@@ -1239,7 +1239,7 @@ actor Renderer {
         // view transform on top of this).
         let scale = PlayerState.scale
         // One consistent read of feet/origin/sky/sun under a single lock, instead
-        // of six separate lock acquisitions per frame (#184).
+        // of six separate lock acquisitions per frame.
         let rs = appModel.player.renderState()
         let s = rs.snap
         self.worldMeshRef = s.meshRef   // for frustum culling in the draw pass (#1)
@@ -1271,7 +1271,7 @@ actor Renderer {
         // a = 2 tells skyFragment to sample the cube instead of the flat colour;
         // the flat bgcolor stays up until the six faces have downloaded.
         if rs.skySolid.w > 0, rs.sky.fog.z > 0.5, skyboxTexture != nil { self.uniforms[0].skySolid.w = 2 }
-        // Server sky look (#102): colours, sun/moon, stars, clouds, saturation.
+        // Server sky look: colours, sun/moon, stars, clouds, saturation.
         let sky = rs.sky
         self.uniforms[0].skyDayZenith = sky.dayZenith
         self.uniforms[0].skyDayHorizon = sky.dayHorizon
@@ -1283,7 +1283,7 @@ actor Renderer {
         self.uniforms[0].skyClouds = sky.clouds
         self.uniforms[0].skyCloudColor = sky.cloudColor
         self.uniforms[0].saturation = sky.saturation
-        // Distance fog (#285), as Game::updateFrame sets it up: linear from
+        // Distance fog, as Game::updateFrame sets it up: linear from
         // fog_start * range to range, where range is the view distance (our
         // wanted_range in blocks * 16) unless SET_SKY gave a fog_distance, and
         // the colour is what Sky::getFogColor returns: the server's fog_color
@@ -1367,7 +1367,7 @@ actor Renderer {
     /// render thread; Metal retains the old buffers until in-flight frames finish.
     private func consumeHandoff() {
         guard let d = appModel.meshHandoff.take() else { return }
-        // Fold the per-block delta into the block dict (#183). Buffers were built
+        // Fold the per-block delta into the block dict. Buffers were built
         // on the mesher thread; Metal keeps replaced ones alive for in-flight
         // frames. `reset` drops everything first (atlas grew -> all re-meshed).
         if d.reset { worldBlocks.removeAll(keepingCapacity: true) }
@@ -1386,7 +1386,7 @@ actor Renderer {
         #endif
     }
 
-    // Animated node tiles (#137): layers whose pixels cycle over time (lava, fire,
+    // Animated node tiles: layers whose pixels cycle over time (lava, fire,
     // furnace). Re-uploaded per frame only when the frame index advances.
     // World index counts of the last drawable (solid/cutout/liquid), for the
     // [perf] line: the GPU review had to guess the vertex load; now a device
@@ -1411,13 +1411,13 @@ actor Renderer {
     }
 
     private func consumeEntityHandoff() {
-        // Already split at post time (#186): head-locked HUD is placed per-drawable
+        // Already split at post time: head-locked HUD is placed per-drawable
         // against the fresh head pose (buildHudBillboards); world billboards are
         // placed here in origin space.
         let (ents, hud) = appModel.entityHandoff.read()
         hudInstances = hud
         guard !ents.isEmpty else { entityIndexCount = 0; return }
-        let rs = appModel.player.renderState()   // snap + origin under one lock (#184)
+        let rs = appModel.player.renderState()   // snap + origin under one lock
         let snap = rs.snap
         let eye = rs.origin
         let scale = PlayerState.scale
@@ -1507,7 +1507,7 @@ actor Renderer {
         func bandDir(_ az: Float, _ e: Float) -> SIMD3<Float> { simd_normalize(fwd + right * tan(az) + up * tan(e)) }
         let pc = headPos + bandDir(0, -0.30) * gd
         // Hug the vitals rows (they reach ~az ±0.185, one row tall) instead of a
-        // wide slab -- Eric: the backing read too big on device (#194/#9).
+        // wide slab -- Eric: the backing read too big on device.
         let hw = gd * tan(0.27), hh = gd * tan(0.05)
         let bl = pc - right * hw - up * hh, br = pc + right * hw - up * hh
         hudScratchGV.removeAll(keepingCapacity: true)
@@ -1558,7 +1558,7 @@ actor Renderer {
     /// Mob model geometry (already in origin space) for this frame.
     /// Upload `src` into a persistent buffer, reusing it (memcpy) and only
     /// re-allocating when it must grow. Replaces makeBuffer(bytes:) on the
-    /// per-frame path so the render loop stops churning MTLBuffers (#163).
+    /// per-frame path so the render loop stops churning MTLBuffers.
     private func upload<T>(_ src: [T], into buf: inout MTLBuffer) {
         let bytes = src.count * MemoryLayout<T>.stride
         guard bytes > 0 else { return }
@@ -1649,7 +1649,7 @@ actor Renderer {
                 // Fits: only the layers beyond what we already hold are new.
                 for i in modelArrayLogical..<texs.count { upload(tex, i) }
                 modelArrayLogical = texs.count
-                appModel.modelTextureHandoff.reportBuilt(texs.count)   // ack so the producer knows the array actually grew (#254)
+                appModel.modelTextureHandoff.reportBuilt(texs.count)   // ack so the producer knows the array actually grew
                 print("[model] grew to \(texs.count) layers (capacity \(tex.arrayLength))"); fflush(stdout)
             } else {
                 let desc = MTLTextureDescriptor()
@@ -1897,9 +1897,9 @@ actor Renderer {
         if capture { ensureCaptureTexture(like: drawable.colorTextures[0]); if let ct = captureTexture { perFrame.append(ct) } }
         residencySet.removeAllAllocations()   // clear the prior frame's set (slot's GPU work is done)
         residencySet.addAllocations(perFrame)
-        residencySet.commit()                 // one commit per frame, not two (#182)
+        residencySet.commit()                 // one commit per frame, not two
         // World block buffers live in a dedicated set, rebuilt only when the
-        // block set changed (#182/#183). Refresh this slot's set if armed; each
+        // block set changed. Refresh this slot's set if armed; each
         // slot's prior frame has completed (endFrameEvent wait) so it's safe.
         let worldRes = self.worldResidencySets[uniformBufferIndex]
         if worldResidencyRefresh > 0 {
@@ -1928,7 +1928,7 @@ actor Renderer {
 
         renderEncoder.pushDebugGroup("Draw World")
 
-        // Winding (#85): the mesher winds faces counter-clockwise with outward
+        // Winding: the mesher winds faces counter-clockwise with outward
         // normals in node space, but modelMatrix's Z mirror flips handedness, so
         // outward faces arrive CLOCKWISE on screen. Front = clockwise makes
         // back-face culling correct for the world mesh. Culling is switched on
@@ -1958,11 +1958,11 @@ actor Renderer {
         // Uniforms (incl. daylight) are read by both the sky and world fragments.
         renderEncoder.setFragmentBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
 
-        // The world, drawn PER MAPBLOCK
-        // (#183). Solid cubes and cutout (leaves/plants/nodeboxes) each get their
+        // The world, drawn PER MAPBLOCK.
+        // Solid cubes and cutout (leaves/plants/nodeboxes) each get their
         // own index stream over the block's vertex buffer: solid through the
-        // no-discard early-Z pipeline, cutout through the alpha-discard pipeline
-        // (#164). Uniforms/vp/atlas are shared across all blocks.
+        // no-discard early-Z pipeline, cutout through the alpha-discard pipeline.
+        // Uniforms/vp/atlas are shared across all blocks.
         renderEncoder.setDepthStencilState(depthState)
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(drawableTarget.viewProjectionBuffer, offset: drawableTarget.viewProjectionBufferOffset, index: BufferIndex.viewProjection.rawValue)
@@ -2174,7 +2174,7 @@ actor Renderer {
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: handHudIndexCount,
                                                 indexType: .uint32, indexBuffer: handHudIndexBuffer, indexBufferOffset: 0)
         }
-        // Wield stack count (#158): same hand pipeline/depth, but the digits live
+        // Wield stack count: same hand pipeline/depth, but the digits live
         // in the MODEL texture array, so bind that for this one draw.
         if handHudTextIndexCount > 0, let mtex = modelTextureArray {
             renderEncoder.setRenderPipelineState(entityPipelineState)

@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 /// TextureAtlas.decodePNGFrames splits a vertical animation strip into its square
 /// frames, frame 0 at the TOP (Luanti plays top->bottom). This is the tricky bit
-/// behind animated node tiles (#137: lava/fire), so pin the ordering + count.
+/// behind animated node tiles (lava/fire), so pin the ordering + count.
 final class AnimTileTests: XCTestCase {
     /// A W x 2W PNG: top half red, bottom half blue (two square frames).
     private func twoFrameStripPNG(w: Int) -> Data {

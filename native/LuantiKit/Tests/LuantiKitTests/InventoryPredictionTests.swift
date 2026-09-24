@@ -3,7 +3,7 @@ import XCTest
 
 /// Client-side inventory prediction: the pure apply* helpers mirror the server's
 /// Move/Drop/MoveSomewhere merge/swap/clamp rules so the panel can update
-/// instantly (the server echo reconciles). #224.
+/// instantly (the server echo reconciles)..
 final class InventoryPredictionTests: XCTestCase {
     typealias Stack = Client.ItemStack
     // Most items stack to 64 in VoxeLibre; a couple of overrides to exercise clamp.

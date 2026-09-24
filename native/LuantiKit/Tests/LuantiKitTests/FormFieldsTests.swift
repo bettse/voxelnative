@@ -3,8 +3,8 @@ import XCTest
 
 /// TOSERVER_INVENTORY_FIELDS: closing a named show_formspec form (a chest's
 /// "mcl_chests:chest_x_y_z") must send this with the formname + quit, or the
-/// server's on_player_receive_fields never fires and the chest lid stays open
-/// (#130). Layout mirrors serverpackethandler handleCommand_InventoryFields.
+/// server's on_player_receive_fields never fires and the chest lid stays open.
+/// Layout mirrors serverpackethandler handleCommand_InventoryFields.
 final class FormFieldsTests: XCTestCase {
     func testChestCloseCarriesFormnameAndQuit() {
         let d = Client.inventoryFieldsPacket(formname: "mcl_chests:chest_-545_35_26",

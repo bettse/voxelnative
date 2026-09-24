@@ -71,7 +71,7 @@ final class InteractPacketTests: XCTestCase {
         XCTAssertEqual(d.keys, 0)
     }
 
-    /// Raise-to-mouth eat is a HOLD (#173): VoxeLibre ticks a ~1.6s eat delay off
+    /// Raise-to-mouth eat is a HOLD: VoxeLibre ticks a ~1.6s eat delay off
     /// the held place/RMB control bit, so while placeHeld the interact carries the
     /// place bit even for an activate that otherwise has none.
     func testPlaceHeldSetsThePlaceBitOnActivate() {
@@ -83,7 +83,7 @@ final class InteractPacketTests: XCTestCase {
     }
 
     /// Sneak is control bit 6 (value 64): sent so mods see it and the server
-    /// treats a rightclick as a placement (#178). It rides both PLAYERPOS and
+    /// treats a rightclick as a placement. It rides both PLAYERPOS and
     /// interact packets, and combines with the held place bit.
     func testSneakSetsBit6() {
         let c = Client(name: "t", password: "")

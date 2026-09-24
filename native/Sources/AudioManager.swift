@@ -11,7 +11,7 @@ import LuantiKit
 final class DisplaySettings {
     static let shared = DisplaySettings()
     private let defaults = UserDefaults.standard
-    /// #84: hide visionOS's persistent system overlays in the immersive space
+    /// hide visionOS's persistent system overlays in the immersive space
     /// (the circle/menu affordance that appears when you look at a Sense
     /// controller). Default on; read once when the scene is built.
     var hideSystemOverlays: Bool {
@@ -23,7 +23,7 @@ final class DisplaySettings {
 /// View distance in mapblocks (UserDefaults-backed, like VolumeSettings). Drives
 /// the client's wanted_range in PLAYERPOS: lower = the server streams and the
 /// client meshes fewer blocks, trading draw distance for a lighter GPU/thermal
-/// load (#161). Clamped to a sane band.
+/// load. Clamped to a sane band.
 final class ViewSettings {
     static let shared = ViewSettings()
     static let minBlocks = 3, maxBlocks = 12, defaultBlocks = 8
@@ -101,7 +101,7 @@ final class AudioManager: NSObject {
     // 2D source straight to mainMixerNode silently dropped the env ->
     // mainMixer link (its outputConnectionPoints went to 0), and the next
     // positional play() raised 'player started when in a disconnected state'
-    // -- an NSException Swift can't catch, so the app died (#302). With the
+    // -- an NSException Swift can't catch, so the app died. With the
     // submixer, per-sound connects never touch the bus the environment uses.
     private let flat = AVAudioMixerNode()
     private final class Source {
@@ -166,7 +166,7 @@ final class AudioManager: NSObject {
         // sets the SOURCE gain to 3x and OpenAL clamps only the final result,
         // so a gain-1 sound is full volume out to 3 nodes and then 3/d. AVAudio
         // clamps the player volume at 1 before attenuating, which made sounds
-        // fade ~3x too fast (a third at 3 nodes, #288). A 3-node reference
+        // fade ~3x too fast (a third at 3 nodes). A 3-node reference
         // distance gives the same min(1, 3/d) curve for gain 1 (the common
         // case); low-gain sounds carry a little farther than desktop, high-gain
         // ones (lightning) a little less.
@@ -196,7 +196,7 @@ final class AudioManager: NSObject {
     /// AVAudio's frame is right-handed (-Z forward), so Z flips, the same
     /// mirror the renderer applies to the world.
     // Last pose handed to the engine: skip the per-tick dispatch (a closure
-    // context + a queue wake at 62 Hz) while the head hasn't moved (perf #312).
+    // context + a queue wake at 62 Hz) while the head hasn't moved.
     private var lastListenerPos = SIMD3<Float>(repeating: .nan)
     private var lastListenerFwd = SIMD3<Float>(repeating: .nan)
     func setListener(pos: SIMD3<Float>, forward: SIMD3<Float>, up: SIMD3<Float>) {
@@ -367,7 +367,7 @@ final class AudioManager: NSObject {
             // play() raises an uncatchable NSException if the path from the
             // player to the output is broken anywhere. Check the whole chain
             // first; try to re-link a dropped submixer/environment, and if a
-            // link is still missing drop this sound instead of the app (#302).
+            // link is still missing drop this sound instead of the app.
             let stage = positional ? self.env : self.flat
             if self.engine.outputConnectionPoints(for: stage, outputBus: 0).isEmpty {
                 print("[audio] \(positional ? "environment" : "2D mixer") lost its output link; reconnecting"); fflush(stdout)
@@ -391,7 +391,7 @@ final class AudioManager: NSObject {
             // without a handle) and the engine treats them as fire-and-forget
             // (clientpackethandler.cpp). Keying them by id made every ephemeral
             // replace the previous one: a door click cut off a mob call, a
-            // footstep cut off the dug sound (#280). Only real handles (> 0)
+            // footstep cut off the dug sound. Only real handles (> 0)
             // are tracked for STOP/FADE.
             if spec.id > 0 {
                 if let old = self.sources[spec.id] { self.tearDown(old) }   // replace any prior sound on this id
@@ -409,7 +409,7 @@ final class AudioManager: NSObject {
     }
 
     /// A server-handled (id > 0) sound ran to its end on its own. WorldSession
-    /// reports these as TOSERVER_REMOVED_SOUNDS (#290). Called on the audio queue.
+    /// reports these as TOSERVER_REMOVED_SOUNDS. Called on the audio queue.
     var onFinished: ((Int) -> Void)?
 
     private func finish(_ src: Source, key: ObjectIdentifier) {
@@ -426,7 +426,7 @@ final class AudioManager: NSObject {
     /// to run outside the catch. So "connect failed ... dropped" logged, then
     /// the very next detach aborted the app -- Eric's tunnel crash right after a
     /// level-up sound while mining coal. Catch the detach too so a bad sound
-    /// truly drops instead of crashing (#337 follow-up).
+    /// truly drops instead of crashing (follow-up).
     private func safeDetach(_ nodes: AVAudioNode...) {
         for n in nodes {
             if let err = VNCatchNSException({ self.engine.detach(n) }) {

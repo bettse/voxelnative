@@ -2,7 +2,7 @@ import XCTest
 import CryptoKit
 @testable import LuantiKit
 
-/// Runtime media + batched particles (#104): SPAWN_PARTICLE_BATCH framing,
+/// Runtime media + batched particles: SPAWN_PARTICLE_BATCH framing,
 /// MEDIA_PUSH bookkeeping in MediaManager, and the HAVE_MEDIA ack. Wire
 /// layouts mirror clientpackethandler.cpp / particles.cpp / client.cpp.
 final class RuntimeMediaTests: XCTestCase {

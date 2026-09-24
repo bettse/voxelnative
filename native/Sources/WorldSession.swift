@@ -15,7 +15,7 @@ import LuantiKit
 
 // Element-wise vertex/index appends. An `append(contentsOf: [..])` array literal
 // heap-allocates a throwaway Array every call; these emitters run per corner /
-// per quad on the tick thread, so that churn adds up (#248). Same layout out.
+// per quad on the tick thread, so that churn adds up. Same layout out.
 @inline(__always) private func pushV(_ a: inout [Float], _ x: Float, _ y: Float, _ z: Float,
                                      _ u: Float, _ w: Float, _ layer: Float, _ shade: Float,
                                      _ light: Float, _ tint: Float) {
@@ -113,7 +113,7 @@ final class WorldSession {
     private var modelTexData: [[UInt8]] = []
     private var modelTexNames: [String] = []
     private var modelTexCount = 0
-    private var modelTexPostedCount = 0        // layer count of the last full we POSTED (vs handoff.builtCount, what the renderer acked) (#254)
+    private var modelTexPostedCount = 0        // layer count of the last full we POSTED (vs handoff.builtCount, what the renderer acked)
     private var modelTexDirty: Set<Int> = []   // existing layers whose pixels changed (patch, don't rebuild)
     /// Overwrite an existing layer's pixels and mark it for an in-place GPU patch
     /// (not a full array rebuild). Use this for every content update of a layer
@@ -149,7 +149,7 @@ final class WorldSession {
     // for nav bounds, render, highlight and dispatch) stays consistent per frame.
     // Audio is controlled by the launcher's volume sliders now, so the old
     // in-game music/sound toggles are gone (they duplicated the sliders and
-    // confused more than helped) (#240). Stored, not computed: it was read per
+    // confused more than helped). Stored, not computed: it was read per
     // option per tick while the menu was open, rebuilding the array each time.
     private let koganeOptions: [String] = {
         var o = ["Resume", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
@@ -158,7 +158,7 @@ final class WorldSession {
     }()
     private var koganeFocused = false          // gaze is on the companion
     private var koganeMenuOpen = false
-    private let koganeSpriteVisible = false   // #105: hidden for now (right X opens the menu); code kept
+    private let koganeSpriteVisible = false   // hidden for now (right X opens the menu); code kept
     private var koganeSel = 0                   // highlighted option
     private var koganeBob: Float = 0            // idle bob phase
     private var koganeOpenCooldown: Float = 0   // brief lockout so opening can't instant-confirm
@@ -195,7 +195,7 @@ final class WorldSession {
     private var kbBufferAspect: Float = 1   // width/height of the baked output text (renderTextFilled)
     private var kbHover: Int? = nil
     private var kbPrevPress = false
-    private var kbPrevCancel = false        // edge-detect the cancel (menu/inventory) button so the press that OPENED the keyboard doesn't instantly close it (#238)
+    private var kbPrevCancel = false        // edge-detect the cancel (menu/inventory) button so the press that OPENED the keyboard doesn't instantly close it
     #if targetEnvironment(simulator)
     private var koganeSimClock: Float = 0       // sim-only: auto-opens the menu so it can be screenshotted
     #endif
@@ -223,12 +223,12 @@ final class WorldSession {
     // Atlas builds run here, off the tick queue. At 64px tiles a full bake is
     // heavy enough (~16x the 16px pixel count) to blow the 16ms physics budget
     // if run inline during client.poll, which froze locomotion then snap-
-    // corrected the player (a fall risk, #152). Session-queue-only flags below
+    // corrected the player (a fall risk). Session-queue-only flags below
     // coalesce overlapping requests.
     private let atlasQueue = DispatchQueue(label: "world.atlas", qos: .userInitiated)
     private var atlasBuilding = false               // a build is in flight on atlasQueue
     private var atlasRebuildPending = false         // asked again mid-build; rebuild once more when done
-    private var mediaAtlasDirty = false             // media arrived; coalesce the rebuild (#188)
+    private var mediaAtlasDirty = false             // media arrived; coalesce the rebuild
     private var sinceMediaAtlas: Double = 999       // seconds since the last atlas rebuild (first is prompt)
     private let client = Client(name: WorldSession.playerName, password: WorldSession.password)
     private let audio = AudioManager()
@@ -273,30 +273,30 @@ final class WorldSession {
     private var remeshCooldown: Double = 0
     private var playersSeen: Set<String> = []
     private var creepersNear: Set<Int> = []   // creeper object ids within hiss range (#gag: hot-pink creepers)
-    private var loggedDropIds: Set<Int> = []  // dropped items already reported by the one-shot [drop] draw log (#358)
-    private var creeperCache: [Int: Bool] = [:]   // per-entity creeper flag; mesh/name are stable, so don't re-lowercase every frame (#247)
-    private var bgMissLogged: Set<String> = []    // one-time log for a missing fill-background texture (#254)
+    private var loggedDropIds: Set<Int> = []  // dropped items already reported by the one-shot [drop] draw log
+    private var creeperCache: [Int: Bool] = [:]   // per-entity creeper flag; mesh/name are stable, so don't re-lowercase every frame
+    private var bgMissLogged: Set<String> = []    // one-time log for a missing fill-background texture
     private var skinCache: [Int: (mesh: String, frame: Float, bones: Int, positions: [SIMD3<Float>])] = [:]   // entity id -> last skin
-    // #165 perf: how far out we skin+draw real mob meshes. Capped at 96 nodes
+    // Perf: how far out we skin+draw real mob meshes. Capped at 96 nodes
     // (past that they're clutter), but a lower view-distance slider pulls it in
     // so fewer mobs get skinned each tick (skinning is the fan-spinning cost).
     private var mobRenderDist: Float = 96
-    // #162 perf: the bind-pose bounds/fit-height of a model depend only on its
+    // Perf: the bind-pose bounds/fit-height of a model depend only on its
     // mesh + visible-surface set (never on pose or the player), so cache them
     // per entity instead of scanning every draw index every tick.
     // Reserve the model vertex/index arrays to last tick's size so a ~140k-float
-    // stream isn't regrown from zero (repeated reallocs) every tick (#162).
+    // stream isn't regrown from zero (repeated reallocs) every tick.
     private var lastModelVerts = 0
     private var lastModelIdx = 0
     private var lastOverlayVerts = 0, lastOverlayIdx = 0, lastBlendVerts = 0, lastBlendIdx = 0
     private var seenEntityTiles: Set<String> = []   // entity texture strings already offered to the atlas
-    // Gate for ensureModelTextures' entity scan (#251): only walk all entities'
+    // Gate for ensureModelTextures' entity scan: only walk all entities'
     // textures when a new one appeared (objects.tiles is a monotonic "seen" set,
     // so its count only grows) or media just landed (a pending skin may resolve
     // now). Otherwise every tick re-parsed each pending skin's modifier string.
     private var modelTexRescan = true
     private var lastModelTexTilesCount = -1
-    private var simMobPhase = 0                       // -vrdev.spawnMob framing state (#91)
+    private var simMobPhase = 0                       // -vrdev.spawnMob framing state
     private var simMobTimer: Double = 0
     private var simRealHudDone = false                // one-shot guard for -vrdev.realHud
     private var simBedSpawned = false                 // one-shot guard for -vrdev.spawnBed
@@ -306,7 +306,7 @@ final class WorldSession {
     private var simCmdQueue: [String]? = nil           // remaining -vrdev.cmd commands, drained one per ~12 frames
     private var simCmdTimer: Double = 1.3               // seconds since the last -vrdev.cmd send (kept >= the server's chat allowance)
     private var fakeRainSpawned = false
-    // free_move (#291): Luanti toggles it with K when the player has "fly";
+    // free_move: Luanti toggles it with K when the player has "fly";
     // in VR a double-tap of jump does it. Off again if the priv goes away.
     private var flying = false
     private var flyPrevJump = false
@@ -315,7 +315,7 @@ final class WorldSession {
     private var digCapsTestDone = false
     private var audioTestPhase = 0
     private var audioTestTimer: Float = 0
-    private var fakeRainLogTimer: Double = 0                // one-shot guard for -vrdev.fakeRain (#199/#201)
+    private var fakeRainLogTimer: Double = 0                // one-shot guard for -vrdev.fakeRain
     private var simRideDone = false                    // one-shot guard for -vrdev.rideTest
     private var simEatPhase = 0                         // -vrdev.eatTest state machine
     private var simGripOverride: Bool? = nil            // -vrdev.bowTest: stands in for the controller grip
@@ -325,7 +325,7 @@ final class WorldSession {
     // a low-water mark, a target node, a paced chat queue).
     private var simScratchCount = 0
     private var simFallPrepped = false
-    private var simDigPhase = 0                         // -vrdev.digTest state machine (#179)
+    private var simDigPhase = 0                         // -vrdev.digTest state machine
     private var simDigTimer: Double = 0
     private var simTarget: SIMD3<Int>? = nil        // per-scene scratch: the node the scene works on
     private var spawnerLogged = Set<String>()            // spawner textures already logged
@@ -337,8 +337,8 @@ final class WorldSession {
     private var awardBox: (lo: SIMD2<Float>, hi: SIMD2<Float>)? = nil   // this frame's toast background (nominal px), to fit its text
     private var simAwardRects: [String: (lo: SIMD2<Float>, hi: SIMD2<Float>)] = [:]   // -vrdev.awardTest: drawn toast rects (nominal px)
     private var simScratchInt = Int.max                  // per-scene scratch: a low-water mark or a start value x100
-    private var simInvPhase = 0                         // -vrdev.invPickTest state machine (#81)
-    private var simInvCyclePhase = 0                    // -vrdev.invCycle (#296)
+    private var simInvPhase = 0                         // -vrdev.invPickTest state machine
+    private var simInvCyclePhase = 0                    // -vrdev.invCycle
     private var simInvTimer: Double = 0
     private var simInvHoverOverride: Int? = nil         // sim: force invHover to a slot (no ray)
     private var prevInventory = false
@@ -350,7 +350,7 @@ final class WorldSession {
     private var teleportSettle: Float = 0
     private var terrainLoading = false
     private var simSceneTimer: Double = 0
-    private var inventoryOpen = false   // right O toggles; panel itself is #81
+    private var inventoryOpen = false   // right O toggles; panel itself is
     // Per-mapblock mesh cache (mesherQueue-only). A dig/place re-meshes just the
     // touched block + its neighbours instead of the whole world, then the cache
     // entries are concatenated into the combined buffer the renderer wants. Keyed
@@ -366,22 +366,22 @@ final class WorldSession {
     ]
     private var started = false
     private var prevDig = false, prevPlace = false
-    // Drop chord (#341): right trigger + right grip together = desktop Q.
+    // Drop chord: right trigger + right grip together = desktop Q.
     private var dropChordLatched = false        // chord fired; both buttons ignored until both release
     private var chordWait: Float = 0            // a lone press waits this long for its partner
     private var chordPendingDig = false         // which button started the wait
     private static let chordWindow: Float = 0.08
-    private var objectHitDelay: Float = 0               // game.cpp object_hit_delay_timer, counts down every tick (#284)
+    private var objectHitDelay: Float = 0               // game.cpp object_hit_delay_timer, counts down every tick
     private var digInstantly = false                    // last break was an instant dig (game.cpp dig_instantly)
     private var prevFeet: SIMD3<Float>? = nil           // last tick's feet, for the PLAYERPOS velocity
-    private var slipVel = SIMD2<Float>(0, 0)            // eased horizontal velocity while on a slippery node (#269)
-    // Hold-to-place repeat (#178): armed while performPlace keeps returning true (see its doc).
+    private var slipVel = SIMD2<Float>(0, 0)            // eased horizontal velocity while on a slippery node
+    // Hold-to-place repeat: armed while performPlace keeps returning true (see its doc).
     private static let placeRepeatTime: Float = 0.25   // Luanti repeat_place_time
     private var placeRepeatArmed = false
     private var placeRepeatTimer: Float = 0
     private var prevHotbarPrev = false, prevHotbarNext = false
     private var dead = false            // hp == 0; blocks dig/place and arms respawn
-    private var damageFlash: Float = 0  // seconds of red hit-cast left (#279)
+    private var damageFlash: Float = 0  // seconds of red hit-cast left
     private var recentFallDamage: Float = 0   // set by reportFallDamage so the HP drop plays the fall sound
     private var simDeadTimer: Float = 0 // sim: auto-respawn after 2 s dead
     private var prevRespawnBtn = false
@@ -395,12 +395,12 @@ final class WorldSession {
     private struct BreakParticle {
         var pos: SIMD3<Float>, vel: SIMD3<Float>, acc: SIMD3<Float>
         var age: Float, life: Float, size: Float
-        var collide = false, removeOnHit = false   // collisiondetection / collision_removal (#275)
+        var collide = false, removeOnHit = false   // collisiondetection / collision_removal
         var layer: Int32     // atlas layer at spawn (informational; render re-resolves by tex)
         var tex: String      // texture key, re-resolved every frame (never the spawn
                              // index) so an atlas rebuild's remap can't point a live
-                             // particle at the wrong tile (rain/snow->dirt #201/#256)
-        /// Tile animation (#307): one atlas texture key per frame (baked through
+                             // particle at the wrong tile (rain/snow->dirt)
+        /// Tile animation: one atlas texture key per frame (baked through
         /// the [verticalframe / [sheet modifiers) and the seconds per frame; empty
         /// = a still texture. Frames are re-resolved by key like `tex`.
         var frameKeys: [String] = []
@@ -408,7 +408,7 @@ final class WorldSession {
         var frameLayers: [Int32] = []   // frameKeys resolved for atlasGeneration == layerGen
         var layerGen = -1               // atlasGeneration the cached layer(s) were resolved against
         var glow: UInt8 = 0  // light floor on both day/night nibbles (Particle::updateLight)
-        // Particle::step extras (#308): per-axis drag, brownian jitter picked
+        // Particle::step extras: per-axis drag, brownian jitter picked
         // each frame, bounce on collision; scale tween over the lifetime.
         var drag: SIMD3<Float> = .zero
         var jitterMin: SIMD3<Float> = .zero, jitterMax: SIMD3<Float> = .zero
@@ -417,7 +417,7 @@ final class WorldSession {
     }
     private var particles: [BreakParticle] = []
     private var particleAnimLogged: Set<String> = []   // one [particles] frames line per animated texture
-    // Reused per-surface vertex remap for appendModel (#247 perf): a fresh
+    // Reused per-surface vertex remap for appendModel (perf): a fresh
     // [Int32] was allocated per surface per mob per frame on the tick thread.
     // `modelRemapSeen` stamps which local index was assigned this surface via a
     // monotonic generation, so we skip both the per-surface heap alloc AND the
@@ -426,17 +426,17 @@ final class WorldSession {
     private var modelRemapSeen: [Int32] = []
     private var modelRemapGen: Int32 = 0
     // Sorted server-HUD elements, cached by Client.hudGeneration so the ~80
-    // pre-created potion-effect slots aren't mapped + z-sorted every frame (#249).
+    // pre-created potion-effect slots aren't mapped + z-sorted every frame.
     private var sortedHud: [(Int, Client.HudElement)] = []
     private var sortedHudGen = -1
     // Constant quad UVs, hoisted so the emission helpers don't re-allocate the
-    // array literal every call (#248 follow-up). BL = bottom-left texture origin
+    // array literal every call (follow-up). BL = bottom-left texture origin
     // (y-up quads), TL = top-left (y-down quads).
     private static let quadUVsBL: [(Float, Float)] = [(0, 1), (1, 1), (1, 0), (0, 0)]
     private static let quadUVsTL: [(Float, Float)] = [(0, 0), (1, 0), (1, 1), (0, 1)]
     // Head transform snapshotted once per postEntities pass: it was fetched (and
     // its basis re-normalized) ~7x/frame, each call locking PlayerState. The pose
-    // is fixed for the frame, so one read feeds every HUD/nametag helper (#250).
+    // is fixed for the frame, so one read feeds every HUD/nametag helper.
     private var frameHeadXform = matrix_identity_float4x4
     private struct ActiveSpawner { let spec: Client.ParticleSpawner; var emitted: Int; var age: Float; var gone: Float; var spawnRemainder: Float = 0 }
     private var activeSpawners: [Int: ActiveSpawner] = [:]
@@ -460,7 +460,7 @@ final class WorldSession {
     /// The player's hand item: Luanti reads it from the "hand" inventory list
     /// (VoxeLibre's mcl_meshhand puts mcl_meshhand:<skin>_surv or _crea there,
     /// the creative one digging at 0.2 s with a 10-node range). Nil until the
-    /// server has sent that list (#267).
+    /// server has sent that list.
     private func handItemName() -> String? {
         guard let h = client.inventory["hand"], let first = h.first, let st = first, !st.name.isEmpty else { return nil }
         if loggedHand != st.name { loggedHand = st.name; print("[hand] \(st.name) range=\(client.items.range(for: st.name).map { String($0) } ?? "nil")"); fflush(stdout) }
@@ -468,7 +468,7 @@ final class WorldSession {
     }
 
     /// Pointing range the way game.cpp getToolRange does: the wielded item's
-    /// range when it sets one (>= 0), else the hand's, else 4 (#267).
+    /// range when it sets one (>= 0), else the hand's, else 4.
     private var currentReach: Float {
         let wield = client.wieldIndex
         if wield >= 0, wield < hotbar.count, let w = hotbar[wield], let r = client.items.range(for: w), r >= 0 { return r }
@@ -524,7 +524,7 @@ final class WorldSession {
         self.handHudHandoff = handHudHandoff
         self.screenshotFlag = screenshotFlag
         self.player = player
-        client.wantedRange = ViewSettings.shared.blocks   // view-distance slider (#161)
+        client.wantedRange = ViewSettings.shared.blocks   // view-distance slider
         mobRenderDist = min(96, Float(ViewSettings.shared.blocks * 16))
         client.onAuthenticated = { [weak self] seed in
             print("[session] AUTHENTICATED map_seed=\(seed) \(PerfStats.uptime())"); fflush(stdout)
@@ -560,7 +560,7 @@ final class WorldSession {
             // big ones; a small (< 6 node) reset is left to converge over the
             // next ticks, because snapping the headset view is worse in VR than
             // a brief drift. The server's position stays authoritative either
-            // way (#180, #319).
+            // way.
             if !self.player.haveSpawn {
                 let sp = grounded(pos)
                 print("[session] initial spawn at \(pos) -> \(sp) yaw=\(yaw) \(PerfStats.uptime())"); fflush(stdout)
@@ -593,11 +593,11 @@ final class WorldSession {
             // SoundMaker::playerDamage): a red flash and the "player_damage"
             // sound (VoxeLibre ships it in mcl_sounds) on every HP drop while
             // alive, so a zombie or arrow hit registers without reading the
-            // hearts (#279). Fall damage plays "player_falling_damage" instead,
+            // hearts. Fall damage plays "player_falling_damage" instead,
             // keyed off our own [fall] report.
             if hp < self.hp, self.hp > 0, damageEffect {
                 self.damageFlash = 0.35
-                self.input.rumble(intensity: 1.0, sharpness: 0.35, duration: 0.12)   // a solid hit buzz (#357)
+                self.input.rumble(intensity: 1.0, sharpness: 0.35, duration: 0.12)   // a solid hit buzz
                 let fall = self.recentFallDamage > 0
                 self.recentFallDamage = 0
                 self.queue.async {
@@ -639,7 +639,7 @@ final class WorldSession {
                 guard let name else { icons.append(nil); continue }
                 let tile: String?
                 if i < stacks.count, let img = stacks[i]?.customImage {
-                    tile = img                       // stack meta: bow charge frame, enchant glint (#271)
+                    tile = img                       // stack meta: bow charge frame, enchant glint
                 } else if let img = self.client.items.image(for: name), !img.isEmpty {
                     tile = img
                 } else {
@@ -748,7 +748,7 @@ final class WorldSession {
         client.onBlock = { [weak self] bpos in self?.markBlockDirty(bpos) }
         // A relight (torch placed, wall dug into daylight) touched these blocks'
         // light values: remesh them now, like the engine's addNodeAndUpdate
-        // remeshing every modified block (#278).
+        // remeshing every modified block.
         client.world.onRelit = { [weak self] blocks in
             guard let self else { return }
             for b in blocks { self.dirtyBlocks.insert(b) }
@@ -766,16 +766,16 @@ final class WorldSession {
             // A container we have open just changed its metadata (items moved in
             // by a hopper, another player, or the initial contents arriving after
             // the formspec): rebake its item icons, else new item types show as
-            // empty slots until the panel is reopened (#254). onNodeChanged only
+            // empty slots until the panel is reopened. onNodeChanged only
             // remeshed before, which never touched the inventory tile cache.
             if self.formspecOpen, self.formspecContext == p {
-                self.refreshOpenNodeFormspec()   // fire/arrow gauge + any image[] update (#344)
+                self.refreshOpenNodeFormspec()   // fire/arrow gauge + any image[] update
                 self.refreshInventoryTiles()
             }
         }
         // Media streams in continuously at join; each file used to force an atlas
         // rebuild + full-world remesh. Coalesce to at most ~1/s (first is prompt),
-        // driven from the tick, so the busy streaming phase isn't a remesh storm (#188).
+        // driven from the tick, so the busy streaming phase isn't a remesh storm.
         client.onMediaReady = { [weak self] in
             guard let self else { return }
             self.mediaAtlasDirty = true; self.modelTexRescan = true
@@ -783,7 +783,7 @@ final class WorldSession {
             // media announce arrived) got blacklisted in modelFailed. Now that
             // more media has landed, drop any blacklisted spec whose files are
             // all present so it re-bakes -- the stone-panel background9 announced
-            // late this way and stayed a grey slab forever (#254). A genuine
+            // late this way and stayed a grey slab forever. A genuine
             // decode failure just re-blacklists on the retry.
             self.modelFailed = self.modelFailed.filter { spec in
                 !NodeRegistry.imageNames(spec).allSatisfy { self.client.media.store[$0] != nil }
@@ -797,7 +797,7 @@ final class WorldSession {
                                       collide: collide, removeOnHit: look.collisionRemoval, look: look)
         }
         client.onAddParticleSpawner = { [weak self] sp in
-            // Diagnostic (#199/#201): rain/snow arrive as player-attached spawners;
+            // Diagnostic: rain/snow arrive as player-attached spawners;
             // log the texture + size + spread so a weather run shows exactly what
             // the server sends (the giant-bar and rain->dirt bugs). Once per
             // texture: VoxeLibre's weather adds ~37 short-lived spawners a second,
@@ -834,7 +834,7 @@ final class WorldSession {
         }
     }
 
-    /// Live view-distance change from the launcher slider (#161): applies to the
+    /// Live view-distance change from the launcher slider: applies to the
     /// running client so the next PLAYERPOS asks the server for the new range.
     func setViewDistance(_ blocks: Int) {
         // Both writes hop onto the session queue: mobRenderDist is read from
@@ -954,7 +954,7 @@ final class WorldSession {
 
     /// Bake a "skybox" sky's six faces once their PNGs are here and hand them
     /// to the renderer; clear it when the sky type changes back. The End is
-    /// the one VoxeLibre skybox (six copies of its starry texture) (#290).
+    /// the one VoxeLibre skybox (six copies of its starry texture).
     private func stepSkybox() {
         guard skyboxWanted != skyboxBuilt else { return }
         if skyboxWanted.isEmpty { skyboxHandoff.postClear(); skyboxBuilt = []; return }
@@ -979,8 +979,8 @@ final class WorldSession {
         guard player.haveSpawn else { return }
         let pStart = perf.now()
         defer { perf.add("total", pStart, perf.now()) }
-        refreshPhysicsSnapshot()   // one lock per tick instead of ~8 per scanned node (perf #312)
-        // Coalesced media-driven atlas rebuild (#188): prompt the first time, then
+        refreshPhysicsSnapshot()   // one lock per tick instead of ~8 per scanned node
+        // Coalesced media-driven atlas rebuild: prompt the first time, then
         // at most once a second, so a burst of streaming media doesn't restart the
         // full-world remesh over and over.
         sinceMediaAtlas += Double(dt)
@@ -990,7 +990,7 @@ final class WorldSession {
         // own local VoxeLibre dev server (tools/server.sh, world vrdev) using its
         // standard chat commands (/grantme, /giveme, /teleport, /setblock); see
         // AGENTS.md.
-        // Teleport to open sky first, THEN spawn the lineup (#91 framing): at the
+        // Teleport to open sky first, THEN spawn the lineup (framing): at the
         // normal spawn the fake camera is buried in terrain, so the old one-shot
         // dropped the mobs where only their nametags showed through. Floating over
         // open sky puts the whole facing lineup against a clean backdrop.
@@ -1049,7 +1049,7 @@ final class WorldSession {
             simRideDone = true
             spawnSimRide()
         }
-        // -vrdev.eatTest 1: verify the HOLD-to-eat mechanic (#173) headless. Uses a
+        // -vrdev.eatTest 1: verify the HOLD-to-eat mechanic headless. Uses a
         // golden apple (can_eat_when_full) so it eats at full hunger, drives the
         // place-hold + activate the gesture would, and logs the stack count before
         // and after. Bypasses the hand-at-mouth geometry (that's device-only).
@@ -1086,7 +1086,7 @@ final class WorldSession {
             }
         }
         // -vrdev.bowTest 1: prove the RMB control bit reaches the server for a
-        // non-food wield (parity #263). mcl_bows charges on register_on_hold(RMB)
+        // non-food wield. mcl_bows charges on register_on_hold(RMB)
         // by swapping the wield to mcl_bows:bow_0/_1/_2 server-side; that swap
         // shows up in our inventory only if PLAYERPOS carries bit 256 while the
         // grip is held. Drives the real grip path: simGripOverride stands in for
@@ -1116,7 +1116,7 @@ final class WorldSession {
             case 2:
                 // Hold ~1.5 s (BOW_CHARGE_TIME_FULL is 1 s), then release. Charging
                 // only changes the bow's inventory_image META (which we don't parse
-                // yet, #271), so the observable signal is the RELEASE firing: mcl_bows
+                // yet), so the observable signal is the RELEASE firing: mcl_bows
                 // spawns an mcl_bows:arrow_entity. Count arrow AOs before/after.
                 simGripOverride = true
                 if simEatTimer > 1.5 {
@@ -1135,8 +1135,8 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.fallTest 1: prove client-computed fall damage reaches the server
-        // (#264). Once settled on the ground, lift the feet 12 nodes and let the
+        // -vrdev.fallTest 1: prove client-computed fall damage reaches the server.
+        // Once settled on the ground, lift the feet 12 nodes and let the
         // land physics drop them: at 2x10.4 airborne accel that lands at ~22
         // node/s, i.e. ~8 hp past the 14 node/s tolerance. The [fall] line is our
         // send; the [hud] HP line is the server's TOCLIENT_HP answer.
@@ -1170,7 +1170,7 @@ final class WorldSession {
         }
         // -vrdev.placeTest 1: wield stone and place aiming straight down. The pointed node is the floor, so the
         // target is the feet node: the engine refuses that (you'd be inside the
-        // block), no INTERACT goes out, and the node under us stays air (#268).
+        // block), no INTERACT goes out, and the node under us stays air.
         if UserDefaults.standard.bool(forKey: "vrdev.placeTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -1191,7 +1191,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.bounceTest 1: bouncy parity (#269). Swap the node under the sim
+        // -vrdev.bounceTest 1: bouncy parity. Swap the node under the sim
         // player for a slime block (local world copy is what physics reads),
         // lift 8 nodes and drop: the landing must reflect vy upward (bouncy=44
         // -> ~44% of the impact) instead of stopping dead.
@@ -1221,7 +1221,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.iglooTest 1: Eric's igloo-basement report (#303). Teleport to the
+        // -vrdev.iglooTest 1: Eric's igloo-basement report. Teleport to the
         // spot from his bug note (solid stone in the vrdev world, which is fine:
         // it's the buried case) and auto-walk for 10 s. The feet must hold; the
         // bug lifted them 3 nodes a tick through solid rock (the eject probe only
@@ -1231,11 +1231,11 @@ final class WorldSession {
             let f = player.physics().feet
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/teleport -113.08 -9.5 -104.94")   // the #303 repro spot in the developer's own dev world, in server coords (ours - 0.5)
+                client.sendChat("/grantme all"); client.sendChat("/teleport -113.08 -9.5 -104.94")   // the igloo-basement repro spot in the developer's own dev world, in server coords (ours - 0.5)
                 simDigPhase = 10; simDigTimer = 0
             case 10 where simDigTimer > 8:
                 simScratchInt = Int(f.y * 100); simFallMaxY = f.y
-                // Print the node column around the #303 repro coordinates so the client's decoded map can
+                // Print the node column around the igloo repro coordinates so the client's decoded map can
                 // be compared with what his device log saw.
                 for y in stride(from: -4, through: -12, by: -1) {
                     var row = "[igloo] y=\(y):"
@@ -1262,7 +1262,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.ladderTest 1: igloo-ladder report (#331) -- "climb down works,
+        // -vrdev.ladderTest 1: igloo-ladder report -- "climb down works,
         // can't walk into the ladder cube to go back up". Build a minimal
         // wall-mounted ladder column in the local world (a brick shaft like the
         // igloo's), then check the two things the report implicates, with no
@@ -1357,7 +1357,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.iceTest 1: slippery parity (#269). Lay a local 21x21 ice patch under
+        // -vrdev.iceTest 1: slippery parity. Lay a local 21x21 ice patch under
         // the sim player, auto-walk for 3 s, then stop: on ice the speed must
         // ramp up slowly (accel 2.4/(3+1) = 0.6 node/s^2) and coast on after the
         // stick is released, instead of the usual instant start/stop.
@@ -1488,7 +1488,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.torchTest 1: client-side relight with the real NODEDEF (#278).
+        // -vrdev.torchTest 1: client-side relight with the real NODEDEF.
         // Drop a torch into the local world 2 nodes ahead on the platform and
         // read the night light around it; then dig it and read again. Starts
         // from the spawn pad like the other scenes: wherever the previous scene
@@ -1510,7 +1510,7 @@ final class WorldSession {
                     print("[torchtest] placed at \(p): self=\(lit) +1=\(lit1) +3=\(lit3) +6=\(nl(p &+ SIMD3(6,0,0))) up2=\(nl(p &+ SIMD3(0,2,0))) dayBank=\(dayLit)"); fflush(stdout)
                     client.world.removeNode(p)
                     // A torch (light 13 in VoxeLibre) must light its neighbours
-                    // while placed and go fully dark once dug (#278).
+                    // while placed and go fully dark once dug.
                     let dark = nl(p), dark1 = nl(p &+ SIMD3(1,0,0)), dark3 = nl(p &+ SIMD3(3,0,0))
                     print("[torchtest] RESULT after dig: self=\(dark) +1=\(dark1) +3=\(dark3) pass=\(lit >= 10 && lit1 == lit - 1 && lit3 == lit - 3 && dark == 0 && dark1 == 0 && dark3 == 0 && dayLit >= lit)"); fflush(stdout)
                 } else { print("[torchtest] no torch def"); fflush(stdout) }
@@ -1519,7 +1519,7 @@ final class WorldSession {
         // -vrdev.awardTest 1 (with -vrdev.fakeAward 1): the advancement toast's
         // title, header and icon must all land inside its background box, and
         // the two text lines must not overlap. Uses a long real title by
-        // default, since short ones hid overflow before (#222, device report
+        // default, since short ones hid overflow before (device report
         // 2026-09-23 "looked bad").
         if UserDefaults.standard.bool(forKey: "vrdev.awardTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
@@ -1688,7 +1688,7 @@ final class WorldSession {
         // magnet, so the drop stays put instead of flying into the inventory),
         // dig it, and 1.5 s later check the __builtin:item entity is there AND
         // has a resolved icon layer, i.e. it would actually draw. Bug note
-        // 2026-09-22 "I don't see mined blocks" (#358).
+        // 2026-09-22 "I don't see mined blocks".
         if UserDefaults.standard.bool(forKey: "vrdev.dropTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -1755,7 +1755,7 @@ final class WorldSession {
                 simDropResult = "[droptest] RESULT drops=\(drops.count) drawable=\(drawable) sunk=\(sunk) pass=\(drawable > 0 && sunk == 0)"
                 simDigPhase = 4; simDigTimer = 0
             case 4 where simDigTimer > 4:
-                // Settle check (#360): the server's send threshold drops to 0.01
+                // Settle check: the server's send threshold drops to 0.01
                 // after 1 s of quiet, so a landed item's residual velocity should
                 // have been zeroed by now instead of dead-reckoning it away.
                 let feet = player.physics().feet
@@ -1775,7 +1775,7 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.digTest 1: prove dig prediction is synchronous (#179). Teleports
+        // -vrdev.digTest 1: prove dig prediction is synchronous. Teleports
         // onto open ground, then digs the block underfoot and logs the target's
         // node id right before and right after performDig IN THE SAME TICK: if the
         // node is already air post-call (no server round-trip) and remeshCooldown
@@ -1804,7 +1804,7 @@ final class WorldSession {
                 print("[digtest] target=\(target) before=\(before) afterSameTick=\(after) predictedAir=\(after == WorldMap.CONTENT_AIR) remeshCooldown=\(remeshCooldown)"); fflush(stdout)
                 simDigPhase = 2; simDigTimer = 0
             case 2 where simDigTimer > 1:
-                print("[digtest] RESULT dug node went to air within the dig call (no server wait) and a remesh was scheduled for the next tick (#179 prediction is synchronous) pass=\(simDigPredictedAir)"); fflush(stdout)
+                print("[digtest] RESULT dug node went to air within the dig call (no server wait) and a remesh was scheduled for the next tick (prediction is synchronous) pass=\(simDigPredictedAir)"); fflush(stdout)
                 // Put the sky platform's block back: this dig once removed
                 // (0,120,0) for real and every later teleport there fell through.
                 client.sendChat("/setblock 0,120,0 mcl_core:stone")
@@ -1813,7 +1813,7 @@ final class WorldSession {
             }
         }
         // -vrdev.chordDropTest 1: right trigger + grip together drops the
-        // wielded stack like desktop Q (#341), and neither dig nor place leaks
+        // wielded stack like desktop Q, and neither dig nor place leaks
         // through while the chord is held. Then a lone one-frame grip tap must
         // still come out of the gate as a place press (the chord wait replays it).
         // -vrdev.weatherTest 1: VoxeLibre's snow the way its weather mod sends
@@ -1890,8 +1890,8 @@ final class WorldSession {
             default: break
             }
         }
-        // -vrdev.invPickTest 1: drive a real inventory pick-and-place headless
-        // (#81). Gives cobble, opens the panel, then forces the hovered slot and
+        // -vrdev.invPickTest 1: drive a real inventory pick-and-place headless.
+        // Gives cobble, opens the panel, then forces the hovered slot and
         // feeds a synthetic dig edge so the actual click logic (moveAction +
         // client-side prediction) runs -- proving the panel's slots map to real
         // inventory refs and a move predicts, without a controller ray.
@@ -1929,7 +1929,7 @@ final class WorldSession {
             }
         }
         #endif
-        // Age out mapblocks left far behind and tell the server (#97). Runs
+        // Age out mapblocks left far behind and tell the server. Runs
         // every tick, ahead of the UI early-outs below, the way Client::step
         // does. Evicted blocks are marked dirty so the remesh sweeps their
         // cached meshes (and re-meshes the neighbours' now-open faces).
@@ -1963,7 +1963,7 @@ final class WorldSession {
         var vig = SIMD4<Float>(0, 0, 0, 0)
         damageFlash = max(0, damageFlash - dt)
         if !dead, damageFlash > 0 {
-            // Hit flash (#279): a strong red edge cast that fades over ~0.35 s.
+            // Hit flash: a strong red edge cast that fades over ~0.35 s.
             vig = SIMD4(0.85, 0.05, 0.05, min(0.7, damageFlash / 0.35 * 0.7))
         } else if !dead {
             if hp > 0 && hp <= 6 {
@@ -1979,7 +1979,7 @@ final class WorldSession {
         input.textEntry = keyboardOpen
         var gi = input.poll()
         #if targetEnvironment(simulator)
-        // -vrdev.flyTest 1: free_move parity (#291). Grant fly, double-tap
+        // -vrdev.flyTest 1: free_move parity. Grant fly, double-tap
         // jump, hold jump 2 s (should rise ~8 nodes at walk speed), release
         // (should HOVER, not fall), then double-tap again to land.
         if UserDefaults.standard.bool(forKey: "vrdev.flyTest"), client.objects.localPlayerId != 0, atlasBuilt {
@@ -2067,7 +2067,7 @@ final class WorldSession {
         #if targetEnvironment(simulator)
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.openInventory"), atlasBuilt { toggleInventory(); simSceneTimer = -1e9 }
         // -vrdev.invCycle 1: open at 8 s, close at 16 s, reopen at 20 s, so the
-        // [icon] released/reused layer counts show in the log (#296).
+        // [icon] released/reused layer counts show in the log.
         if UserDefaults.standard.bool(forKey: "vrdev.invCycle"), atlasBuilt {
             if simInvCyclePhase == 0, simSceneTimer > 8, !inventoryOpen { toggleInventory(); simInvCyclePhase = 1 }
             else if simInvCyclePhase == 1, simSceneTimer > 16, inventoryOpen { let before = modelTexCount; toggleInventory(); print("[invcycle] closed: layers=\(before) free=\(freeModelLayers.count)"); fflush(stdout); simInvCyclePhase = 2 }
@@ -2075,7 +2075,7 @@ final class WorldSession {
             else if simInvCyclePhase == 3, simSceneTimer > 26 { print("[invcycle] RESULT reopened: layers=\(modelTexCount) free=\(freeModelLayers.count)"); fflush(stdout); simInvCyclePhase = 4 }
         }
         // Sim-only: -vrdev.fakeStation 1 opens a canned station formspec (labels +
-        // a small list) so the #176 label rendering can be screenshotted headless.
+        // a small list) so the label rendering can be screenshotted headless.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeStation"), atlasBuilt {
             seedFakePlayerInventory()
             let spec = "size[9,9]label[0.5,0.5;Cartography Table]label[2,2;Map]label[4,2;Paper]" +
@@ -2084,7 +2084,7 @@ final class WorldSession {
         }
         // Sim-only: -vrdev.fakeAchieve 1 opens a VoxeLibre-shaped achievements
         // form (awards:awards: tabheader + textlist rows + an icon image[] + a
-        // hypertext description) so the #339 read-only info-form render can be
+        // hypertext description) so the read-only info-form render can be
         // screenshotted headless. A player form, so no node context.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAchieve"), atlasBuilt {
             // awards.getFormspec's layout (awards/api.lua:437-492), legacy
@@ -2114,7 +2114,7 @@ final class WorldSession {
             }
             // Active furnace (mcl_furnaces active_formspec): the fire + arrow are
             // [lowpart:N:fg composites, not the inactive plain-bg image. Use the
-            // lit spec so the fire-gauge composite is exercised headless (#344).
+            // lit spec so the fire-gauge composite is exercised headless.
             let spec = "formspec_version[4]size[11.75,10.425]label[0.375,0.375;Furnace]"
                 + slotBg(3.5, 0.75, 1, 1) + "list[context;src;3.5,0.75;1,1;]"
                 + "image[3.5,2;1,1;default_furnace_fire_bg.png^[lowpart:50:default_furnace_fire_fg.png]"
@@ -2128,7 +2128,7 @@ final class WorldSession {
             openFormspec(spec, "mcl_furnaces:furnace_0_0_0"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeAnvil 1 opens an anvil-style form (item lists + a
-        // rename field + a button) to screenshot the #229 widget boxes headless.
+        // rename field + a button) to screenshot the widget boxes headless.
         // A field needs a node context to submit, so stub one.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeAnvil"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
@@ -2146,18 +2146,18 @@ final class WorldSession {
             openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeChest 1 opens the chest form (Chest + Inventory
-        // labels, item grids) to screenshot the #241 layout headless.
+        // labels, item grids) to screenshot the layout headless.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeChest"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             // Seed the chest's nodemeta with items so the nodemeta render path
-            // (not just the player list) shows real icons headless (#254).
+            // (not just the player list) shows real icons headless.
             var chest = [Client.ItemStack?](repeating: nil, count: 27)
-            // Mix cube nodes (3D isometric icon path #255) with craftitems whose
+            // Mix cube nodes (3D isometric icon path) with craftitems whose
             // inventory_image was never a node face (raw_iron, flint, boots...).
             // Those are the ones that came up blank on device: the icon used to
             // wait on the node atlas, so a chest-only craftitem stayed empty until
-            // the next full rebuild. Seeding them here reproduces #254 headless.
+            // the next full rebuild. Seeding them here reproduces the blank-icon bug headless.
             let seed = ["mcl_core:cobble", "mcl_core:dirt", "mcl_core:stone", "mcl_core:sand",
                         "mcl_raw_ores:raw_iron", "mcl_core:flint", "mcl_armor:boots_iron", "mcl_core:glass",
                         "mcl_copper:raw_copper", "mcl_core:tree", "mcl_mobitems:bone", "mcl_core:brick_block",
@@ -2191,13 +2191,13 @@ final class WorldSession {
             openFormspec(spec, "mcl_chests:chest_0_0_0"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeFurnace 1 opens the active furnace form (fire gauge
-        // + cook arrow via image[] with ^[lowpart) to screenshot #223 headless.
+        // + cook arrow via image[] with ^[lowpart) to screenshot it headless.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeFurnace"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
             // Seed real craftitems in the item slots (not just the fire/arrow
             // images): src/dst are exactly the chest-only-craftitem icon case
-            // that #254 left blank, so an empty furnace form never caught it.
+            // that the blank-icon bug left blank, so an empty furnace form never caught it.
             client.world.setNodeInventoryForTest(SIMD3(0, 0, 0), list: "src",
                 [Client.ItemStack(name: "mcl_raw_ores:raw_iron", count: 3, wear: 0)])
             client.world.setNodeInventoryForTest(SIMD3(0, 0, 0), list: "fuel",
@@ -2214,7 +2214,7 @@ final class WorldSession {
             openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeBeacon 1 opens a beacon-style form (item_image[]
-        // payment icons + image_button[] effect selector) to screenshot #232/#233.
+        // payment icons + image_button[] effect selector) to screenshot them.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBeacon"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
@@ -2242,7 +2242,7 @@ final class WorldSession {
             openFormspec(spec, "mobs_mc:trade_sim"); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeBrewing 1 opens the brewing form with its full-panel
-        // background[] art (mcl_brewing_inventory.png) to screenshot #245 headless.
+        // background[] art (mcl_brewing_inventory.png) to screenshot it headless.
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeBrewing"), atlasBuilt {
             formspecContext = SIMD3(0, 0, 0)
             seedFakePlayerInventory()
@@ -2265,13 +2265,13 @@ final class WorldSession {
             openFormspec(spec, ""); simSceneTimer = -1e9
         }
         // Sim-only: -vrdev.fakeRain 1 feeds the exact mcl_weather rain spawner
-        // (player-attached, size 4..8, box above the head) so #199 (giant bars)
-        // and #201 (wrong texture) can be seen without the server's biome/outdoor
+        // (player-attached, size 4..8, box above the head) so giant bars
+        // and a wrong texture can be seen without the server's biome/outdoor
         // gate. Skips mcl_weather's has_rain/is_outdoor gate by feeding the
         // spawner locally (no server involved).
         // Sim aid (-vrdev.fakeSkybox 1): the End's SET_SKY as mcl_weather sends
         // it (type skybox, six mcl_playerplus_end_sky.png), through the real
-        // packet path, so the cube-texture sky can be screenshotted (#290).
+        // packet path, so the cube-texture sky can be screenshotted.
         if !fakeSkyboxSent, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.fakeSkybox"), atlasBuilt {
             fakeSkyboxSent = true
             let w = PacketWriter()
@@ -2283,7 +2283,7 @@ final class WorldSession {
         }
         // -vrdev.audioTest 1: a 2D sound, then 1.5 s later a positional one --
         // the order that raised 'player started when in a disconnected state'
-        // on device (#302). Unmuted launch needed (no -vrdev.mute).
+        // on device. Unmuted launch needed (no -vrdev.mute).
         if UserDefaults.standard.bool(forKey: "vrdev.audioTest"), atlasBuilt, client.objects.localPlayerId != 0 {
             audioTestTimer += dt
             if audioTestPhase == 0, audioTestTimer > 3 {
@@ -2302,10 +2302,10 @@ final class WorldSession {
         }
         // -vrdev.digCapsTest 1: with the real VoxeLibre ITEMDEF/NODEDEF, print
         // what getDigParams says for pick/shovel/hand on dirt and stone, so the
-        // hand fallback (#297) can be checked without a controller.
+        // hand fallback can be checked without a controller.
         if !digCapsTestDone, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.digCapsTest"), atlasBuilt, handItemName() != nil {
             digCapsTestDone = true
-            // ITEMDEF tail check (#298): VoxeLibre sets place_param2 on crops/kelp,
+            // ITEMDEF tail check: VoxeLibre sets place_param2 on crops/kelp,
             // wield_scale 1.8 on tools.
             for item in ["mcl_farming:wheat_1", "mcl_ocean:kelp_sand", "mesecons_noteblock:noteblock", "mcl_tools:pick_iron", "mcl_shields:shield", "mcl_core:dirt"] {
                 print("[itemtail] \(item) place_param2=\(client.items.placeParam2(for: item).map(String.init) ?? "nil") wield_scale=\(client.items.wieldScale(for: item).x)"); fflush(stdout)
@@ -2335,12 +2335,12 @@ final class WorldSession {
                 expMin: 1, expMax: 4, sizeMin: 4, sizeMax: 8,
                 attachedId: client.objects.localPlayerId,
                 texture: "weather_pack_rain_raindrop_1.png", collisionRemoval: true,
-                collisionDetection: !UserDefaults.standard.bool(forKey: "vrdev.fakeRainNoCollide"))   // control run for #275
+                collisionDetection: !UserDefaults.standard.bool(forKey: "vrdev.fakeRainNoCollide"))   // control run for
             client.onAddParticleSpawner?(sp)
             print("[fakeRain] spawned rain spawner"); fflush(stdout)
         }
         // With collision on, no drop may end up below the platform we stand on
-        // (it would have had to pass through stone). Reports the count (#275).
+        // (it would have had to pass through stone). Reports the count.
         if fakeRainSpawned, UserDefaults.standard.bool(forKey: "vrdev.fakeRain") {
             fakeRainLogTimer += Double(dt)
             if fakeRainLogTimer > 3 {
@@ -2388,7 +2388,7 @@ final class WorldSession {
         if inventoryOpen { move = SIMD2(0, 0); turn = 0; gi.jump = false; gi.lookYaw = 0 }
         // Normalize the move vector so diagonals aren't faster: keyboard sets
         // x and y to +/-1 each, giving a length of 1.41 diagonally. Clamp length
-        // to 1 (a stick already inside the unit circle is untouched) (#231).
+        // to 1 (a stick already inside the unit circle is untouched).
         let mlen = simd_length(move)
         if mlen > 1 { move /= mlen }
         // Forward = where you're looking (head gaze flattened to horizontal),
@@ -2428,8 +2428,8 @@ final class WorldSession {
         // Post-effect over the whole view: the camera node's NODEDEF colour
         // (water), OR opaque black when the head is inside a solid node. On AVP
         // the tracked head can lean past the collision box into a wall, and
-        // visionOS's fixed near plane then clips through the terrain (see-through,
-        // #60). Luanti's ClientMap::renderPostFx blacks out a camera inside a
+        // visionOS's fixed near plane then clips through the terrain (see-through).
+        // Luanti's ClientMap::renderPostFx blacks out a camera inside a
         // solid node in first person, which both matches desktop and hides the
         // artifact. Use the REAL head (rayOrigin) so a room-scale lean counts.
         var fx = postEffectAt(viewEye)
@@ -2461,14 +2461,14 @@ final class WorldSession {
         // the server derives the allowed speed from them (mcl_sprint raises the
         // physics override when it sees aux1 + up), and its authoritative
         // MOVE_PLAYER correction overrides any locally predicted speed that
-        // doesn't match (#180). Directional bits follow the stick; aux1 = the
+        // doesn't match. Directional bits follow the stick; aux1 = the
         // sprint grip.
         client.moveKeys = Client.moveControlBits(dx: move.x, dy: move.y, sprint: gi.fast)
         var speed = player.moveSpeed(fast: gi.fast, sneak: gi.sneak)
         // Movement resistance from the node the box is in (water 1 -> x0.5, lava
         // 7 -> molasses, cobweb 14 -> near-stop), from the server's per-node
         // move_resistance rather than the drawtype so plantlike cobwebs slow you
-        // too (#211). Falls back to the flat liquid factor if a liquid reports 0.
+        // too. Falls back to the flat liquid factor if a liquid reports 0.
         let resist = overlapResistance(feet: pre.feet)
         if resist > 0 { speed /= Float(1 + resist) }
         else if inLiquid { speed *= PlayerState.liquidSpeedFactor }
@@ -2498,7 +2498,7 @@ final class WorldSession {
             slipVel = SIMD2(vel.x, vel.z)
         }
         let dx = vel.x * dt, dz = vel.z * dt
-        // Riding (#139): while the local player is attached to a vehicle, mirror
+        // Riding: while the local player is attached to a vehicle, mirror
         // the vehicle's position instead of running our own locomotion/gravity
         // (which would leave the camera behind as the boat/horse moves). The
         // server owns the vehicle pos; we sit at parent.pos + the attach offset
@@ -2516,9 +2516,9 @@ final class WorldSession {
         if inLiquid {
             // Buoyant vertical model, but sweep BOTH axes through the same
             // collision as land so climbing out of water into a solid can't
-            // embed you and suffocate you (#114), and swimming up under an
-            // overhang stops at the ceiling instead of clipping through it
-            // (#167). Settling onto the column floor falls out of the sweep.
+            // embed you and suffocate you, and swimming up under an
+            // overhang stops at the ceiling instead of clipping through it.
+            // Settling onto the column floor falls out of the sweep.
             let (feet0, _, _) = player.physics()
             let vy = player.buoyantVY(dt: dt, submerged: submerged, swimUp: gi.jump)
             // Sweep server knockback here too (like the land branch): you can be
@@ -2540,18 +2540,18 @@ final class WorldSession {
             var (feet, vy, grounded) = player.physics()
             // Climbing = Luanti's centre-column sample, PLUS a jump-gated body grab
             // so you can catch a ladder whose lowest rung is a node above your feet
-            // (the igloo shaft, #331) by pressing up while standing under/against it.
+            // (the igloo shaft) by pressing up while standing under/against it.
             let climbing = overlapsClimbable(feet: feet) || (gi.jump && climbGrab(feet: feet))
             if climbing {
                 // On a ladder/vine: jump climbs, sneak descends, otherwise hover
                 // (the fall is arrested). Gravity is suppressed, matching Luanti
-                // localplayer.cpp's is_climbing branch (#209).
-                let climbSpeed = client.speedClimb   // MOVEMENT's movement_speed_climb (#299)
+                // localplayer.cpp's is_climbing branch.
+                let climbSpeed = client.speedClimb   // MOVEMENT's movement_speed_climb
                 vy = gi.jump ? climbSpeed : (gi.sneak ? -climbSpeed : 0)
                 grounded = false
             } else {
                 // disable_jump on the node you stand on OR the one your feet are
-                // in (cobweb, end portal) blocks the jump (localplayer.cpp) (#269).
+                // in (cobweb, end portal) blocks the jump (localplayer.cpp).
                 var jumpBlocked = false
                 if gi.jump && grounded {
                     let fx = Int(floor(feet.x)), fz = Int(floor(feet.z)), fy = Int(floor(feet.y))
@@ -2572,11 +2572,11 @@ final class WorldSession {
                     vy -= player.gravityNow * dt
                 }
             }
-            // Diagnostic (#209 follow-up): when near a ladder/trapdoor, log whether
+            // Diagnostic (follow-up): when near a ladder/trapdoor, log whether
             // we flag it climbable and whether descent is happening, so the "can't
             // climb down the shaft" report can be pinned from a device log.
             climbLogTick += 1
-            // Off by default now that the igloo climb is fixed (#331): the scan
+            // Off by default now that the igloo climb is fixed: the scan
             // below does 36 locked name() lookups + substring tests, too much for
             // the shipping per-tick path. Re-enable with -vrdev.climbLog to debug.
             if climbLogEnabled, climbLogTick % 12 == 0 {
@@ -2594,7 +2594,7 @@ final class WorldSession {
                     print("[climb] climbing=\(climbing) grab=\(climbGrab(feet: feet)) vy=\(String(format: "%.2f", vy)) jump=\(gi.jump) sneak=\(gi.sneak) feet=(\(String(format: "%.2f", feet.x)),\(String(format: "%.2f", feet.y)),\(String(format: "%.2f", feet.z))) near=\(near)"); fflush(stdout)
                     // Once, dump the node column around the feet so the exact shaft
                     // layout (which cells are brick, air, ladder) is visible and the
-                    // "can't reach the ladder" case can be solved, not guessed (#331).
+                    // "can't reach the ladder" case can be solved, not guessed.
                     if !climbColumnLogged {
                         climbColumnLogged = true
                         for y in stride(from: Int(floor(feet.y)) + 3, through: Int(floor(feet.y)) - 2, by: -1) {
@@ -2653,7 +2653,7 @@ final class WorldSession {
                 // bouncy (slime 44, beds 66): a landing faster than 3 node/s
                 // reflects vy by bouncy/100 (collision.cpp collide_with). A
                 // controllable (>0) bouncy node lets jump add a boost and sneak
-                // damp the bounce by a third (localplayer.cpp) (#269).
+                // damp the bounce by a third (localplayer.cpp).
                 let under = SIMD3(Int(floor(feet.x)), Int(floor(feet.y - 0.1)), Int(floor(feet.z)))
                 let bouncy = client.nodes.groups(client.world.nodeId(under))["bouncy"] ?? 0
                 if bouncy != 0, impact > 3 {
@@ -2671,7 +2671,7 @@ final class WorldSession {
         }
         }
         // A mob's killing blow puffs smoke instead of flashing (GenericCAO
-        // PUNCHED -> createSmokePuff, sized by visual_size) (#306). VoxeLibre
+        // PUNCHED -> createSmokePuff, sized by visual_size). VoxeLibre
         // ships mcl_particles_smoke.png; the engine's own smoke_puff.png isn't
         // server media.
         for puff in client.objects.takeDeathPuffs() {
@@ -2716,7 +2716,7 @@ final class WorldSession {
         var s = player.snapshot()
         // Diagnostics only (the [clip]/heartbeat logs). Scan just a few nodes
         // under the feet, not the whole 300-deep column: this runs every tick and
-        // clip detection only cares about the ground right below you (#167).
+        // clip detection only cares about the ground right below you.
         let groundTop = groundHeight(x: Int(floor(s.feet.x)), z: Int(floor(s.feet.z)),
                                      near: Int(floor(s.feet.y)), maxDrop: 6)
         s = player.snapshot()
@@ -2726,7 +2726,7 @@ final class WorldSession {
         let aim = player.aim()
         let headYaw = atan2(-aim.x, aim.z)   // Luanti: dir = (-sin yaw, 0, cos yaw)
         let headPitch = -asin(max(-1, min(1, aim.y)))
-        // Velocity for PLAYERPOS (#270): the feet delta over the tick covers every
+        // Velocity for PLAYERPOS: the feet delta over the tick covers every
         // mover (walk, jump/fall, swim, climb, ride, knockback) without plumbing
         // each branch. A teleport (MOVE_PLAYER, respawn) shows up as one huge
         // delta, which the desktop client's m_speed never contains, so drop it.
@@ -2983,7 +2983,7 @@ final class WorldSession {
     private func playNodeSound(_ name: String?, at node: SIMD3<Int>) {
         guard let name, !name.isEmpty else { return }
         let pos = SIMD3<Float>(Float(node.x) + 0.5, Float(node.y) + 0.5, Float(node.z) + 0.5)   // node centre in our [g,g+1] grid (built locally, so gridShift is not applied)
-        let g = client.nodes.soundGain(name)   // the NODEDEF's gain/pitch for this sound (#280)
+        let g = client.nodes.soundGain(name)   // the NODEDEF's gain/pitch for this sound
         playSound(SoundSpec(id: -1, name: name, gain: g.gain, type: 1, pos: pos,
                             objectId: 0, loop: false, fade: 0, pitch: g.pitch, ephemeral: true))
     }
@@ -2994,7 +2994,7 @@ final class WorldSession {
     private var stepCount = 0              // footsteps played (read by -vrdev.stepTest)
     private var cadenceStepCount = 0       // of those, cadence (not landing) steps
     private var climbLogTick = 0            // rate-limit the [climb] diagnostic
-    private var climbColumnLogged = false         // one-shot [climbmap] node-column dump (#331)
+    private var climbColumnLogged = false         // one-shot [climbmap] node-column dump
     private lazy var climbLogEnabled = UserDefaults.standard.bool(forKey: "vrdev.climbLog")   // opt-in ladder diagnostic (read once)
 
     private func playSound(_ spec: SoundSpec) {
@@ -3018,7 +3018,7 @@ final class WorldSession {
             // yet, so setPosition upgrades it to 3D once it arrives (else it'd
             // stay flat 2D forever). Start at the object's pos, or spec.pos as a
             // best-guess origin until the first UPDATE_POSITION.
-            if spec.id > 0 { attachedSounds[spec.id] = spec.objectId }   // ephemerals (id -1) start at the mob and play out (#280)
+            if spec.id > 0 { attachedSounds[spec.id] = spec.objectId }   // ephemerals (id -1) start at the mob and play out
             pos = client.objects.entity(spec.objectId)?.pos ?? spec.pos
         } else if spec.type != 0 {
             pos = spec.pos
@@ -3028,7 +3028,7 @@ final class WorldSession {
 
     /// Right trigger + right grip pressed together drops the wielded stack, like
     /// desktop Q (sneak held: just one item; game.cpp dropSelectedItem). There's
-    /// no spare button on the Sense controllers, so it's a chord (#341). A lone
+    /// no spare button on the Sense controllers, so it's a chord. A lone
     /// dig or place press is held back for chordWindow so a near-simultaneous
     /// chord doesn't also dig or place first; after the drop both buttons stay
     /// blanked until both are released.
@@ -3133,13 +3133,13 @@ final class WorldSession {
                 // punch is reported whenever object_hit_delay (0.2 s, counting
                 // down every tick) has run out, so spam-clicking can't beat the
                 // hold rate; any punch holds off digging for 0.15 s. mcl_mobs'
-                // 0.5 s invulnerability paces the actual damage (#284).
+                // 0.5 s invulnerability paces the actual damage.
                 if gi.dig {
                     if objectHitDelay <= 0 {
                         objectHitDelay = 0.2
                         nodigDelay = max(nodigDelay, 0.15)
                         client.sendInteract(action: 0, objectId: obj.id)
-                        // Immediate hit feedback (#149); flash() skips immortal
+                        // Immediate hit feedback; flash() skips immortal
                         // objects (armor stands, item frames), which take no damage.
                         client.objects.flash(obj.id, seconds: 0.25)
                         print("[melee] punch object \(obj.id)"); fflush(stdout)
@@ -3152,8 +3152,8 @@ final class WorldSession {
             }
         }
         prevDig = gi.dig
-        client.sneakHeld = gi.sneak   // report sneak so mods see it + it can force placement (#178)
-        // Place, with hold-to-repeat (#178): first press places, then while held
+        client.sneakHeld = gi.sneak   // report sneak so mods see it + it can force placement
+        // Place, with hold-to-repeat: first press places, then while held
         // it repeats every repeat_place_time as long as performPlace pointed at
         // a node it placed against (not a rightclick/formspec/entity/air use).
         // Sneak-place also repeats (build a wall).
@@ -3170,9 +3170,9 @@ final class WorldSession {
             placeRepeatArmed = false
         }
         prevPlace = gi.place
-        updateEat(dt: dt, gripHeld: simGripOverride ?? gi.place)   // hold grip on food to eat (#173); also mirrors RMB bit
+        updateEat(dt: dt, gripHeld: simGripOverride ?? gi.place)   // hold grip on food to eat; also mirrors RMB bit
         client.digHeld = gi.dig                  // LMB control bit: mcl_playerplus reads control.LMB
-        client.jumpHeld = gi.jump                // jump bit: horse jump, boat dismount (#270)
+        client.jumpHeld = gi.jump                // jump bit: horse jump, boat dismount
         // Sim aid: periodically dig straight down on the local dev world to
         // exercise the dig loop without a controller. Off by default (it chews
         // up the world); flip to verify.
@@ -3199,7 +3199,7 @@ final class WorldSession {
         // Between digs the engine waits nodig_delay_timer (game.cpp): the last
         // dig time over the crack frame count, capped at 0.3 s, 0.15 s for
         // instant nodes, so holding the trigger across tall grass or torches
-        // doesn't chain-delete them faster than desktop (#297).
+        // doesn't chain-delete them faster than desktop.
         if nodigDelay > 0, digNode == nil { return }   // counted down in handleInteraction
         if digNode != hit.under {
             if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove) }  // stop old
@@ -3247,13 +3247,13 @@ final class WorldSession {
     /// Dig time for the node under the crosshair the way game.cpp handleDigging
     /// picks it: the wielded item's caps (an item with none inherits the hand's),
     /// and if THAT says not diggable, the hand's caps -- so a pickaxe still digs
-    /// dirt at hand speed instead of not at all (#297). time < 0 = undiggable.
+    /// dirt at hand speed instead of not at all. time < 0 = undiggable.
     private func digParamsFor(_ id: UInt16) -> (time: Float, group: String?, wield: String, source: String) {
         let groups = client.nodes.groups(id)
         let wield = client.wieldIndex
         let wieldName = (wield >= 0 && wield < hotbar.count) ? hotbar[wield] : nil
         // The real hand item first (survival vs creative caps), then the
-        // ITEMDEF-wide guess until the "hand" list has arrived (#267).
+        // ITEMDEF-wide guess until the "hand" list has arrived.
         var hand = client.items.handCaps()
         var handSource = "hand"
         if let hn = handItemName(), let hc = client.items.caps(for: hn), !hc.groupCaps.isEmpty { hand = hc; handSource = hn }
@@ -3286,7 +3286,7 @@ final class WorldSession {
         markNodeDirty(hit.under); remeshCooldown = 0
     }
 
-    // Hold-to-eat (#173): VoxeLibre eating is a HOLD, not a click. mcl_hunger sets
+    // Hold-to-eat: VoxeLibre eating is a HOLD, not a click. mcl_hunger sets
     // is_eating on the item's on_secondary_use (the grip press already sends that
     // via performPlace), then ticks a ~1.6s delay off the HELD place/RMB key
     // before the bite lands. So while the right grip stays held on a wielded food,
@@ -3300,7 +3300,7 @@ final class WorldSession {
     /// tolerance is the damage in hp (1 hp per node/s), scaled by the landed
     /// node's fall_damage_add_percent group (hay/honey -80, slime -100, beds
     /// -50 ...). Sent as TOSERVER_DAMAGE; the server decides whether it
-    /// applies (#264). Water never gets here: the liquid branch has no floor hit.
+    /// applies. Water never gets here: the liquid branch has no floor hit.
     static let fallTolerance: Float = 14
     private func reportFallDamage(impactSpeed: Float, feet: SIMD3<Float>) {
         guard impactSpeed > Self.fallTolerance else { return }
@@ -3327,7 +3327,7 @@ final class WorldSession {
         // VoxeLibre's bow, crossbow, trident, spear, spyglass and shield all
         // run off controls.register_on_hold/release(RMB), which reads
         // get_player_control() -- i.e. these PLAYERPOS bits. Gating the bit to
-        // eatables silently disabled all of them (parity #263). Only the eat
+        // eatables silently disabled all of them. Only the eat
         // re-arm below stays food-only.
         client.placeHeld = gripHeld
         let wi = client.wieldIndex
@@ -3341,14 +3341,14 @@ final class WorldSession {
 
     /// Predict a placed node's param2 the way Luanti's client does (game.cpp
     /// nodePlacement), so oriented nodes (stairs, chests, torches, pumpkins)
-    /// appear facing the right way instead of snapping a round-trip later (#178).
+    /// appear facing the right way instead of snapping a round-trip later.
     /// Node coords and the player are in the same translated (non-mirrored) frame,
     /// so these differences match the server's. Colour/palette (colored variants)
     /// and torch wallmounted_rotate_vertical are left to the server's correction.
     private func predictedParam2(id: UInt16, nodepos: SIMD3<Int>, neighborpos: SIMD3<Int>, item: String? = nil) -> UInt8 {
         // game.cpp nodePlacement: an item's place_param2 wins over the
         // facedir/wallmounted derivation (VoxeLibre crops start at stage 1,
-        // kelp/corals/lanterns carry their variant in param2) (#298).
+        // kelp/corals/lanterns carry their variant in param2).
         if let item, let p2 = client.items.placeParam2(for: item) { return UInt8(truncatingIfNeeded: p2) }
         let feet = player.snapshot().feet
         let pn = SIMD3(Int(floor(feet.x)), Int(floor(feet.y)), Int(floor(feet.z)))
@@ -3358,7 +3358,7 @@ final class WorldSession {
 
     /// Returns true when the grip was used against a node (placed, or used the
     /// wielded item on it), so the caller repeats it while the grip is held, as
-    /// game.cpp's repeat_place_timer does for any item (#178). Object
+    /// game.cpp's repeat_place_timer does for any item. Object
     /// rightclicks, rightclickable nodes, meta formspecs, refused attached
     /// placements and air uses return false, so a held grip never re-opens a
     /// chest or re-toggles a door.
@@ -3375,9 +3375,9 @@ final class WorldSession {
             let nodeDist: Float = nodeHit.map { simd_length((SIMD3<Float>($0.under) + SIMD3(0.5, 0.5, 0.5)) - o) } ?? .infinity
             // A rightclickable NODE wins over an overlapping decorative entity:
             // VoxeLibre chests/furnaces are nodes with on_rightclick plus a visual
-            // lid/flame ENTITY sitting right on them. #155 diverted the grip to
+            // lid/flame ENTITY sitting right on them. An earlier fix diverted the grip to
             // that entity (whose object-rightclick does nothing), so containers
-            // wouldn't open (#166). Only rightclick the object when the node under
+            // wouldn't open. Only rightclick the object when the node under
             // it isn't itself rightclickable (so mounting a horse on grass still works).
             let nodeRightclick = nodeHit.map { client.nodes.isRightclickable(client.world.nodeId($0.under)) } ?? false
             if obj.dist <= nodeDist, !nodeRightclick {
@@ -3394,7 +3394,7 @@ final class WorldSession {
             // and raycasts server-side along the look we send (the gaze), with
             // liquids included, so the aim just has to land on a source.
             client.sendInteract(action: 5, under: nil, above: nil)
-            // Diagnostic (#166): the pointable-filtered raycast found nothing, but
+            // Diagnostic: the pointable-filtered raycast found nothing, but
             // was there actually a node under the gaze that got skipped? Re-cast
             // ignoring pointability and report it, so a furnace that won't open
             // tells us whether it's a pointability parse (node present, skipped)
@@ -3411,10 +3411,10 @@ final class WorldSession {
         // and other stations that set meta:formspec instead of a callback) is
         // opened CLIENT-side on rightclick in real Luanti -- the server never
         // pushes a SHOW_FORMSPEC for it. Do the same: open it and send no place,
-        // so grip actually opens the furnace (#166). Rightclickable nodes fall
+        // so grip actually opens the furnace. Rightclickable nodes fall
         // through to the server (their on_rightclick sends the formspec).
         // Sneaking forces placement instead of "use", so you can build against a
-        // furnace/chest/door (Luanti: the use branches bail when SNEAK is up) (#178).
+        // furnace/chest/door (Luanti: the use branches bail when SNEAK is up).
         // Game::nodePlacement does this for rightclickable nodes too: it sends
         // the use (so on_rightclick still runs) AND opens the meta formspec.
         // Shulker boxes (on_rightclick only animates the lid) and the grindstone
@@ -3459,13 +3459,13 @@ final class WorldSession {
             // If the pointed node is buildable_to (grass tuft, snow layer), the
             // block replaces IT; otherwise it lands in the empty neighbour. Only
             // predict when the target cell is itself replaceable, so we never
-            // paint a phantom over a solid the server would reject (#178).
+            // paint a phantom over a solid the server would reject.
             let nodepos = client.nodes.isBuildableTo(client.world.nodeId(hit.under)) ? hit.under : hit.above
             // Don't place a walkable node inside your own body (game.cpp
             // nodePlacement): the standing node is the floor under the feet
             // (feet - 0.1 when grounded, else the feet node), and floor+1 /
             // floor+2 are where you are. The engine neither predicts nor sends
-            // the INTERACT, and plays sound_place_failed instead (#268).
+            // the INTERACT, and plays sound_place_failed instead.
             if client.nodes.isWalkable(id) {
                 let ph = player.physics()
                 let standY = Int(floor(ph.feet.y - (ph.grounded ? 0.1 : 0)))
@@ -3480,7 +3480,7 @@ final class WorldSession {
             // attached_node support check (game.cpp nodePlacement): a flower/
             // sapling/crop/rail needs a walkable node under it (an==3 or the
             // default), a hanging one needs the node above (an==4). Without the
-            // support the server drops the node, so predicting it flickers (#340).
+            // support the server drops the node, so predicting it flickers.
             // We handle only the Y-axis cases: wallmounted support (torches) and
             // the facedir an==2 case depend on a direction that's mirrored in our
             // frame, so leave those to the server rather than risk a false refuse.
@@ -3517,7 +3517,7 @@ final class WorldSession {
     }
 
 
-    // MARK: - Inventory panel (#81)
+    // MARK: - Inventory panel
     //
     // A spatial panel that opens where you're looking (right O) and stays put
     // in the world, visionOS style, instead of Luanti's flat formspec. Same
@@ -3536,23 +3536,23 @@ final class WorldSession {
     private var formspecContext: SIMD3<Int>? = nil   // node whose metadata a formspec's current_name/context refers to
     /// The open form is the player's own INVENTORY_FORMSPEC (formname ""): it
     /// closes with player fields, not node fields, and a re-sent inventory
-    /// formspec (creative tab switch) re-lays it out in place (#281).
+    /// formspec (creative tab switch) re-lays it out in place.
     private var formspecIsInventory = false
     private var formspecElements: [Formspec.List] = []
-    private var formspecRings: [(loc: String, list: String)] = []        // listring[] chain for shift-click quick-move (#208)
+    private var formspecRings: [(loc: String, list: String)] = []        // listring[] chain for shift-click quick-move
     private var formspecLabelsRaw: [Formspec.Label] = []                 // static label[] text, formspec grid coords
     private var invLabels: [(u: Float, v: Float, text: String, color: Float?)] = []     // laid-out label positions (panel plane, metres)
-    private var formspecFields: [Formspec.Field] = []                    // editable fields on a list-form (anvil rename, #229)
-    private var formspecButtons: [Formspec.PositionedButton] = []        // tappable buttons on a list-form (#229)
+    private var formspecFields: [Formspec.Field] = []                    // editable fields on a list-form (anvil rename)
+    private var formspecButtons: [Formspec.PositionedButton] = []        // tappable buttons on a list-form
     private var invWidgets: [(u: Float, v: Float, hw: Float, hh: Float, field: Formspec.Field?, button: Formspec.PositionedButton?)] = []   // laid-out tappable field/button boxes
-    private var formspecInfoTargets: [Formspec.InfoTarget] = []   // info-form tab/row tap regions in grid coords (#346)
+    private var formspecInfoTargets: [Formspec.InfoTarget] = []   // info-form tab/row tap regions in grid coords
     private var infoTargets: [(u: Float, v: Float, hw: Float, hh: Float, field: String, value: String)] = []   // laid out in panel metres
-    private var formspecImages: [Formspec.Image] = []                    // static image[] elements (furnace fire/arrow, #223)
-    private var formspecBackgrounds: [Formspec.Background] = []          // background[]/background9[] panels (#244)
+    private var formspecImages: [Formspec.Image] = []                    // static image[] elements (furnace fire/arrow)
+    private var formspecBackgrounds: [Formspec.Background] = []          // background[]/background9[] panels
     private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool, count: Int)] = []   // laid-out image quads (isItem: draw as an item icon)
-    private var invBackgrounds: [(u: Float, v: Float, hw: Float, hh: Float, texture: String)] = []   // laid-out background[] station art at its own coords (#245)
-    private var formspecTooltips: [String: (text: String, color: Float?)] = [:]  // element name -> hover text + color (enchant cost, #236)
-    private var formspecCheckboxes: [Formspec.Checkbox] = []             // checkbox[] toggles (#237)
+    private var invBackgrounds: [(u: Float, v: Float, hw: Float, hh: Float, texture: String)] = []   // laid-out background[] station art at its own coords
+    private var formspecTooltips: [String: (text: String, color: Float?)] = [:]  // element name -> hover text + color (enchant cost)
+    private var formspecCheckboxes: [Formspec.Checkbox] = []             // checkbox[] toggles
     private var checkboxState: [String: Bool] = [:]                      // local checked state, flipped on tap
     private var invCheckboxes: [(u: Float, v: Float, hw: Float, hh: Float, name: String, label: String, color: Float?)] = []   // laid-out checkbox boxes
     private var formspecLabelLayers: [String: (layer: Int, aspect: Float)] = [:]   // label text -> text layer
@@ -3574,7 +3574,7 @@ final class WorldSession {
         return list[s.index]
     }
 
-    /// Desktop-style shift-click quick-move (#208): send `stack` to its logical
+    /// Desktop-style shift-click quick-move: send `stack` to its logical
     /// destination and return true if an action was issued. Left-grip-held on a
     /// filled slot routes it without picking it up.
     private func shiftMove(_ h: InvSlot, _ stack: Client.ItemStack) -> Bool {
@@ -3594,7 +3594,7 @@ final class WorldSession {
         // A server container/station is open: follow its listring, exactly like
         // desktop. Moving to the NEXT ring entry after the source list routes a
         // furnace's items to the `distr` distributor (which sorts fuel vs
-        // ingredient server-side), and cycles chest<->player correctly (#208).
+        // ingredient server-side), and cycles chest<->player correctly.
         if formspecOpen, !formspecRings.isEmpty,
            let i = formspecRings.firstIndex(where: { $0.loc == h.loc && $0.list == h.list }) {
             let d = formspecRings[(i + 1) % formspecRings.count]
@@ -3659,7 +3659,7 @@ final class WorldSession {
         if formspecOpen { closeFormspec(); return }
         // The server's own inventory form when it sent one (VoxeLibre's
         // survival page: armour column, offhand slot, 2x2 craft; or the
-        // creative browser with its tabs) -- what desktop shows on E (#281).
+        // creative browser with its tabs) -- what desktop shows on E.
         // The hand-built grid below stays as the fallback for a server that
         // never sent INVENTORY_FORMSPEC.
         if !inventoryOpen, !client.inventoryFormspec.isEmpty {
@@ -3696,8 +3696,8 @@ final class WorldSession {
         // use "mcl_chests:chest_x_y_z") closes via INVENTORY_FIELDS with that
         // formname + quit -- that is what fires mcl_chests' on_player_receive_
         // fields to play the lid-close animation. Sending NODEMETA_FIELDS to the
-        // node (no formname) never matched "mcl_chests:", so the lid stayed open
-        // (#130). Fall back to node fields for a bare nodemeta form (no formname).
+        // node (no formname) never matched "mcl_chests:", so the lid stayed open.
+        // Fall back to node fields for a bare nodemeta form (no formname).
         if !formspecName.isEmpty || formspecIsInventory {
             // The inventory form's name is "" on the wire; mcl_inventory's
             // receive_fields handler (craft-grid return, creative state) keys
@@ -3716,7 +3716,7 @@ final class WorldSession {
     /// re-sends its formspec each cook tick with a new fire/arrow `[lowpart:N`
     /// percent (mcl_furnaces active_formspec). We were only rebaking item icons
     /// on a meta change, so the fire gauge stayed frozen at its open-time value
-    /// -- it read as "no animation" (#344). Re-parse just the visual elements
+    /// -- it read as "no animation". Re-parse just the visual elements
     /// (image/label/background) from the node's CURRENT meta formspec and
     /// re-lay-out; the item lists are identical between active/inactive, so a
     /// held stack, hover and cursor are left untouched.
@@ -3734,12 +3734,12 @@ final class WorldSession {
     /// in the spatial panel: tab captions, textlist rows, textarea and hypertext
     /// text become positioned labels (Formspec.infoFormLabels), plus any image[]
     /// (the achievement icon) and background art. Tabs and textlist rows are
-    /// tappable (infoTargets, #346); clicking off the panel sends the form's
-    /// quit like any other (#339).
+    /// tappable (infoTargets); clicking off the panel sends the form's
+    /// quit like any other.
     private func openInfoFormspec(spec: String, name: String, legacy: Bool) {
         // A re-send of the SAME form (tab switch, row select echo) should keep
         // the panel where it is instead of re-anchoring in front of the player
-        // on every tap (#346).
+        // on every tap.
         let reuse = formspecOpen && formspecName == name && invFrame != nil
         formspecContext = nil            // player form (show_formspec), not a node's meta form
         formspecElements = []
@@ -3777,15 +3777,15 @@ final class WorldSession {
         formspecIsInventory = inventory
         // The server's per-player formspec prepend carries the global stone
         // background9 panel + styles; Luanti prepends it to every formspec
-        // except those with no_prepend[] (Formspec.wantsPrepend), so we do too (#244).
+        // except those with no_prepend[] (Formspec.wantsPrepend), so we do too.
         let rawSpec = (Formspec.wantsPrepend(rawSpec0) ? client.formspecPrepend : "") + rawSpec0
         // Log the raw spec (prepend + body) so a device capture shows the exact
         // slot/label/background coords the server sent -- needed to pin the
-        // chest-panel misalignment and stray label fragment (#254). Truncated so
+        // chest-panel misalignment and stray label fragment. Truncated so
         // a huge creative form doesn't flood the log.
         print("[formspec] raw '\(name)' prepend=\(client.formspecPrepend.count)b spec=\(rawSpec0.prefix(700))"); fflush(stdout)
         // Bake container[]/container_end[] offsets into element positions so the
-        // parsers below stay container-unaware (enchanting table rows, #234).
+        // parsers below stay container-unaware (enchanting table rows).
         let spec = Formspec.flattenContainers(rawSpec)
         let legacy = Formspec.Legacy.applies(to: rawSpec0)   // old coordinates: the body decides, not the prepend
         let lists = Formspec.parseLists(spec, context: formspecContext)
@@ -3795,7 +3795,7 @@ final class WorldSession {
             // form that also carries real buttons (the bed sleep form: chat
             // field + Send + "Leave bed") is a button dialog instead; the
             // keyboard used to pop up on its chat field every time Eric went to
-            // sleep (#304).
+            // sleep.
             let fields = Formspec.parseFields(spec)
             if let field = fields.first, let ctx = formspecContext, Formspec.isTextEditorForm(spec) {
                 openKeyboard(prefill: field.value) { [weak self] text in
@@ -3806,7 +3806,7 @@ final class WorldSession {
             // A non-inventory INFO form (achievements, announcements, doc Help):
             // no item grids, but textlist/tabheader/hypertext content. Render it
             // read-only in the panel so it's legible, instead of the one-button
-            // notice that dropped everything but a single button (#339).
+            // notice that dropped everything but a single button.
             if Formspec.isInfoForm(spec) {
                 openInfoFormspec(spec: spec, name: name, legacy: legacy)
                 return
@@ -3823,20 +3823,20 @@ final class WorldSession {
             return
         }
         formspecElements = lists
-        formspecRings = Formspec.parseListrings(spec, context: formspecContext)   // shift-click order (#208)
-        // Station name + slot captions (#176), furnace fire/arrow gauges (#223),
-        // item_image[] icons like beacon payment / trade hints (#232), stone
-        // panel + station art (#244).
+        formspecRings = Formspec.parseListrings(spec, context: formspecContext)   // shift-click order
+        // Station name + slot captions, furnace fire/arrow gauges,
+        // item_image[] icons like beacon payment / trade hints, stone
+        // panel + station art.
         let vis = Formspec.parseVisuals(spec, legacy: legacy)
         formspecLabelsRaw = vis.labels
         // A list-form can also carry an editable field (anvil rename) or a button;
-        // surface them as tappable boxes in the panel instead of dropping them (#229).
+        // surface them as tappable boxes in the panel instead of dropping them.
         formspecFields = formspecContext != nil ? Formspec.parseFieldsPositioned(spec) : []
-        formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)   // + stonecutter recipes (#235)
+        formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)   // + stonecutter recipes
         formspecImages = vis.images
-        formspecTooltips = Formspec.parseTooltips(spec)   // hover text (enchant cost, #236)
+        formspecTooltips = Formspec.parseTooltips(spec)   // hover text (enchant cost)
         formspecBackgrounds = vis.backgrounds
-        formspecCheckboxes = Formspec.parseCheckboxes(spec)   // toggles (#237)
+        formspecCheckboxes = Formspec.parseCheckboxes(spec)   // toggles
         checkboxState = Dictionary(formspecCheckboxes.map { ($0.name, $0.selected) }, uniquingKeysWith: { a, _ in a })
         // Old-coordinate forms (villager trade, brewing stand) go into the
         // real-coordinate units the layout below assumes; left alone, their
@@ -3848,7 +3848,7 @@ final class WorldSession {
             formspecButtons = formspecButtons.map(Formspec.Legacy.convert)
             formspecCheckboxes = formspecCheckboxes.map(Formspec.Legacy.convert)
         }
-        formspecName = name              // remembered so close sends the named-form quit (#130)
+        formspecName = name              // remembered so close sends the named-form quit
         formspecOpen = true; inventoryOpen = true
         invHeld = nil; invHover = nil; invCursor = nil
         openInventoryPanel()   // anchors invFrame ahead of the player, then layoutInventory()
@@ -3861,7 +3861,7 @@ final class WorldSession {
     /// For each distinct item in the open panel, log where its icon resolution
     /// stands: image name, cached tile, atlas layer, and the baked model-texture
     /// layer the panel actually draws from. A nil at any stage is why the slot
-    /// renders empty even though it holds an item (#254). Runs after
+    /// renders empty even though it holds an item. Runs after
     /// refreshInventoryTiles so the atlas rebuild has happened.
     private func logIconResolution(_ lists: [Formspec.List]) {
         var stacks: [Client.ItemStack?] = Array(client.inventory.values.joined())
@@ -3886,7 +3886,7 @@ final class WorldSession {
     /// OWN grid -- the one every station form embeds via list[current_player;
     /// main] -- exercises the icon path each run. The sim dev account is nearly
     /// empty, so without this the player grid stayed blank in the sim and the
-    /// #254 blank-icon class only showed in a container's own slots.
+    /// The blank-icon class only showed in a container's own slots.
     private func seedFakePlayerInventory() {
         // Fill only the EMPTY slots so the dev account's real items stay put; the
         // sim account is nearly empty, so this populates the grid either way.
@@ -3908,7 +3908,7 @@ final class WorldSession {
 
     /// Print the resolved contents of every list a formspec references, plus the
     /// player's own main list, so we can compare what the server actually sent
-    /// against what the panel renders (chest slots showing empty, #254). Prints
+    /// against what the panel renders (chest slots showing empty). Prints
     /// slot index -> item xN for each filled slot; `<no list resolved>` means the
     /// nodemeta/detached inventory never arrived (the real bug if the chest looks
     /// empty in-world too).
@@ -3959,7 +3959,7 @@ final class WorldSession {
                     // form's rows a little closer, e.pitch), and the slot's CENTER
                     // is +0.5 from its top-left x,y. Match that so the interactive
                     // slots line up with the slot-background images the stations
-                    // emit (get_itemslot_bg_v4), which we now draw (#241).
+                    // emit (get_itemslot_bg_v4), which we now draw.
                     slots.append(InvSlot(loc: e.loc, list: e.list, index: e.start + i,
                                          u: (e.gx + Float(col) * e.pitch.x + 0.5) * p,
                                          v: -(e.gy + Float(row) * e.pitch.y + 0.5) * p))
@@ -3974,7 +3974,7 @@ final class WorldSession {
                 // A list-less info form (achievements / announcements / Help) has
                 // no slots to center on, so its labels/images would lay out from
                 // the panel origin and spill off the right edge. Center on the
-                // label + image extent instead (#339).
+                // label + image extent instead.
                 var us: [Float] = [], vs: [Float] = []
                 for l in formspecLabelsRaw { us.append(l.gx * p); vs.append(-l.gy * p) }
                 for im in formspecImages { us.append((im.gx + im.w * 0.5) * p); vs.append(-(im.gy + im.h * 0.5) * p) }
@@ -3987,20 +3987,20 @@ final class WorldSession {
             // so negate. In real-coordinate forms (formspec_version >= 2, all of
             // VoxeLibre) label y is the text's vertical CENTER; the old half-cell
             // nudge up put "Inventory" (y=4.7) inside the chest's last row, where
-            // the slot backgrounds hid all but its tail (#261).
+            // the slot backgrounds hid all but its tail.
             invLabels = formspecLabelsRaw.map {
                 (u: $0.gx * p - cu, v: -$0.gy * p - cv, text: $0.text, color: $0.color)
             }
             // Info-form tab/row tap boxes (achievements/Help): same grid->metre
             // mapping as the labels, so a tap lands on the visible text. Invisible;
             // hit-tested in handleInventoryInput to submit the tab index / textlist
-            // CHG event (#346). gy is the text's vertical centre, matching labels.
+            // CHG event. gy is the text's vertical centre, matching labels.
             infoTargets = formspecInfoTargets.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -$0.gy * p - cv,
                  hw: $0.w * 0.5 * p, hh: $0.h * 0.5 * p, field: $0.field, value: $0.value)
             }
             // Tappable field/button boxes, centered on their grid rect (formspec
-            // x,y is the box's top-left), recentered the same way as slots (#229).
+            // x,y is the box's top-left), recentered the same way as slots.
             var widgets: [(u: Float, v: Float, hw: Float, hh: Float, field: Formspec.Field?, button: Formspec.PositionedButton?)] = []
             for f in formspecFields {
                 widgets.append((u: (f.gx + f.w * 0.5) * p - cu, v: -(f.gy + 0.5) * p - cv,
@@ -4012,20 +4012,20 @@ final class WorldSession {
             }
             invWidgets = widgets
             // Static image[] quads (furnace fire gauge + cook arrow), centered on
-            // their grid rect the same way as slots/widgets (#223).
+            // their grid rect the same way as slots/widgets.
             invImages = formspecImages.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
                  hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture, isItem: $0.isItem, count: $0.count)
             }
             // Non-fill background[] art (brewing/trading/book panels): each draws
             // at its own grid rect, unlike the prepend's stone panel that fills
-            // the whole backdrop. Same top-left -> center mapping as images (#245).
+            // the whole backdrop. Same top-left -> center mapping as images.
             invBackgrounds = formspecBackgrounds.filter { !$0.fill }.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
                  hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture)
             }
             // Checkboxes: a small box at (gx,gy) (y is the box's center) plus a
-            // label reaching right; the whole span is the tap target (#237).
+            // label reaching right; the whole span is the tap target.
             invCheckboxes = formspecCheckboxes.map {
                 let box: Float = p * 0.5
                 return (u: $0.gx * p - cu + box, v: -$0.gy * p - cv,
@@ -4054,7 +4054,7 @@ final class WorldSession {
         }
         if let armor = client.inventory["armor"] {
             // mcl_armor uses armor-list slots 1..4 for head/torso/legs/feet (slot 0
-            // is unused); skip it so the column is exactly those four (#168).
+            // is unused); skip it so the column is exactly those four.
             for i in 1..<armor.count {
                 slots.append(InvSlot(loc: "current_player", list: "armor", index: i, u: -5.5 * p, v: (2.0 - Float(i)) * p))
             }
@@ -4132,7 +4132,7 @@ final class WorldSession {
         }
         #if targetEnvironment(simulator)
         // -vrdev.invPickTest drives the real click logic without a controller ray
-        // by forcing the hovered slot (#81). overPanel true so a release stays put.
+        // by forcing the hovered slot. overPanel true so a release stays put.
         if let ov = simInvHoverOverride { invHover = (ov >= 0 && ov < invSlots.count) ? ov : nil; overPanel = true }
         #endif
         // Keyboard Enter / Shift+Enter click the gazed slot like the trigger /
@@ -4143,7 +4143,7 @@ final class WorldSession {
         guard primary || secondary else { return }
         // Tap an info-form tab caption or textlist row (achievements/Help): submit
         // the field so the server re-sends the form on that tab / with that entry
-        // selected (#346). A player form (no node context) submits via
+        // selected. A player form (no node context) submits via
         // INVENTORY_FIELDS; a node info form via nodemeta. Doesn't close.
         if primary, invHeld == nil, invHover == nil, let cur = invCursor, !infoTargets.isEmpty {
             let rel = cur - fr.center
@@ -4159,7 +4159,7 @@ final class WorldSession {
             }
         }
         // Tap a field/button box (anvil rename, etc.): a field opens the keyboard
-        // and submits nodemeta fields; a button submits immediately (#229). Only
+        // and submits nodemeta fields; a button submits immediately. Only
         // with an empty hand and no slot under the pointer, so item moves win.
         if primary, invHeld == nil, invHover == nil, let cur = invCursor, !invWidgets.isEmpty {
             let rel = cur - fr.center
@@ -4178,7 +4178,7 @@ final class WorldSession {
                 return
             }
         }
-        // Tap a checkbox: flip local state and submit its field (#237).
+        // Tap a checkbox: flip local state and submit its field.
         if primary, invHeld == nil, invHover == nil, let cur = invCursor, !invCheckboxes.isEmpty,
            let ctx = formspecContext {
             let rel = cur - fr.center
@@ -4214,7 +4214,7 @@ final class WorldSession {
                 if h.loc == held.loc && h.list == held.list && h.index == held.index { invHeld = nil; return }
                 // Clicking the craft output again while already holding the crafted
                 // result crafts another batch and accumulates it in the hand, like
-                // desktop (#160). The hand references the hidden craftresult slot,
+                // desktop. The hand references the hidden craftresult slot,
                 // so the extra output stacks into what we're already holding (the
                 // server clamps at stack_max). Holding any other item, the output
                 // isn't takeable, so do nothing.
@@ -4241,7 +4241,7 @@ final class WorldSession {
                 // Left-click deposits the held stack onto the target, like desktop:
                 // same item -> merge/grow the target (server clamps at stack_max,
                 // any remainder stays in the held source), different item -> swap,
-                // empty -> place. (The old pull-into-hand was backwards, #150: it
+                // empty -> place. (The old pull-into-hand was backwards: it
                 // blocked dropping onto an existing stack to grow it.)
                 let count = secondary ? 1 : held.count
                 // Nothing of the held stack fits the target (a different item, a
@@ -4308,8 +4308,8 @@ final class WorldSession {
         guard let h = hover, let stack = inventoryStack(h) else { return }
         // Shift-click quick-move: left grip, or E / Ctrl on a keyboard (gi.fast), held + a primary TAP
         // on a filled slot, nothing in hand -> send the stack to its logical
-        // destination instead of picking it up, like holding shift on desktop
-        // (#208). Only on the primary tap; left grip does nothing else in the panel.
+        // destination instead of picking it up, like holding shift on desktop.
+        // Only on the primary tap; left grip does nothing else in the panel.
         if primary, gi.fast, shiftMove(h, stack) { return }
         if h.list == "craftpreview" {
             // Craft one into the hidden "craftresult" and pick it up onto the
@@ -4349,7 +4349,7 @@ final class WorldSession {
         // creative browser's ~1500 items) is baked straight from media into
         // the model-texture array by iconLayerForTile. Pushing the creative
         // list into the node atlas blew past Metal's 2048-layer cap and
-        // aborted in makeAtlas (#281).
+        // aborted in makeAtlas.
         let ownMain = client.inventory["main"] ?? []
         for list in allLists {
             for st in list {
@@ -4382,7 +4382,7 @@ final class WorldSession {
         // Pre-bake every panel icon here in ONE batch. The draw loop used to
         // register each lazily, and every new model-texture layer kicks a full
         // array rebuild -- opening a chest set off ~20 rebuilds in a row, and the
-        // array re-swapping each time blanked the whole panel (#254 regression).
+        // array re-swapping each time blanked the whole panel (regression).
         // Baking them together makes the layer count jump once -> one rebuild.
         // Mirror nodeIcon3D's own choice of layers so the pre-bake matches what
         // the draw samples: a flat item icon, or a cube's three visible faces
@@ -4427,7 +4427,7 @@ final class WorldSession {
     /// When a panel closes, give back the icon layers only that panel needed.
     /// Layers are append-only otherwise, and one creative page adds ~50: paging
     /// through the browser in a long session would hit Metal's 2048-slice cap
-    /// and icons would start sharing the last layer (#296). Kept: every tile
+    /// and icons would start sharing the last layer. Kept: every tile
     /// the player's own main list (the wrist hotbar's 3D icons) still draws.
     private func releasePanelIconLayers() {
         var keep = Set<String>()
@@ -4455,7 +4455,7 @@ final class WorldSession {
     }
     /// Cache key for a stack's icon: the item name, or name + the stack's
     /// inventory_image meta override (bow charge frames, enchant glint) so
-    /// two stacks of one item can show different pictures (#271).
+    /// two stacks of one item can show different pictures.
     private func iconKey(_ st: Client.ItemStack) -> String {
         if let img = st.customImage { return st.name + "\u{0}" + img }
         return st.name
@@ -4464,13 +4464,13 @@ final class WorldSession {
     /// Upscale an ATLAS tile into a MODEL-texture layer (the inventory panel draws
     /// from the model-texture array, a different layer space than the world node
     /// atlas), cached by tile name. Used for item icons and for each face of a 3D
-    /// node icon (#219).
+    /// node icon.
     private func iconLayerForTile(_ tile: String) -> Int? {
         if let l = invIconLayers[tile] { return l }
         // Prefer an already-baked atlas layer (a node face we've decoded), then
         // its base PNG's layer when the full modifier chain ("a.png^b.png", a
         // [combine) isn't atlased itself -- otherwise a 3D-icon face drops and
-        // shows a hole (#255).
+        // shows a hole.
         if let ai = atlas.tileLayer(tile) ?? NodeRegistry.imageNames(tile).first.flatMap({ atlas.tileLayer($0) }) {
             let i = Int(ai)
             if i >= 0, i < atlas.layers.count {
@@ -4491,7 +4491,7 @@ final class WorldSession {
         }
         // Not in the node atlas: a chest-only craftitem's inventory_image lives
         // in media but was never a node face, so waiting on the atlas left the
-        // slot blank until the next full atlas rebuild landed (#254). Bake it
+        // slot blank until the next full atlas rebuild landed. Bake it
         // straight from media (same path wield/dropped items use), so the icon
         // appears the instant the panel opens. All PNGs must be present.
         // Fill (not fit) the layer: the icon draw uses appendQuad with the full
@@ -4511,7 +4511,7 @@ final class WorldSession {
     /// cube faces' layers and shades, or a mesh node's model + fitted scale.
     /// nil = no 3D icon (a flat inventory_image, or an unknown node). Resolving
     /// this per slot per tick was ~8 registry lookups and 4 array allocations
-    /// per block slot (#322); now it's one dictionary hit.
+    /// per block slot; now it's one dictionary hit.
     private enum NodeIcon {
         case cube([(shade: Float, dep: Float, corners: Int, layer: Int)])   // corners: index into cubeIconCorners
         case mesh(file: String, layer: Int, mid: SIMD3<Float>, scale: Float)
@@ -4538,7 +4538,7 @@ final class WorldSession {
         guard let id = client.nodes.id(for: name), id != WorldMap.CONTENT_AIR else { return nil }
         switch client.nodes.kind(id) {
         case .cube:
-            let topTile = client.nodes.faceTile(id, 0)   // last-resort so no face is a hole (#255)
+            let topTile = client.nodes.faceTile(id, 0)   // last-resort so no face is a hole
             var faces: [(shade: Float, dep: Float, corners: Int, layer: Int)] = []
             for (k, f) in Self.cubeIconFaces.enumerated() {
                 let tile = client.nodes.faceTile(id, f.fi) ?? topTile
@@ -4561,7 +4561,7 @@ final class WorldSession {
 
     /// Draw a node item as a small 3D isometric icon on the panel plane -- a cube
     /// shows top + two sides, a mesh node (chest) shows its model -- instead of a
-    /// flat face tile (#219). Uses model-texture layers (iconLayerForTile) so the
+    /// flat face tile. Uses model-texture layers (iconLayerForTile) so the
     /// geometry samples the right atlas. Returns false for non-node items (tools,
     /// craftitems, and nodes shipping a 2D inventory_image) so the caller draws
     /// the flat icon. Iso: yaw 45deg + pitch 30deg, the classic inventory angle.
@@ -4581,7 +4581,7 @@ final class WorldSession {
         case .cube(let faces):
             // 2.5D iso decal: each face keeps its iso screen shape but sits at a
             // constant depth, drawn sides then top so the top wins the overlap;
-            // real per-vertex depth made the near faces occlude the top (#255).
+            // real per-vertex depth made the near faces occlude the top.
             let h = size * 0.5
             for f in faces {
                 let vb = UInt32(v.count / 9)
@@ -4617,7 +4617,7 @@ final class WorldSession {
 
     // Armor-slot labels (helmet/chest/legs/boots/off-hand), baked once, shown on
     // empty armor cells so the slots are identifiable.
-    // XP (#107) from mcl_experience's HUD elements, via Client.onXp.
+    // XP from mcl_experience's HUD elements, via Client.onXp.
     private var xpLevel = 0
     private var xpFraction: Float = 0
     private var xpLevelLayer = -1          // overlay text layer for the level digits
@@ -4631,7 +4631,7 @@ final class WorldSession {
         return (xpLevel, xpFraction)
     }
 
-    // Entity nametags (#118): one overlay text layer per distinct label, kept
+    // Entity nametags: one overlay text layer per distinct label, kept
     // for the session (names are few; capped so a griefer can't grow the
     // texture array without bound).
     private var nametagLayers: [String: (layer: Int, aspect: Float)] = [:]
@@ -4639,7 +4639,7 @@ final class WorldSession {
         if let l = nametagLayers[text] { return l }
         // Filled (full-canvas) render, not renderTextRGBA at a small fontFrac: the
         // glyphs fill 128px instead of ~20px, so the upscaled quad reads crisp
-        // instead of blurry (#175). Caller draws at the returned aspect.
+        // instead of blurry. Caller draws at the returned aspect.
         guard nametagLayers.count < 64,
               let r = Self.renderTextFilled(String(text.prefix(24)), canvas: ModelTextureHandoff.size)
         else { return nil }
@@ -4648,7 +4648,7 @@ final class WorldSession {
         return (l, r.aspect)
     }
 
-    // Server HUD elements (#103): generic image/text/waypoint elements from
+    // Server HUD elements: generic image/text/waypoint elements from
     // HUDADD (boss bars, potion effects, vignettes), drawn in the overlay
     // against a nominal 1920x1080 screen mapped onto a +-0.42 x +-0.32 rad
     // window 1.2 m ahead. Statbars and the XP pair have their own paths.
@@ -4835,11 +4835,11 @@ final class WorldSession {
     /// Server HUD elements we replace or deliberately leave out.
     static func hudAlwaysSkipped(_ e: Client.HudElement) -> Bool {
         // VoxeLibre adds its own crosshair image; we deliberately draw no
-        // reticle (#48: the pointed-node outline is the cue, and a reticle
+        // reticle (the pointed-node outline is the cue, and a reticle
         // at a guessed depth reads badly in stereo).
         if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { return true }
         // VoxeLibre also draws its hotbar background (mcl_inventory_hotbar.png)
-        // as an image element; ours is wrist-anchored (#57), so a strip of
+        // as an image element; ours is wrist-anchored, so a strip of
         // empty slots floating at the bottom of view is just noise.
         if e.type == 0, e.text.range(of: "hotbar", options: .caseInsensitive) != nil { return true }
         // mcl_offhand's slot frame and item: drawn head-locked above the
@@ -4857,8 +4857,8 @@ final class WorldSession {
     private func appendServerHUD(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
                                  v: inout [Float], idx: inout [UInt32]) {
         // Sorted view cached by hudGeneration: the server keeps ~80 pre-created
-        // potion slots, so mapping + z-sorting them every frame was pure waste
-        // (#249). COW keeps `var elems = sortedHud` alloc-free unless a sim path
+        // potion slots, so mapping + z-sorting them every frame was pure waste.
+        // COW keeps `var elems = sortedHud` alloc-free unless a sim path
         // appends to it below.
         if client.hudGeneration != sortedHudGen {
             // Elements we never draw are dropped here, once per HUD change,
@@ -4872,7 +4872,7 @@ final class WorldSession {
         let hudBaseCount = elems.count
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
-        // adds (awards/api.lua), including the icon-as-statbar, to verify #222.
+        // adds (awards/api.lua), including the icon-as-statbar, to verify.
         if UserDefaults.standard.bool(forKey: "vrdev.fakeAward") || UserDefaults.standard.bool(forKey: "vrdev.awardTest") {
             func aw(_ type: Int, _ text: String, name: String, off: SIMD2<Float>, align: SIMD2<Float>,
                     scale: SIMD2<Float> = SIMD2(1, 1), size: SIMD2<Float> = .zero, number: Int = 0xFFFFFF, z: Int) -> Client.HudElement {
@@ -4942,11 +4942,11 @@ final class WorldSession {
             // the award-icon hack: VoxeLibre's advancement toast draws its icon as
             // a statbar (type 2) with an explicit size + small number so it can be
             // scaled (awards/api.lua). Let that one through; the real vitals
-            // statbars (number ~20, no size) stay ours (#222).
+            // statbars (number ~20, no size) stay ours.
             // The toast's statbar is named "award_icon", number 2, no text2;
             // vl_hudbars' vitals bars always set size (24) AND text2 (bgicon) and
             // hit number 1-2 exactly when you're about to die, which the old
-            // size+number guess mistook for a toast icon (#289).
+            // size+number guess mistook for a toast icon.
             let awardIcon = e.type == 2 && (e.name == "award_icon" || (e.text2.isEmpty && e.number == 2 && e.size.x >= 32))
             guard e.type == 0 || e.type == 1 || e.type == 3 || e.type == 4 || e.type == 5 || awardIcon else { continue }
             // Pixel offsets scale with the size boost so a mod's layout (a title
@@ -4962,9 +4962,9 @@ final class WorldSession {
                 // as a short title instead of being shrunk to fit a fixed square.
                 // Exception: VoxeLibre's advancement toast (awards/api.lua) sizes
                 // its two lines to a fixed 128px background box. Our VR-legible
-                // 26px glyph (#157) is ~1.6x too tall for that box, so a real
+                // 26px glyph is ~1.6x too tall for that box, so a real
                 // (longer) achievement name spilled past it. Match desktop
-                // proportions for just those two lines so the title fits (#222).
+                // proportions for just those two lines so the title fits.
                 let isAwardText = e.name == "award_au" || e.name == "award_title"
                 // Size constants are cap heights; the block's rows are line
                 // boxes, so scale by row count and line/cap to keep capitals put.
@@ -5050,12 +5050,12 @@ final class WorldSession {
                                             tint: Self.packTint(Int(255 * min(1, 2 * (1 - left))), Int(255 * min(1, 2 * left)), 0), v: &v, idx: &idx)
                     }
                 }
-            case 2:                                              // award-icon statbar drawn as one scaled image (#222)
+            case 2:                                              // award-icon statbar drawn as one scaled image
                 guard !e.text.isEmpty, let img = hudImage(e.text) else { continue }
                 let dst = (e.size.x > 0 ? e.size : SIMD2(64, 64)) * Self.hudSizeBoost
                 // Hud::drawStatbar puts the first icon's TOP-LEFT at pos+offset and
                 // ignores alignment; centring it there pushed the toast icon half
-                // its size up and left, hanging off the box (#222 follow-up).
+                // its size up and left, hanging off the box (follow-up).
                 let c = at(anchor + dst / 2)
                 noteAwardRect(e.name, center: anchor + dst / 2, size: dst)
                 appendOverlayQuadUV(center: c, right: hr, up: hu, hw: dst.x / 2 * kx * D, hh: dst.y / 2 * ky * D,
@@ -5101,13 +5101,13 @@ final class WorldSession {
 
     // Indexed by the mcl_armor "armor" list slot: 0 unused, 1 head .. 4 feet.
     private static let armorSlotLabels = ["", "Head", "Torso", "Legs", "Feet"]
-    // Filled renderer via formspecLabelLayer for a crisp caption (#175).
+    // Filled renderer via formspecLabelLayer for a crisp caption.
     private func armorLabelLayer(_ i: Int) -> (layer: Int, aspect: Float)? {
         guard i >= 0, i < Self.armorSlotLabels.count else { return nil }
         return formspecLabelLayer(Self.armorSlotLabels[i])
     }
 
-    /// Text layer for a formspec label (#176). Keyed by text; uses the filled
+    /// Text layer for a formspec label. Keyed by text; uses the filled
     /// renderer so a long station title keeps the same glyph height as a short
     /// slot caption (the caller draws the quad at the returned aspect).
     private func formspecLabelLayer(_ text: String) -> (layer: Int, aspect: Float)? {
@@ -5139,11 +5139,11 @@ final class WorldSession {
     private var formspecLabelLastUse: [String: Int] = [:]
     private var formspecLabelUse = 0
 
-    // Filled renderer so the tooltip name reads crisp regardless of length (#175);
+    // Filled renderer so the tooltip name reads crisp regardless of length;
     // the caller draws the quad at the returned aspect.
     private func invNameLayer(_ name: String, stack: Client.ItemStack? = nil) -> (layer: Int, aspect: Float, color: Float?)? {
         var d = client.items.descriptionColored(for: name)
-        // An anvil rename lives in the stack's description meta (#271); the
+        // An anvil rename lives in the stack's description meta; the
         // first line is the name (VoxeLibre appends tooltip lines after \n).
         if let custom = stack?.customDescription {
             let first = custom.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? custom
@@ -5180,17 +5180,17 @@ final class WorldSession {
         // Server-sent stone panel (background9 from the formspec prepend): stretch
         // it over the whole backdrop so stations read as VoxeLibre instead of a
         // flat dark rect. Drawn just in front of the dark backdrop; slots/icons
-        // sit in front of it (#244). MVP is a plain stretch, not a true 9-slice.
+        // sit in front of it. MVP is a plain stretch, not a true 9-slice.
         for bg in formspecBackgrounds where bg.fill {
             guard let hi = hudImage(bg.texture) else {
                 // The stone panel texture isn't baked -> panel falls back to the
-                // bare dark backdrop, which reads as a plain grey slab (#254). Log
+                // bare dark backdrop, which reads as a plain grey slab. Log
                 // once per texture so a device capture shows if it's a missing-media
                 // problem vs a look-pass (9-slice) one.
                 // Only a genuinely stuck panel (blacklisted, or bytes never
                 // arrived) is worth flagging -- a first-frame miss that self-heals
                 // once media lands is normal. modelFailed used to keep it stuck
-                // forever until onMediaReady learned to retry (#254).
+                // forever until onMediaReady learned to retry.
                 let names = NodeRegistry.imageNames(bg.texture)
                 let stuck = modelFailed.contains(bg.texture) || !names.allSatisfy { client.media.store[$0] != nil }
                 if stuck, bgMissLogged.insert(bg.texture).inserted {
@@ -5205,27 +5205,27 @@ final class WorldSession {
         }
         // Non-fill background[] art: each at its own rect (brewing bubbles, the
         // trade arrow panel, book/writing backdrops). Drawn in front of the stone
-        // panel but behind slots/icons, like desktop VoxeLibre layers them (#245).
+        // panel but behind slots/icons, like desktop VoxeLibre layers them.
         for bg in invBackgrounds {
             guard let hi = hudImage(bg.texture) else { continue }
             let c = fr.center + fr.right * bg.u + fr.up * bg.v - toward * 0.0036
             appendOverlayQuadUV(center: toOrigin(c), right: oRight, up: oUp, hw: bg.hw, hh: bg.hh,
                                 layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
         }
-        // Static image[] elements (furnace fire gauge + cook arrow, #223). The
+        // Static image[] elements (furnace fire gauge + cook arrow). The
         // texture is a modifier chain (^[lowpart:PCT / ^[transformR270); hudImage
         // composes it (requesting any missing PNG) and the server re-sends the
         // form with a new percent as it burns, so the gauge fills over time.
         // Emitted BEFORE slots and labels: this pass has no depth test, so
         // emission order is draw order, and VoxeLibre puts 27 image[] slot
         // backgrounds ahead of each list[]. Drawing them after the icons hid
-        // every item in the chest form on device (#261).
+        // every item in the chest form on device.
         for im in invImages {
             let c = fr.center + fr.right * im.u + fr.up * im.v - toward * 0.005
             if im.isItem {
                 // item_image[]: draw the item's icon (3D node cube/chest, else its
                 // flat inventory_image) so beacon payment rows / trade hints show
-                // what item is meant (#232).
+                // what item is meant.
                 let sz = min(im.hw, im.hh) * 1.4
                 if im.count > 1, let cl = invCountLayer(im.count) {
                     let cc = c + fr.right * (im.hw * 0.56) - fr.up * (im.hh * 0.56) - toward * 0.008
@@ -5305,14 +5305,14 @@ final class WorldSession {
             let th = cell * 0.30, tw = th * max(0.4, t.aspect)
             // Luanti labels are LEFT-anchored at their x. Centering them pushed a
             // long label (e.g. "Inventory") half its width off the panel's left
-            // edge, so it read as "Inve" (#241). Anchor the left edge at lab.u.
+            // edge, so it read as "Inve". Anchor the left edge at lab.u.
             let lc = fr.center + fr.right * (lab.u + tw * 0.5) + fr.up * lab.v - toward * 0.006
             appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
                        layer: t.layer, tint: lab.color ?? 16777215, v: &v, idx: &idx)
         }
-        // Tappable field/button boxes (#229): a framed plate, brighter when the
+        // Tappable field/button boxes: a framed plate, brighter when the
         // pointer is over it, with the field's current value or the button label.
-        var tipText: (text: String, color: Float?)? = nil   // hover tooltip for the widget under the pointer (#236)
+        var tipText: (text: String, color: Float?)? = nil   // hover tooltip for the widget under the pointer
         for w in invWidgets {
             let over = invCursor.map { c -> Bool in
                 let rel = c - fr.center
@@ -5325,7 +5325,7 @@ final class WorldSession {
                        layer: highlightLayer, tint: over ? Self.packTint(90, 90, 110) : Self.packTint(45, 45, 55), v: &v, idx: &idx)
             // image_button[]: draw its icon texture over the plate (the beacon
             // effect selector uses these; a plain plate showed 8 identical "OK"
-            // buttons) (#233). The plate stays as the hover highlight behind it.
+            // buttons). The plate stays as the hover highlight behind it.
             if let tex = w.button?.texture, !tex.isEmpty {
                 if let hi = hudImage(tex) {
                     let ic = fr.center + fr.right * w.u + fr.up * w.v - toward * 0.007
@@ -5336,7 +5336,7 @@ final class WorldSession {
                 continue
             }
             // item_image_button[]: draw the item's icon on the plate (stonecutter
-            // recipe picker) (#235).
+            // recipe picker).
             if let item = w.button?.itemName, !item.isEmpty {
                 let ic = fr.center + fr.right * w.u + fr.up * w.v - toward * 0.007
                 let s = min(w.hw, w.hh) * 1.4
@@ -5351,7 +5351,7 @@ final class WorldSession {
             }
             // A field shows its value (or a "Name" placeholder); a button shows
             // its label, or NOTHING when the label is empty (tab background /
-            // styled buttons -- the old "OK" fallback spammed the creative tabs) (#237).
+            // styled buttons -- the old "OK" fallback spammed the creative tabs).
             let text: String? = w.field.map { $0.value.isEmpty ? "Name" : $0.value } ?? w.button.map { $0.label }
             let textColor = w.button?.color   // fields render their editable value white
             if let text, !text.isEmpty, let t = formspecLabelLayer(text) {
@@ -5361,7 +5361,7 @@ final class WorldSession {
                            layer: t.layer, tint: textColor ?? 16777215, v: &v, idx: &idx)
             }
         }
-        // Checkboxes (#237): a box (bright fill when checked) + label to the right.
+        // Checkboxes: a box (bright fill when checked) + label to the right.
         for cb in invCheckboxes {
             let checked = checkboxState[cb.name] ?? false
             let bc = fr.center + fr.right * cb.u + fr.up * cb.v - toward * 0.006
@@ -5383,7 +5383,7 @@ final class WorldSession {
         player.setPanelPointer(PlayerState.PanelPointer(
             center: toOrigin(fr.center), right: oRight, up: oUp, toward: toOriginDir(toward),
             dotLayer: highlightLayer, dotHalf: 0.006 * scale, heldLayer: heldIcon, heldHalf: cell * 0.35 * scale))
-        // Hover tooltip for a widget (enchant cost, effect name, #236): a text
+        // Hover tooltip for a widget (enchant cost, effect name): a text
         // plate near the cursor. Single line (the filled renderer), so a
         // multi-line tooltip shows its first, most useful line.
         if let tip = tipText, let cur = invCursor, let t = formspecLabelLayer(tip.text.split(separator: "\n").first.map(String.init) ?? tip.text) {
@@ -5403,15 +5403,15 @@ final class WorldSession {
     }
 
     /// ProcessInfo.systemUptime read once per postEntities (an ObjC singleton
-    /// fetch + message send per spinning entity otherwise, perf #311).
+    /// fetch + message send per spinning entity otherwise).
     private var frameUptime: TimeInterval = 0
     private func postEntities() {
         frameUptime = ProcessInfo.processInfo.systemUptime
         guard atlasBuilt else { return }
-        frameHeadXform = player.headXform()   // one locked read for the whole pass (#250)
+        frameHeadXform = player.headXform()   // one locked read for the whole pass
         // Snapshot the entity list once per tick and reuse it for both the model-
         // texture registration and the draw loop below, instead of filtering
-        // objects.values into a fresh array twice (#185).
+        // objects.values into a fresh array twice.
         let pe0 = perf.now()
         let ents = client.objects.snapshot()
         ensureModelTextures(ents)
@@ -5448,7 +5448,7 @@ final class WorldSession {
         let anyBoneAttached = ents.contains { !$0.attachBone.isEmpty && $0.attachParent != 0 }
         let entIndexById: [Int: Int] = anyBoneAttached
             ? Dictionary(ents.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a }) : [:]
-        var lightCur = WorldMap.BlockCursor()   // shared by the entity + particle light lookups (perf #312)
+        var lightCur = WorldMap.BlockCursor()   // shared by the entity + particle light lookups
         var modelsDrawn = 0
         for var e in ents {
             if e.isPlayer {
@@ -5458,7 +5458,7 @@ final class WorldSession {
                     print("[player] \(e.name) at \(e.pos) visual=\(e.visual) mesh=\(e.mesh)"); fflush(stdout)
                 }
             }
-            // Bone attachment (#282): shields on a player's arm, spider eyes on
+            // Bone attachment: shields on a player's arm, spider eyes on
             // "body.head", the rover's held node. GenericCAO parents the child
             // scene node to the parent's joint node, so the child sits at
             // parent origin + yaw * visual_size/10 * (G_bone(frame) * offset),
@@ -5490,7 +5490,7 @@ final class WorldSession {
                 let g = min(15, e.glow)
                 light = Float((max(base >> 4, g) << 4) | max(base & 0x0F, g))
             }
-            // Hit feedback (#100): tint the whole thing red while its PUNCHED
+            // Hit feedback: tint the whole thing red while its PUNCHED
             // flash timer runs, standing in for the engine's damage-texture
             // overlay. Packed r + g*256 + b*65536; white = no tint.
             // Eric hates creepers: paint them hot pink and hiss (tnt_ignite, the
@@ -5504,7 +5504,7 @@ final class WorldSession {
             // Damage flash colour follows damage_texture_modifier: the engine
             // default ^[brighten is a white wash (mobs), VoxeLibre players get
             // ^[colorize:red:130. The entity shader blends toward a coloured
-            // tint, so near-white-pink reads as "brightened" (#306).
+            // tint, so near-white-pink reads as "brightened".
             // Only compute the flash colour on an actual hit -- the two substring
             // scans of damageTexMod ran for every entity every tick otherwise (perf).
             let tint: Float
@@ -5528,11 +5528,11 @@ final class WorldSession {
                     print("[creeper] hiss near \(e.id)"); fflush(stdout)
                 } else if d > 12 { creepersNear.remove(e.id) }   // hysteresis so it can re-hiss
             }
-            // Nametag (#118), like GenericCAO::updateNametag: only with text and
+            // Nametag, like GenericCAO::updateNametag: only with text and
             // a non-zero alpha, floated above the collision box. Not for us
             // (skipped above). Other players always get a label even when the
             // server set no explicit nametag: desktop shows every player by login
-            // name (#246). Players get a longer range than mobs since seeing who
+            // name. Players get a longer range than mobs since seeing who
             // is where matters more; mob labels past 32 nodes are just clutter.
             let tagText = (e.isPlayer && e.nametag.isEmpty) ? e.name : e.nametag
             let tagRange: Float = e.isPlayer ? 128 : 32
@@ -5556,7 +5556,7 @@ final class WorldSession {
                     continue   // else fall through to a billboard until skins download
                 }
                 // Mesh mob that couldn't draw (skins not resolved) -> white
-                // billboard fallback (#72). One-shot log per name to see which
+                // billboard fallback. One-shot log per name to see which
                 // mobs and textures are missing without spamming.
                 else if !mobMissLogged.contains(e.name) {
                     mobMissLogged.insert(e.name)
@@ -5564,7 +5564,7 @@ final class WorldSession {
                     let resolved = e.textures.filter { modelTexLayer[$0] != nil }.count
                     // For each non-blank spec, show which component PNGs are
                     // present/announced/failed, so a stuck composite skin
-                    // (missing overlay, un-announced file) is diagnosable (#72).
+                    // (missing overlay, un-announced file) is diagnosable.
                     let detail = e.textures.filter { !Self.isBlankSpec($0) }.map { spec -> String in
                         let comps = NodeRegistry.imageNames(spec).map { n in
                             "\(n):\(client.media.store[n] != nil ? "have" : (client.media.announced.contains(n) ? "wait" : "none"))"
@@ -5580,7 +5580,7 @@ final class WorldSession {
             // frames, held items on mobs/players -- draws at Luanti's size
             // (visual_size x 1.5 nodes: a falling node at 0.667 is a full block)
             // without the spin. Bone-attached ones land at the parent's position
-            // plus offset (no bone tracking), which is close enough (#266).
+            // plus offset (no bone tracking), which is close enough.
             if e.visual == "wielditem" || e.visual == "item" {
                 let dropStr = !e.wieldItem.isEmpty ? e.wieldItem : e.textures.first
                 if let itemStr = dropStr, !itemStr.isEmpty, itemStr != "blank.png" {
@@ -5590,7 +5590,7 @@ final class WorldSession {
                     let cardSz: Float = isDrop ? 0.18 : vs * 0.8
                     let modelSz: Float = isDrop ? 0.4 : vs
                     // One line per drop so a "can't see my mined block" report can
-                    // be matched against what we actually emitted for it (#358).
+                    // be matched against what we actually emitted for it.
                     let draw = itemDraw(itemStr)
                     if isDrop, loggedDropIds.insert(e.id).inserted {
                         let path: String
@@ -5600,14 +5600,14 @@ final class WorldSession {
                     switch draw {
                     case .model(let nid, let layer):
                         if let model = nodeMeshModel(for: nid) {
-                            // A mesh-drawtype node (chest etc): its real model (#191).
+                            // A mesh-drawtype node (chest etc): its real model.
                             appendItemModel(model, pos: e.pos, layer: layer,
                                             eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw,
                                             light: light, size: modelSz, v: &mv, idx: &mi)
                         }
                     case .cube(let layers):
                         // A cube node: a small spinning cube like Minecraft for drops,
-                        // a still full-size block for falling sand/gravel (#191 sibling).
+                        // a still full-size block for falling sand/gravel (sibling).
                         appendItemCube(faceLayers: layers, pos: e.pos,
                                        eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
                                        size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
@@ -5623,7 +5623,7 @@ final class WorldSession {
             // "cube" (TNT, end crystal, paintings) and "upright_sprite" (sign
             // text, item-frame maps, old-style players): real geometry at the
             // object origin, scaled by visual_size and turned by yaw, exactly
-            // as GenericCAO::addToScene builds them (#287). Textures go through
+            // as GenericCAO::addToScene builds them. Textures go through
             // the model path so modifier strings (sign glyph [combine) work.
             if e.visual == "cube" || e.visual == "upright_sprite" {
                 let want = e.visual == "cube" ? 6 : 2
@@ -5672,7 +5672,7 @@ final class WorldSession {
         lastModelsDrawn = modelsDrawn
         defer { perf.add("e.rest", pe2, perf.now()) }
         // The pointed node under the gaze: feeds the highlight outline and the
-        // dig crack below. There is deliberately no crosshair (#48): the outline
+        // dig crack below. There is deliberately no crosshair: the outline
         // is the targeting cue, and a reticle at a guessed depth reads badly in
         // stereo.
         let aimOrigin = player.rayOrigin(), aimDir = player.aim()
@@ -5689,11 +5689,11 @@ final class WorldSession {
         // Not gated on HUD_SET_FLAGS healthbar/breathbar: VoxeLibre switches
         // the ENGINE bars off at join (flags 111101001) because it draws its
         // own via HUDADD statbars, and these vitals stand in for those. Only
-        // wielditem/hotbar (postHandHud) follow the flags (#290).
+        // wielditem/hotbar (postHandHud) follow the flags.
         appendHealthHUD(origin: .zero, gaze: hudGaze, into: &hud)
         appendHungerHUD(origin: .zero, gaze: hudGaze, into: &hud)
         appendBreathHUD(origin: .zero, gaze: hudGaze, into: &hud)
-        // Armor moved to a left-wrist gauntlet (#108, postHandHud/buildHandHud),
+        // Armor moved to a left-wrist gauntlet (postHandHud/buildHandHud),
         // so it no longer draws as a peripheral column here.
         appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud)
         appendOffhandHUD(origin: .zero, gaze: hudGaze, into: &hud)
@@ -5706,21 +5706,21 @@ final class WorldSession {
             let p = particles[i]
             // Particle size is constant over its life unless the texture carries
             // a scale tween (Particle::updateVertices); the old shrink-to-zero
-            // made every smoke puff collapse instead of just vanishing (#308).
+            // made every smoke puff collapse instead of just vanishing.
             let k = max(0, min(1, p.age / (p.life + 0.1)))
             let sz = p.size * (p.scaleStart + (p.scaleEnd - p.scaleStart) * k)
             let pn = SIMD3(Int(floor(p.pos.x)), Int(floor(p.pos.y)), Int(floor(p.pos.z)))
             // Re-resolve the layer every frame from the texture name: the atlas
             // rebuilds during streaming and remaps layer indices, so a cached
-            // index would point at whatever tile now sits there (#201/#202).
+            // index would point at whatever tile now sits there.
             // Fall back to the neutral marker (white), NEVER the spawn-time index:
             // if the texture isn't in the current atlas (evicted by a rebuild),
             // that stale index points at whatever took its slot -- that's how snow
-            // turned into falling dirt on device (#256). A white blob is fine.
+            // turned into falling dirt on device. A white blob is fine.
             // Layers are resolved by texture key once per atlas generation and
             // cached on the particle (the atlas is append-only, #atlas-append-only,
             // so an index only moves on a rebuild, which bumps atlasGeneration);
-            // that was 1-2 String hashes per particle per tick (perf #312).
+            // that was 1-2 String hashes per particle per tick.
             if p.layerGen != atlasGeneration { resolveParticleLayers(i) }
             let layer = p.frameLayers.isEmpty || p.frameLen <= 0
                 ? p.layer
@@ -5760,7 +5760,7 @@ final class WorldSession {
         appendXpLevel(v: &ov, idx: &oi)
         appendOffhandExtras(v: &ov, idx: &oi)
         appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
-        // Entity nametags (#118): overlay (no depth, like the engine's
+        // Entity nametags: overlay (no depth, like the engine's
         // screen-space nametags), camera-facing, in origin space with the same
         // Z mirror the world gets.
         var tags = nametagJobs
@@ -5803,7 +5803,7 @@ final class WorldSession {
         for b in billboards { if b.headLocal { hudB.append(b) } else { worldB.append(b) } }
         entityHandoff.post(world: worldB, hud: hudB)
         postHandHud()
-        lastModelVerts = mv.count; lastModelIdx = mi.count   // seed next tick's reserve (#162)
+        lastModelVerts = mv.count; lastModelIdx = mi.count   // seed next tick's reserve
         lastOverlayVerts = ov.count; lastOverlayIdx = oi.count
         lastBlendVerts = bv.count; lastBlendIdx = bi.count
         modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi)
@@ -5827,7 +5827,7 @@ final class WorldSession {
         modelDebugTimer += 1
         if modelDebugTimer % 900 == 0 {   // ~15 s: every 2 s was 840 lines a session
             // Reuse the `ents` snapshot from the top of postEntities (two more
-            // full snapshots here were ~240 Entity copies every 2 s, perf #311).
+            // full snapshots here were ~240 Entity copies every 2 s).
             let live = Set(ents.map { $0.id })
             skinCache = skinCache.filter { live.contains($0.key) }
             let mob = ents.filter { $0.visual == "mesh" && !$0.isPlayer }
@@ -5835,14 +5835,14 @@ final class WorldSession {
             let withLayer = near.filter { ($0.textures.first).map { modelTexLayer[$0] != nil } ?? false }
             let nearest = mob.map { simd_distance($0.pos, s.feet) }.min() ?? -1
             print("[model] ents=\(ents.count) mob=\(mob.count) near=\(near.count) withLayer=\(withLayer.count) nearest=\(Int(nearest)) skins=\(modelTexCount) verts=\(mv.count/9)"); fflush(stdout)
-            // Vertical-placement probe for the sunk-mob bug (#67): the nearest
+            // Vertical-placement probe for the sunk-mob bug: the nearest
             // mob's pos.y, collision box, and the ground under it. If pos.y sits
             // at/above the ground, the model draws from pos.y up, so a sink means
             // the model's own feet are below its origin.
             if let m = near.min(by: { simd_distance($0.pos, s.feet) < simd_distance($1.pos, s.feet) }) {
                 let gy = groundHeight(x: Int(floor(m.pos.x)), z: Int(floor(m.pos.z)), near: Int(floor(m.pos.y)))
                 print("[mobY] \(m.name) mesh=\(m.mesh) pos.y=\(m.pos.y) cbMin.y=\(m.cbMin.y) cbMax.y=\(m.cbMax.y) feetY=\(m.pos.y + m.cbMin.y) ground=\(gy.map { String($0) } ?? "nil")"); fflush(stdout)
-                // Facing check (#67): the mesh (front +Z) points at world
+                // Facing check: the mesh (front +Z) points at world
                 // (-sin yaw, cos yaw). Compare to the direction to the player; a
                 // hostile mob that faces you should have these roughly aligned.
                 let faceDeg = m.yaw * 180 / .pi
@@ -5853,9 +5853,9 @@ final class WorldSession {
         }
     }
     private var modelDebugTimer = 0
-    private var doorDebugDone = false   // one-shot door drawtype/model probe (#71)
+    private var doorDebugDone = false   // one-shot door drawtype/model probe
     private var mobMissLogged: Set<String> = []
-    private var modelDropLogged: Set<String> = []   // mobs that fell back to a white billboard (#72)
+    private var modelDropLogged: Set<String> = []   // mobs that fell back to a white billboard
 
     /// Where the offhand item sits in the vitals band: on the XP level's row
     /// (-0.22, above the XP bar at -0.28), just right of the digits at az 0,
@@ -5948,7 +5948,7 @@ final class WorldSession {
         }
     }
 
-    /// XP bar (#107): a thin track along the bottom-centre of the peripheral
+    /// XP bar: a thin track along the bottom-centre of the peripheral
     /// HUD (where the desktop bar sits) with the green fill growing from the
     /// left. Only once there is any XP, like VoxeLibre's own HUD. The level
     /// digits are drawn in the overlay stream (appendXpLevel) since text lives
@@ -5962,7 +5962,7 @@ final class WorldSession {
         // A flat row across the bottom of view at the same elevation as the
         // hearts / hunger rows. It used to bow (+0.35 rad/rad^2, the ends 1.5
         // degrees above the centre) and read as bent next to the level rows
-        // (Eric, #313). Segments are camera-facing billboards along the row;
+        // (Eric). Segments are camera-facing billboards along the row;
         // the green fill covers the left `fraction` of them, with the
         // straddling segment filled partway.
         let n = 12
@@ -6107,11 +6107,11 @@ final class WorldSession {
     /// mob-skin path — don't blacklist a not-yet-downloaded model).
     /// The parsed b3d/obj model for one mesh-drawtype node, if its media has
     /// downloaded and parsed. Shares nodeModelCache with the world mesher so the
-    /// wield reuses whatever the terrain already loaded (#190).
+    /// wield reuses whatever the terrain already loaded.
     private var meshBoundsCache: [UInt16: (lo: SIMD3<Float>, hi: SIMD3<Float>)] = [:]
     /// A mesh-drawtype node model's AABB in our [g, g+1] node space (0..1), cached
     /// per content id. Used to aim/highlight a small mesh node by its model rather
-    /// than a full cube when the server sent no selection box (#192). Facedir is
+    /// than a full cube when the server sent no selection box. Facedir is
     /// ignored (these nodes are rarely rotated; the bounds are a close fallback).
     private func meshNodeBounds(_ id: UInt16) -> (lo: SIMD3<Float>, hi: SIMD3<Float>)? {
         if let c = meshBoundsCache[id] { return c }
@@ -6163,8 +6163,8 @@ final class WorldSession {
     /// Parse+cache a model from the media store (nil cached as failed).
     #if targetEnvironment(simulator)
     /// Sim aid (-vrdev.spawnMob 1): drop a cow a few nodes in front of the fake
-    /// camera so mob rendering, the model's ground placement (#67), a head-swivel
-    /// bone override (#124) and a nametag (#118) can be eyeballed headlessly.
+    /// camera so mob rendering, the model's ground placement, a head-swivel
+    /// bone override and a nametag can be eyeballed headlessly.
     /// Built as a real REMOVE_ADD + AO message so it runs the actual parse path;
     /// the poll loop downloads the .b3d and skin once the entity references them.
     /// One test mob: its Lua mesh, its textures array (brush order matters), the
@@ -6174,9 +6174,9 @@ final class WorldSession {
         var walk: SIMD2<Float>? = nil     // animation frame range, if any
         var headSwivel = false
         var yaw: Float = 180              // server yaw deg; 180 faces the camera
-        var pitch: Float = 0             // server pitch deg; non-zero tilts the model (arrows, #128)
-        var size = SIMD3<Float>(1, 1, 1)  // visual_size as the mob's Lua sends it (#286)
-        var visual = "mesh"               // "cube" / "upright_sprite" exercise the non-mesh visuals (#287)
+        var pitch: Float = 0             // server pitch deg; non-zero tilts the model (arrows)
+        var size = SIMD3<Float>(1, 1, 1)  // visual_size as the mob's Lua sends it
+        var visual = "mesh"               // "cube" / "upright_sprite" exercise the non-mesh visuals
     }
 
     private func spawnSimMob() {
@@ -6187,19 +6187,19 @@ final class WorldSession {
         let bs: Float = 10, shift: Float = 0.5
 
         // A spread of texture-tricky mobs so one screenshot surfaces any that
-        // render blank/white (#72): multi-surface skeletons/zombies (some
+        // render blank/white: multi-surface skeletons/zombies (some
         // surfaces map to blank/empty and must be dropped, not painted white),
-        // the witch (single skin), the cow (walk + head-swivel, #82/#124).
+        // the witch (single skin), the cow (walk + head-swivel).
         let mobs: [SimMobSpec] = [
             SimMobSpec(name: "Bessie", mesh: "mobs_mc_cow.b3d",
                        textures: ["mobs_mc_cow.png", "blank.png"], cbMaxY: 1.39,
                        walk: SIMD2(0, 40), headSwivel: true),
             // Distinct yaws so one screenshot shows facing from every side and a
-            // mirror bug (yaw 90 and 270 looking identical) would jump out (#91).
+            // mirror bug (yaw 90 and 270 looking identical) would jump out.
             SimMobSpec(name: "Skeleton", mesh: "mobs_mc_skeleton.b3d",
                        textures: ["mcl_bows_bow_0.png", "mobs_mc_skeleton.png"], cbMaxY: 1.98, yaw: 0),
             // The horse skin is a base^markings composite (horse.lua) — the
-            // #72-flagged case where an overlaid texture must resolve on the
+            // The case where an overlaid texture must resolve on the
             // model path, not render blank. Centred in the row so it is easy to
             // read headlessly.
             SimMobSpec(name: "Horse", mesh: "mobs_mc_horse.b3d",
@@ -6210,7 +6210,7 @@ final class WorldSession {
                        textures: ["mobs_mc_empty.png", "mobs_mc_zombie.png"], cbMaxY: 1.89, yaw: 90),
             SimMobSpec(name: "Witch", mesh: "vl_witch.b3d",
                        textures: ["vl_witch.png"], cbMaxY: 1.94, yaw: 270, size: SIMD3(2.2, 2.2, 2.2)),
-            // A pitched arrow (#128): its shaft should tilt off horizontal. The
+            // A pitched arrow: its shaft should tilt off horizontal. The
             // mobs above all have pitch 0, so they must look identical with this.
             SimMobSpec(name: "Arrow", mesh: "mcl_bows_arrow.obj",
                        textures: ["mcl_bows_arrow.png"], cbMaxY: 0.125, yaw: 180, pitch: 40, size: SIMD3(-1, 1, 1)),
@@ -6239,7 +6239,7 @@ final class WorldSession {
             // Line them up 4 nodes ahead, 1.5 nodes apart across the view.
             let off = Float(i) - Float(mobs.count - 1) / 2
             // +1.2 lifts the lineup to near eye level of the floating player so the
-            // sim's default (level) camera frames it without a pitch flag (#91).
+            // sim's default (level) camera frames it without a pitch flag.
             let target = SIMD3<Float>(feet.x + bf.x * 4 + right.x * off * 1.5, feet.y + 1.2,
                                       feet.z + bf.z * 4 + right.z * off * 1.5)
             let props = PacketWriter()
@@ -6261,7 +6261,7 @@ final class WorldSession {
             let initData = PacketWriter()
             initData.u8(1).string16("sim:\(m.name)").u8(0).u16(id)
             v3(initData, (target - shift) * bs)        // position (server grid units)
-            v3(initData, SIMD3(0, m.yaw, m.pitch))     // rotation deg (facing #91; the arc tilt rides rotation.z like vl_projectile, #305)
+            v3(initData, SIMD3(0, m.yaw, m.pitch))     // rotation deg (the arc tilt rides rotation.z like vl_projectile)
             initData.u16(20).u8(1).bytes32(props.data) // hp, one initial message
             let add = PacketWriter()
             add.u16(0).u16(1).u16(id).u8(0).bytes32(initData.data)
@@ -6280,9 +6280,9 @@ final class WorldSession {
             }
         }
         // Item visuals (wielditem): a dropped node (dirt) and tool (pick) check
-        // the node-cube fallback (#129) and the inventory-image path; a falling
+        // the node-cube fallback and the inventory-image path; a falling
         // gravel node (__builtin:falling_node, visual_size 0.667 = one full
-        // block, no spin) checks the non-drop item entities (#266).
+        // block, no spin) checks the non-drop item entities.
         let drops: [(item: String, name: String, size: Float)] = [
             ("mcl_core:dirt", "__builtin:item", 0.4), ("mcl_tools:pick_diamond", "__builtin:item", 0.4),
             ("mcl_core:gravel", "__builtin:falling_node", 0.667)]
@@ -6312,7 +6312,7 @@ final class WorldSession {
             initData.u16(1).u8(1).bytes32(props.data)
             client.objects.handleRemoveAdd(PacketWriter().u16(0).u16(1).u16(id).u8(0).bytes32(initData.data).data)
         }
-        // Bone attachment (#282): hang the pick off the zombie's right arm the
+        // Bone attachment: hang the pick off the zombie's right arm the
         // way vl_held_item / mcl_shields do (ATTACH_TO with a bone name). A
         // zero offset should put it exactly on the shoulder joint (checked:
         // it does); real mods add an offset in the bone's own frame.
@@ -6328,7 +6328,7 @@ final class WorldSession {
     /// Sim aid (-vrdev.spawnBed 1): lay a row of beds (each is two mesh nodes,
     /// foot + head) on a stone floor in front of the fake camera, one per
     /// horizontal facedir 0..3, so bed mesh geometry, the foot/head seam and the
-    /// 64x64 UV-sheet texture can be eyeballed headless (#131). Writes real nodes
+    /// 64x64 UV-sheet texture can be eyeballed headless. Writes real nodes
     /// into the local world copy and forces a remesh.
     private func spawnSimBed() {
         let feet = player.snapshot().feet
@@ -6380,7 +6380,7 @@ final class WorldSession {
 
     /// Sim aid (-vrdev.spawnGlass 1): a 3x3 wall of red stained glass a few nodes
     /// ahead with a stone wall right behind it and a cleared tunnel between, so
-    /// translucent glass (#143/#144) is checkable headless -- you should see the
+    /// translucent glass is checkable headless -- you should see the
     /// stone tinted red THROUGH the glass, not a holey or opaque pane.
     private func spawnSimGlass() {
         let feet = player.snapshot().feet
@@ -6427,7 +6427,7 @@ final class WorldSession {
 
     /// Sim aid (-vrdev.spawnRails 1): lay a straight run, an L-corner, a T and a
     /// cross of rails on a stone floor in a carved pit, so the raillike
-    /// connection tiles + rotation (#140) can be eyeballed from above
+    /// connection tiles + rotation can be eyeballed from above
     /// (-vrdev.down 85). A corner should curve toward BOTH its neighbours; if
     /// the curve bends the wrong way it's the Z-mirror flip to fix in railGeom.
     private func spawnSimRails() {
@@ -6459,7 +6459,7 @@ final class WorldSession {
     }
 
     /// Sim aid (-vrdev.rideTest 1): place a vehicle AO a few nodes ahead and UP,
-    /// then attach the local player to it, so riding (#139) can be verified
+    /// then attach the local player to it, so riding can be verified
     /// headless -- the camera should snap up onto the vehicle instead of staying
     /// on the ground.
     private func spawnSimRide() {
@@ -6499,7 +6499,7 @@ final class WorldSession {
     /// The model-array texture spec for a dropped item (visual "wielditem"):
     /// the item's inventory_image, or, when that is empty (nodes rely on a
     /// generated cube icon), the node's top-face tile so dropped dirt/stone
-    /// aren't invisible (#129). Same spec is baked and looked up, so they agree.
+    /// aren't invisible. Same spec is baked and looked up, so they agree.
     private var wieldSilCache: [String: B3DLoader.Mesh] = [:]
     /// The wielded item's icon extruded into a 3D silhouette (desktop wieldmesh
     /// look), cached per icon tile. nil when the tile has no pixels, or is a solid
@@ -6522,7 +6522,7 @@ final class WorldSession {
     /// array, so node faces must be the upscaled model-layer copies
     /// (iconLayerForTile, like the 3D inventory icons), not node-atlas indices:
     /// an atlas index in this stream picks an unrelated skin/icon layer or falls
-    /// off the end, and the drop draws as nothing (#358). Unresolved items
+    /// off the end, and the drop draws as nothing. Unresolved items
     /// aren't cached, so they pick up their layer once the texture lands.
     private func itemDraw(_ itemStr: String) -> ItemDraw? {
         if let d = itemDrawCache[itemStr] { return d }
@@ -6560,7 +6560,7 @@ final class WorldSession {
     #if targetEnvironment(simulator)
     /// Sim aid (-vrdev.realHud 1): feed the REAL server HUDADD packets for the
     /// armor statbar and the XP level, through the actual parse path (not the
-    /// -vrdev.fakeHud struct stub), so armor (#108) and XP (#107) can be
+    /// -vrdev.fakeHud struct stub), so armor and XP can be
     /// reproduced headlessly the way they arrive on device.
     private func simulateServerHud() {
         // TOCLIENT_HUDADD layout (Client.handleHudAdd): u32 id, u8 type, 2xf32
@@ -6669,7 +6669,7 @@ final class WorldSession {
             changed = true
         }
         // Skip the entity texture scan unless a new texture appeared or media
-        // just landed (#251): resolved specs return instantly and pending ones
+        // just landed: resolved specs return instantly and pending ones
         // only progress on media arrival, so a steady state re-parsed skins for
         // nothing every tick.
         let tilesCount = client.objects.tiles.count
@@ -6696,7 +6696,7 @@ final class WorldSession {
         // (device memory pressure). Without the second check the count "latched":
         // the renderer's array stayed small, patches to the missing high indices
         // were dropped, and the newest layers (inventory icons) sampled out of
-        // range -> discarded -> empty slots on device only (#254).
+        // range -> discarded -> empty slots on device only.
         let needFull = modelTexCount != modelTexPostedCount
                     || modelTextureHandoff.builtCount < modelTexPostedCount
         if changed || needFull {
@@ -6745,7 +6745,7 @@ final class WorldSession {
             let base = surf.brush >= 0 && surf.brush < e.textures.count
                      ? e.textures[surf.brush] : (e.textures.first ?? "")
             if Self.isBlankSpec(base) { continue }
-            // Append the live texture-mod (burning/damage/status colorize, #228).
+            // Append the live texture-mod (burning/damage/status colorize).
             // Compose the modified layer on demand; until it's ready, draw the
             // base so the mob never vanishes waiting for the overlay.
             var spec = base
@@ -6788,7 +6788,7 @@ final class WorldSession {
         // 6.6 = 0.66 (box 0.69), the chest lid entity spans -5..3.7 = the node
         // it sits in, the rover is 2.4 units at visual_size 10. The old
         // collisionbox height-fit got mobs roughly right but made the ghast
-        // (visual_size 8) and dragon (3) a fraction of their size (#286).
+        // (visual_size 8) and dragon (3) a fraction of their size.
         // A negative axis mirrors, sign included, exactly as setScale does
         // (the arrow OBJ has its shaft along +X with visual_size.x = -1).
         let vsz = e.size.z != 0 ? e.size.z : e.size.x
@@ -6796,7 +6796,7 @@ final class WorldSession {
         // Animated model: skin the bind positions at the entity's current frame.
         // Bounds/fit above stay on the bind pose so the size doesn't breathe.
         // Skin once per entity per distinct frame: a chest parked on its last
-        // frame or a mob between server ticks reuses the previous result (#86).
+        // frame or a mob between server ticks reuses the previous result.
         let positions: [SIMD3<Float>]
         if !mesh.joints.isEmpty, (mesh.isAnimated && e.animRange != nil) || !e.boneOverrides.isEmpty {
             // Frame quantisation is a distance LOD (perf review #5): up close,
@@ -6812,7 +6812,7 @@ final class WorldSession {
             // Bone overrides (head swivel) are part of the pose, so they key
             // the cache too; quantised so a settled head hits the cache.
             // Hash straight off the entity's override table (no mapValues copy,
-            // no sorted array per tick, perf #311). Its iteration order is
+            // no sorted array per tick). Its iteration order is
             // stable for the same storage; a reorder only costs one cache
             // miss (a re-skin), never a wrong pose. The converted overrides are
             // only built on a miss.
@@ -6849,7 +6849,7 @@ final class WorldSession {
         let op = SIMD3<Float>(rx * cosY - rz * sinY, ry, rx * sinY + rz * cosY)   // origin in origin space
         // Model orientation must turn with the world: positions go through
         // R(-playerYaw), so the model's own R(-e.yaw) composes to R(-(e.yaw + playerYaw)).
-        // automatic_rotate spins the model at a constant rad/s (spawner dolls) (#231).
+        // automatic_rotate spins the model at a constant rad/s (spawner dolls).
         let autoSpin = e.automaticRotate != 0
             ? e.automaticRotate * Float(frameUptime.truncatingRemainder(dividingBy: 3600))
             : 0
@@ -6857,7 +6857,7 @@ final class WorldSession {
         let ca = cos(a), sa = sin(a)
         // Roll (rotation.z): a flying arrow's shaft (its long axis, +X in the
         // model) tips along its arc; vl_projectile writes the flight pitch into
-        // rotation.z for exactly that reason (#305). Applied as a pre-rotation
+        // rotation.z for exactly that reason. Applied as a pre-rotation
         // in the model-local X-Y plane before yaw, so it is identity when 0 --
         // mobs (which never roll) are unchanged. Pitch (rotation.x) tilts in
         // the Y-Z plane (boats bobbing); both are zero for nearly everything.
@@ -6883,7 +6883,7 @@ final class WorldSession {
                     let wx = lx * ca - lz * sa, wz = lx * sa + lz * ca
                     let t = mesh.uvs[ik]
                     // Element-wise appends: an array literal here allocated a
-                    // throwaway [Float] per vertex, thousands/frame across mobs (#247).
+                    // throwaway [Float] per vertex, thousands/frame across mobs.
                     v.append(op.x + wx * scale); v.append(op.y + ly * scale); v.append(-(op.z + wz * scale))
                     v.append(t.x * uv.x); v.append(t.y * uv.y); v.append(Float(d.layer))
                     v.append(1.0); v.append(light); v.append(tint)
@@ -6932,13 +6932,13 @@ final class WorldSession {
     /// Z-mirrored, geometry rotates by R(-(spin+playerYaw))) so it stays
     /// world-locked as you turn, plus a gentle spin like a Minecraft drop.
     /// Textured with the node's single face-0 layer; model coords are node-local
-    /// ~[-0.5,0.5], fit into a small drop cube (#191). Scale/height are a starting
+    /// ~[-0.5,0.5], fit into a small drop cube. Scale/height are a starting
     /// point to tune on device.
     /// A dropped cube node (dirt, stone, ...) drawn as a small 3D cube instead of
     /// a flat card, like a Minecraft dropped block. Same origin-space transform as
     /// Unit cube corners per face in the +Y,-Y,+X,-X,+Z,-Z order NodeRegistry
     /// uses; scaled by the half-extents at emit time. Hoisted so a dropped block
-    /// or cube entity doesn't build seven arrays per tick (perf #311).
+    /// or cube entity doesn't build seven arrays per tick.
     private static let unitQuad: [SIMD2<Float>] = [SIMD2(-1, -1), SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)]   // bl, br, tr, tl
     private static let unitCubeFaces: [[SIMD3<Float>]] = [
         [SIMD3(-1, 1, -1), SIMD3(-1, 1, 1), SIMD3(1, 1, 1), SIMD3(1, 1, -1)],       // +Y
@@ -6950,7 +6950,7 @@ final class WorldSession {
     ]
 
     /// appendItemModel (world-locked + gentle spin); per-face node-atlas layers in
-    /// the +Y,-Y,+X,-X,+Z,-Z order NodeRegistry uses (#191).
+    /// the +Y,-Y,+X,-X,+Z,-Z order NodeRegistry uses.
     private func appendItemCube(faceLayers: [Int], pos: SIMD3<Float>,
                                 eye: SIMD3<Float>, cosY: Float, sinY: Float, playerYaw: Float,
                                 light: Float, size sz: Float = 0.22, spin: Bool = true,
@@ -7226,7 +7226,7 @@ final class WorldSession {
         return (px, Float(w / h), rows.count, Float(lineH / capH))
     }
 
-    /// Word-wrapped multi-line text at a CONSTANT glyph height, for chat (#157):
+    /// Word-wrapped multi-line text at a CONSTANT glyph height, for chat:
     /// a single long line rendered to fit the band width came out tiny, so wrap
     /// it to `cols`-ish characters per line instead. Like renderTextFilled, the
     /// wrapped block is stretched to fill the square canvas and the caller
@@ -7324,7 +7324,7 @@ final class WorldSession {
         // it only redraws when dirty, so without this a reopened bug note kept
         // SHOWING the previous note's text even though keyboardBuffer was "" (Eric,
         // "still shows previous text"). The submit was already correct; only
-        // the on-screen field lagged. (#332)
+        // the on-screen field lagged.
         kbBufferDirty = true
         layoutKeyboard()
         let eye = player.rayOrigin()
@@ -7339,7 +7339,7 @@ final class WorldSession {
         // The trigger/button that just picked "Bug note"/"Chat" in the Kogane menu
         // is still held this frame; seed the edge-trackers as pressed so the
         // keyboard doesn't read that same hold as a key click or a cancel and
-        // slam shut immediately (#238: it opened and closed in one frame).
+        // slam shut immediately (it opened and closed in one frame).
         kbPrevPress = true; kbPrevCancel = true
         print("[kbd] open"); fflush(stdout)
     }
@@ -7415,7 +7415,7 @@ final class WorldSession {
         kbPrevPress = pressHeld
         // Right O, the Menu button, or Esc cancels without submitting -- but only on a FRESH
         // press: edge-detect it so the menu/inventory button still held from
-        // opening the keyboard doesn't cancel it on frame one (#238).
+        // opening the keyboard doesn't cancel it on frame one.
         let cancelHeld = gi.inventory || gi.cancel
         let cancel = cancelHeld && !kbPrevCancel
         kbPrevCancel = cancelHeld
@@ -7447,7 +7447,7 @@ final class WorldSession {
         // The overlay buffer is ORIGIN space (eye at 0, yaw-rotated, Z-mirrored),
         // like the inventory panel. keyboardFrame is in node/world space, so every
         // point must be transformed or the board lands offset by the whole eye
-        // position and never shows (#253). Same toOrigin/toOriginDir as the panel.
+        // position and never shows. Same toOrigin/toOriginDir as the panel.
         let scale = PlayerState.scale
         func toOrigin(_ p: SIMD3<Float>) -> SIMD3<Float> {
             let rx = (p.x - eye.x) * scale, ry = (p.y - eye.y) * scale, rz = (p.z - eye.z) * scale
@@ -7550,7 +7550,7 @@ final class WorldSession {
         }
         let slot = chatNext % Self.chatSlots
         chatNext += 1
-        // Render wrapped at a CONSTANT glyph height (#157): the old square-canvas
+        // Render wrapped at a CONSTANT glyph height: the old square-canvas
         // renderer shrank a long line to fit, so it came out microscopic next to
         // a short one. renderWrappedFilled word-wraps to ~28 cols and returns the
         // block aspect + line count; appendChat sizes the quad from those so all
@@ -7570,7 +7570,7 @@ final class WorldSession {
     /// silent frozen world.
     private func appendStatusBanner(v: inout [Float], idx: inout [UInt32]) {
         // Crisp filled renderer, not renderTextRGBA at a small fontFrac -- the
-        // load/connect banner was the last blurry text path (#175).
+        // load/connect banner was the last blurry text path.
         if noticeText != nil, noticeExpiry > 0, ProcessInfo.processInfo.systemUptime > noticeExpiry {
             noticeText = nil; noticeExpiry = 0
         }
@@ -7629,8 +7629,8 @@ final class WorldSession {
             let fade = age > life - 1 ? Float(max(0, life - age)) : 1
             // Constant per-line glyph height: a message's quad height scales with
             // its wrapped line count, width with its aspect. Long lines wrap to
-            // more rows instead of shrinking, so all chat text reads the same size
-            // (#157). Cap the width at the band; only then shrink height.
+            // more rows instead of shrinking, so all chat text reads the same size.
+            // Cap the width at the band; only then shrink height.
             let perLine: Float = 0.030     // slightly smaller glyphs; ~1deg cap height at the 1.7 m plane (Eric)
             let hMax: Float = 0.44
             var th = perLine * Float(max(1, chatRing[slot].lines))
@@ -7767,7 +7767,7 @@ final class WorldSession {
     /// Register an RGBA image as a new model-texture layer; returns its index.
     private func registerRGBALayer(_ name: String, _ px: [UInt8]) -> Int {
         // Reuse a layer freed by releasePanelIconLayers first: the pixels go up
-        // as an in-place patch, no array growth, no full re-upload (#296).
+        // as an in-place patch, no array growth, no full re-upload.
         if let i = freeModelLayers.popLast() {
             modelTexLayer[name] = i; modelTexUV[name] = SIMD2(1, 1)
             modelTexNames[i] = name; modelTexData[i] = px
@@ -7964,7 +7964,7 @@ final class WorldSession {
         // node= particles (falling-block landing dust, mob landing puffs) draw
         // a tile of that node instead of a texture string:
         // ParticleManager::getNodeParticleParams picks a random face unless
-        // node_tile names one. These used to be dropped entirely (#307).
+        // node_tile names one. These used to be dropped entirely.
         // Only when node= was set: the engine tests != CONTENT_IGNORE
         // (particles.cpp). Treating the unset 127 as a node dropped every
         // weather flake and raindrop, since IGNORE has no tiles.
@@ -8033,7 +8033,7 @@ final class WorldSession {
         // Luanti size -> node-space: the engine's own 1/BS. (The 0.06 "VR
         // scale-down" that lived here was compensating for the spawner
         // positions being parsed at a tenth of their real distance, which is
-        // what actually put rain in your face, #199.) Cap so a bad server value
+        // what actually put rain in your face.) Cap so a bad server value
         // can't fill the view.
         let sz = max(0.05, min(1.0, size * 0.1))
         let texKey = atlas.tileLayer(texture) != nil ? texture : base
@@ -8067,7 +8067,7 @@ final class WorldSession {
     /// Re-resolve a particle's atlas layer(s) from its texture keys; called
     /// when its cached generation is behind the atlas. Falls back to the still
     /// texture, then the neutral marker (never a stale index: that's how snow
-    /// once turned into falling dirt, #256).
+    /// once turned into falling dirt).
     private func resolveParticleLayers(_ i: Int) {
         let base = atlas.tileLayer(particles[i].tex) ?? atlas.markerLayer
         particles[i].layer = Int32(base)
@@ -8079,7 +8079,7 @@ final class WorldSession {
 
     /// Animated-particle frame keys, memoised on (texture, animation params):
     /// deriving them cost a PNG header parse and N interpolated Strings per
-    /// spawned particle, and torch/campfire smoke spawns continuously (perf #312).
+    /// spawned particle, and torch/campfire smoke spawns continuously.
     private var particleFrameMemo: [String: (keys: [String], len: Float)] = [:]
 
     /// Age the break particles: integrate gravity + velocity and drop the dead.
@@ -8211,7 +8211,7 @@ final class WorldSession {
             // and keeps sliding on the others; with collision_removal it's gone;
             // with bounce the largest velocity component reflects. Weather flakes
             // spawn 20+ nodes overhead, so underground they start inside rock
-            // and die on their first step, which keeps caves free of snow (#275).
+            // and die on their first step, which keeps caves free of snow.
             if particles[i].collide {
                 // Swept: rain moves ~2 nodes per tick, so test the path in
                 // half-node steps or it tunnels through a one-thick roof.
@@ -8296,8 +8296,8 @@ final class WorldSession {
 
     // MARK: - Luanti-style collision (player AABB vs walkable node boxes)
 
-    // Local player collisionbox / stepheight, from our own AO's ObjectProperties
-    // (#272). VoxeLibre swaps them per state: normal +-0.312 x 1.8, swimming
+    // Local player collisionbox / stepheight, from our own AO's ObjectProperties.
+    // VoxeLibre swaps them per state: normal +-0.312 x 1.8, swimming
     // 0.8 tall (so you fit through a one-node water gap). These start at the
     // engine's defaults and follow SET_PROPERTIES.
     private var playerHW: Float = 0.3               // Luanti player collisionbox +-0.3
@@ -8356,7 +8356,7 @@ final class WorldSession {
     /// Max movement resistance among nodes the player box overlaps (water 1,
     /// lava 7, cobweb 14; 0 for normal nodes). Speed is divided by (1+this), so
     /// cobwebs nearly stop you and lava wades like molasses, from the server's
-    /// move_resistance/liquid_viscosity rather than the drawtype (#211).
+    /// move_resistance/liquid_viscosity rather than the drawtype.
     private func overlapResistance(feet: SIMD3<Float>) -> Int {
         let hw = playerHW, h = playerHeight
         var best = 0
@@ -8372,7 +8372,7 @@ final class WorldSession {
     }
 
     /// True if the player's collision box overlaps any climbable node (ladder,
-    /// vine): drives ascend/descend and fall-arrest in the land physics (#209).
+    /// vine): drives ascend/descend and fall-arrest in the land physics.
     private func overlapsClimbable(feet: SIMD3<Float>) -> Bool {
         // Luanti (localplayer.cpp) samples the player's CENTRE COLUMN at two
         // heights -- just below the feet (position - 0.2*BS) and mid-body
@@ -8382,7 +8382,7 @@ final class WorldSession {
         // falls when merely brushing a ladder wall edge, and overshot the top by
         // ~1.7 m before gravity resumed. Centre-column matches the engine. The
         // below-feet probe still hands you onto a ladder shaft through an open
-        // trapdoor across the node boundary (#243/#209).
+        // trapdoor across the node boundary.
         let cx = Int(floor(feet.x)), cz = Int(floor(feet.z))
         var cur = WorldMap.BlockCursor()
         for y in [Int(floor(feet.y - 0.2)), Int(floor(feet.y + 0.5))] {
@@ -8393,7 +8393,7 @@ final class WorldSession {
 
     /// True if the player's whole body box sits in a climbable node's column.
     /// Wider than overlapsClimbable's centre-column point samples: it catches a
-    /// ladder whose lowest rung is a node above the feet (the igloo shaft, #331),
+    /// ladder whose lowest rung is a node above the feet (the igloo shaft),
     /// where the +0.5 sample falls just short. Only consulted while JUMP is held
     /// so it can't cause the passive "hover under an overhead ladder" the point
     /// samples were narrowed to avoid -- you must actively press up to grab on.
@@ -8402,8 +8402,8 @@ final class WorldSession {
         // pressed against (its thin plate can leave your centre a hair short of
         // its column) still counts, and UP one node -- pressing jump anticipates
         // the rise, letting you catch a ladder whose lowest rung sits a node
-        // above your head (the igloo shaft base plugs the rungs above the floor,
-        // #331). Still jump-gated, so it never grabs passively.
+        // above your head (the igloo shaft base plugs the rungs above the floor).
+        // Still jump-gated, so it never grabs passively.
         let box = playerBox(feet)
         let loX = Int(floor(box.lo.x - 0.35)), loY = Int(floor(box.lo.y)), loZ = Int(floor(box.lo.z - 0.35))
         let hiX = Int(floor(box.hi.x + 0.35)), hiY = Int(floor(box.hi.y + 1.0)), hiZ = Int(floor(box.hi.z + 0.35))
@@ -8433,18 +8433,18 @@ final class WorldSession {
     /// other walkable nodes are the full cube.
     /// Selection boxes of the node at n in node-local 0..1 space, rotated by
     /// its facedir like the mesh (nil = full cube). Feeds the pointing raycast
-    /// so a slab/stair/door is only hit where it actually is (#80).
+    /// so a slab/stair/door is only hit where it actually is.
     private func pointBoxes(_ n: SIMD3<Int>, _ id: UInt16) -> [(lo: SIMD3<Float>, hi: SIMD3<Float>)]? {
         guard let boxes = client.nodes.selectionBoxes(id), !boxes.isEmpty else {
             // A mesh-drawtype node with no server selection box (lantern, chain,
             // bell): aim/highlight the model's own bounds instead of the full cube
-            // so the outline hugs the model and you can't hit empty air (#192).
+            // so the outline hugs the model and you can't hit empty air.
             if client.nodes.kind(id) == .mesh, let box = meshNodeBounds(id) { return [box] }
             return nil
         }
         // A wallmounted selection box (torch, wall lever) ships 3 boxes; point at
         // only the one its param2 selects, else the union of all three reads as a
-        // full cube around a thin torch (#253). Same pick as the mesher (#212).
+        // full cube around a thin torch. Same pick as the mesher.
         let picked = client.nodes.isWallmountedSelBox(id)
             ? WorldMesher.wallmountedBox(boxes, param2: client.world.nodeParam2(n))
             : boxes
@@ -8463,9 +8463,9 @@ final class WorldSession {
 
     // Append the node's solid collision boxes into `out` instead of returning a
     // fresh array, so the swept-region scan (~dozens of nodes, twice a physics
-    // tick) doesn't allocate a small array per node (#187).
+    // tick) doesn't allocate a small array per node.
     /// Connected-nodebox arm directions (top, bottom, front, left, back, right),
-    /// hoisted out of the per-node scan (perf #312).
+    /// hoisted out of the per-node scan.
     private static let connectDirs: [SIMD3<Int>] = [SIMD3(0,1,0), SIMD3(0,-1,0), SIMD3(0,0,-1),
                                                     SIMD3(-1,0,0), SIMD3(0,0,1), SIMD3(1,0,0)]
     /// Lock-free per-id node facts for collision; refreshed when NODEDEF changes.
@@ -8482,29 +8482,29 @@ final class WorldSession {
         // then climb -- as on desktop, where a ladder's thin wall plate leaves
         // its node walk-in-able. We skip its collision entirely rather than
         // colliding the plate, which under our Z-mirror could land on the room
-        // side and wall you out of a Z-wall ladder (the igloo shaft, #331). The
+        // side and wall you out of a Z-wall ladder (the igloo shaft). The
         // solid node the ladder is bolted to still stops you at the wall. This
-        // also lets you slide freely up/down a ladder while climbing (#243).
+        // also lets you slide freely up/down a ladder while climbing.
         if id != WorldMap.CONTENT_IGNORE, id != WorldMap.CONTENT_AIR, phys.isClimbable(id) { return }
         _ = climbing   // (kept in the signature; climbable skip is now unconditional)
         let base = SIMD3<Float>(Float(n.x), Float(n.y), Float(n.z))
         // Not-yet-loaded nodes are SOLID, as in collision.cpp ("Collide with
         // loaded CONTENT_IGNORE nodes": a full node box). Treating them as empty
         // let the player drop through ground the server hadn't streamed yet
-        // and land in whatever cave was loaded below (#120). Standing on the top
+        // and land in whatever cave was loaded below. Standing on the top
         // of an unloaded block until it arrives, then settling onto the real
         // surface, is what the engine does too.
         if id == WorldMap.CONTENT_IGNORE { out.append(AABB(lo: base, hi: base + 1)); return }
         if id == WorldMap.CONTENT_AIR { return }
         guard phys.isWalkable(id) else { return }
         // Prefer collision_box (taller fence post, etc.) over the visual node_box
-        // for physics; fall back to node_box when a node defines no collision_box
-        // (#214). Any drawtype, like MapNode::getCollisionBoxes: a signlike ladder
-        // is its wallmounted plate, a mesh chest its 14/16 box (#303).
+        // for physics; fall back to node_box when a node defines no collision_box.
+        // Any drawtype, like MapNode::getCollisionBoxes: a signlike ladder
+        // is its wallmounted plate, a mesh chest its 14/16 box.
         let coll = phys.collisionBox(id)
         if let raw = coll ?? phys.nodeBox(id), !raw.isEmpty {
             // A wallmounted node_box ships wall_top/bottom/side; only the one the
-            // param2 selects exists physically (same pick as the mesher, #212).
+            // param2 selects exists physically (same pick as the mesher).
             let boxes = (coll == nil && phys.isWallmounted(id))
                 ? WorldMesher.wallmountedBox(raw, param2: client.world.nodeParam2(n)) : raw
             let fd = WorldMesher.meshFacedir(client.world.nodeParam2(n), phys.pt2(id))
@@ -8534,7 +8534,7 @@ final class WorldSession {
 
     /// True if any node the box touches contributes a solid collision box.
     /// Fills a reused scratch so the eject probe (up to 20 calls in one tick)
-    /// doesn't allocate a fresh array per step (perf #312).
+    /// doesn't allocate a fresh array per step.
     private var probeScratch: [AABB] = []
     private func anySolidBox(around box: AABB) -> Bool {
         probeScratch.removeAll(keepingCapacity: true)
@@ -8596,20 +8596,20 @@ final class WorldSession {
         // While climbing, a climbable node doesn't collide (Luanti: you move
         // freely up/down a ladder). A walkable climbable like the igloo's
         // trapdoor_ladder otherwise landed the descent on itself, so you couldn't
-        // pass down onto the ladder below (#243).
+        // pass down onto the ladder below.
         let solids = solidBoxes(around: swept, climbing: climbing)
         // Already embedded (spawned/teleported into geometry, or swam up into an
         // overhang): don't fight it and don't fall forever -- hold height, and
         // allow horizontal movement only in a direction that doesn't push DEEPER
         // into the geometry, so you can walk/swim out but can't clip through a
-        // wall (#167). Moving toward a wall would add an overlapping box; block
+        // wall. Moving toward a wall would add an overlapping box; block
         // that axis, keep the axis that reduces or holds the overlap count.
         // Only a solid that rises ABOVE the step-up height counts as "embedding"
         // (a real wall you're stuck inside). A thin walkable nodebox you're
         // resting on -- carpet, a slab, a snow layer -- overlaps the feet box but
         // is steppable, so it must NOT trigger the limited-move/eject path, or you
         // can't walk from one carpet onto the next and spawn-on-carpet traps you
-        // (the igloo bug, #242). Those fall through to the normal step-up below.
+        // (the igloo bug). Those fall through to the normal step-up below.
         // A ceiling poking into the top half of the body only: VoxeLibre's bed
         // respawn puts the feet at the spawn node's centre, half a node up, so
         // in a 2-high cave the head starts in the rock. Desktop ignores a box
@@ -8649,15 +8649,15 @@ final class WorldSession {
             let midNode = client.world.nodeId(SIMD3(Int(floor(feet.x)),
                 Int(floor(feet.y + playerHeight * 0.5)), Int(floor(feet.z))))
             // Eject up ONLY when inside genuinely-streamed solid rock (spawn/
-            // teleport into an igloo or stone, #242). If the surrounding terrain is
+            // teleport into an igloo or stone). If the surrounding terrain is
             // merely UNSTREAMED (IGNORE), do NOT eject: solidBoxes treats IGNORE as
             // full cubes, so a cave spawn (y=-50, nothing loaded yet) got shoved
-            // skyward tick after tick, all the way to y=718 (#252). Hold height and
+            // skyward tick after tick, all the way to y=718. Hold height and
             // wait for the real cave to stream in, then gravity settles onto it.
             let insideSolid = midNode != WorldMap.CONTENT_IGNORE &&
                 client.nodes.isWalkable(midNode) && client.nodes.kind(midNode) == .cube
             // Never while climbing: a ladder shaft bottom is a legitimate tight
-            // spot, and the shaft above is where the player wants to stay (#303).
+            // spot, and the shaft above is where the player wants to stay.
             if insideSolid, !climbing, embeddedCount(out) == base, base > 0 {
                 var probe = out, yy = out.y
                 let ceiling = out.y + 5   // don't teleport across the world
@@ -8667,7 +8667,7 @@ final class WorldSession {
                     // Test the REAL column, not just `solids`: those were gathered
                     // around this tick's move and reach ~2.4 nodes up, so anything
                     // higher looked clear and a player under an igloo was lifted 3
-                    // nodes a tick through solid rock into the room above (#303).
+                    // nodes a tick through solid rock into the room above.
                     // Unstreamed nodes count as solid here too, so a not-yet-loaded
                     // ceiling holds the player instead of launching them.
                     if !solids.contains(where: { $0.overlaps(pb) }), !anySolidBox(around: pb) {
@@ -8708,7 +8708,7 @@ final class WorldSession {
         // --- X then Z, each with step-up, else slide up to the blocking face.
         // One pass over the candidate solids per axis: track whether anything
         // blocks, the highest top (for step-up), and the nearest blocking face,
-        // instead of allocating filter/map arrays every physics tick (#187).
+        // instead of allocating filter/map arrays every physics tick.
         for axis in [0, 2] {
             let d = axis == 0 ? delta.x : delta.z
             if d == 0 { continue }
@@ -8762,12 +8762,12 @@ final class WorldSession {
     }
 
     /// Publish the wielded item + hotbar as node-atlas layers for the renderer to
-    /// draw anchored to the hands (#66 wield item, #57 wrist hotbar). Resolves the
+    /// draw anchored to the hands (wield item, wrist hotbar). Resolves the
     /// same icon tiles the head-locked hotbar uses.
     private func postHandHud() {
         // Per-slot durability: wear rides the "main" list (the base-name hotbar
         // icons drop it), so a damaged tool in the hotbar shows a wear bar on its
-        // ring cell too, not just when wielded (#106).
+        // ring cell too, not just when wielded.
         let main = client.inventory["main"]
         var slots: [HandHudState.Icon?] = []
         for (i, tile) in hotbarIcons.enumerated() {
@@ -8814,7 +8814,7 @@ final class WorldSession {
         if wi >= 0, let m = client.inventory["main"], wi < m.count, let st = m[wi], st.wear > 0 {
             wieldWear = Float(65535 - st.wear) / 65535
         }
-        // Stack count on the hand (#158): a stack >1 (torches, blocks, food) bakes
+        // Stack count on the hand: a stack >1 (torches, blocks, food) bakes
         // its number into a model-texture layer; the renderer draws it near the
         // hand. Tools carry wear instead, and never stack, so there's no conflict.
         var wieldCountLayer: Int32 = -1, wieldCountAspect: Float = 1
@@ -8861,7 +8861,7 @@ final class WorldSession {
                 }
                 if slots.allSatisfy({ $0 == nil }) {
                     let icon = atlas.layer(id: id, face: 0)   // top face as a flat cell icon
-                    // Vary wear across the fake cells so the per-slot wear bar (#106) shows headless.
+                    // Vary wear across the fake cells so the per-slot wear bar shows headless.
                     let wears: [Float] = [1, 0.7, 0.35, 0.1]
                     for i in 0..<min(4, slots.count) { slots[i] = .init(layer: icon, uv: SIMD2(1, 1), wear: wears[i]) }
                 }
@@ -8878,11 +8878,11 @@ final class WorldSession {
         // Extrude the wielded tool's icon into a 3D silhouette (nil for blocks or
         // solid-square icons, which the cube/flat slab handle).
         let sil = wieldTile.flatMap { wieldSilhouette(for: $0) }
-        var digging = digNode != nil            // drives the wield swing (#136)
+        var digging = digNode != nil            // drives the wield swing
         var armorForHud = armor
         #if targetEnvironment(simulator)
         if UserDefaults.standard.bool(forKey: "vrdev.fakeSwing") { digging = true }
-        // Sim: stub a stack count so the hand count (#158) shows headless. The
+        // Sim: stub a stack count so the hand count shows headless. The
         // fake wield is a block, so a count reads naturally (torch stack, blocks).
         if wieldCountLayer < 0, UserDefaults.standard.bool(forKey: "vrdev.fakeWield"),
            case .block? = wield, let r = hudTextLayer(id: -777, text: "64") {
@@ -8907,7 +8907,7 @@ final class WorldSession {
         if UserDefaults.standard.bool(forKey: "vrdev.fakeWield") { wieldLight = 255 }  // keep headless wield visible
         #endif
         // HUD_SET_FLAGS: bit 8 wielditem (mcl_shields hides the hand while
-        // blocking, the spyglass while zoomed), bit 1 hotbar (#290).
+        // blocking, the spyglass while zoomed), bit 1 hotbar.
         let hudF = client.hudFlags
         handHudHandoff.post(HandHudState(wield: hudF & 8 != 0 ? wield : nil, digging: digging, wieldLight: wieldLight,
                                          wieldSilhouette: hudF & 8 != 0 ? sil : nil, wieldWear: wieldWear,
@@ -8928,10 +8928,10 @@ final class WorldSession {
     /// Local dig prediction: turn the dug node into its node_dig_prediction target
     /// if it declares one (rare; most nodes dig to air), else remove it. Matches
     /// Luanti's predicted result so the right node/hole shows before the server
-    /// round-trip (#178).
+    /// round-trip.
     private func applyDigPrediction(at p: SIMD3<Int>, id: UInt16) {
         let pred = client.nodes.digPrediction(id) ?? "air"
-        if pred.isEmpty { return }   // explicit "": no prediction, the server's answer stands (#297)
+        if pred.isEmpty { return }   // explicit "": no prediction, the server's answer stands
         if let pid = client.nodes.id(for: pred), pid != WorldMap.CONTENT_AIR {
             client.world.setNode(p, param0: pid)
         } else {
@@ -8971,7 +8971,7 @@ final class WorldSession {
         // was rebuilt against the new order (every block drew the wrong tile).
         let atlasLayers: [[UInt8]]? = atlasGeneration != lastPostedAtlasGen ? atlas.layers : nil
         if atlasLayers != nil { lastPostedAtlasGen = atlasGeneration }
-        // Animated tile frames travel with the atlas (#137); captured on the
+        // Animated tile frames travel with the atlas; captured on the
         // session queue so the mesher block doesn't touch the atlas cross-thread.
         let atlasAnim: [TextureAtlas.AnimLayer] = atlasLayers != nil ? atlas.animatedLayers : []
         // Capture + clear the dirty set for this pass (session queue). A new atlas
@@ -8996,7 +8996,7 @@ final class WorldSession {
             }
 
             // Re-mesh the changed blocks and hand them to the renderer as a
-            // per-block DELTA (#183): a dig/place rebuilds only the touched
+            // per-block DELTA: a dig/place rebuilds only the touched
             // blocks and posts just those, instead of re-concatenating and
             // re-uploading every loaded block into one giant buffer every edit.
             // Block indices are already local (build ran with only:[bpos]), so
@@ -9032,10 +9032,10 @@ final class WorldSession {
                                                 reset: rebuildAll, atlasLayers: atlasLayers, animated: atlasAnim)
             // First real geometry posted: tell the launcher the world is ready to
             // show, so it can drop its spinner and reveal the immersive space.
-            // Solid OR cutout counts: after the #164 opaque/cutout split, a spawn
+            // Solid OR cutout counts: after the opaque/cutout split, a spawn
             // ringed by only solid cubes (stone/dirt, no plants/leaves/glass) has
             // an empty cutout stream, and gating on cutout alone left the loader
-            // spinning forever there (regression of #74).
+            // spinning forever there (a regression once).
             let hasWorldGeom = changedRaw.values.contains { !$0.solid.isEmpty || !$0.cutout.isEmpty }
             if posted, hasWorldGeom {
                 if !self.worldReadyLogged { self.worldReadyLogged = true; print("[session] world ready (first geometry posted) \(PerfStats.uptime())"); fflush(stdout) }
@@ -9064,7 +9064,7 @@ final class WorldSession {
         guard !client.nodes.faceTiles.isEmpty else { return }
         if atlasBuilt && client.media.store.count == lastAtlasStore && !atlasNeedsRebuild { return }   // nothing new
         atlasNeedsRebuild = false
-        sinceMediaAtlas = 0   // reset the media-coalesce clock on any real rebuild (#188)
+        sinceMediaAtlas = 0   // reset the media-coalesce clock on any real rebuild
         lastAtlasStore = client.media.store.count
         // Coalesce: if a build is already running, ask it to run once more when it
         // lands (media/tiles may have grown since it started) instead of stacking
@@ -9082,8 +9082,8 @@ final class WorldSession {
         // Append-only rebuild: seed the new atlas from the current one so every
         // existing tile keeps its layer index and only new tiles get numbers.
         // Building from an empty atlas renumbered everything, and anything that
-        // held an index across the swap sampled the wrong tile (#256/#201/#202/
-        // #254). Seeding happens here on the session queue; `a` is then private
+        // held an index across the swap sampled the wrong tile (snow as dirt, particles as
+        // blocks, blank chest icons). Seeding happens here on the session queue; `a` is then private
         // to the build thread until it's swapped back in below.
         let prev = atlas, dropTiles = atlasDropTiles
         atlasDropTiles.removeAll()

@@ -9,8 +9,8 @@ import UniformTypeIdentifiers
 /// empty atlas used to renumber every tile (dictionary order isn't stable),
 /// and anything holding an index across the swap -- baked vertex floats,
 /// particles, icons -- sampled whatever tile landed in that slot. That one
-/// root cause was behind snow drawing as dirt/wheat (#256/#201), nether
-/// particles as blocks (#202) and wrong chest icons (#254). rebuildAtlas now
+/// root cause was behind snow drawing as dirt/wheat, nether
+/// particles as blocks and wrong chest icons. rebuildAtlas now
 /// seeds each new atlas from the previous one; this locks that invariant in
 /// at the unit level (the DEBUG tripwire in rebuildAtlas covers it at runtime).
 final class AtlasAppendOnlyTests: XCTestCase {

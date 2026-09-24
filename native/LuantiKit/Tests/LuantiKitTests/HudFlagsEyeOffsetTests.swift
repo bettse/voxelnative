@@ -2,7 +2,7 @@ import XCTest
 @testable import LuantiKit
 
 /// TOCLIENT_HUD_SET_FLAGS masks only the named bits; TOCLIENT_EYE_OFFSET is
-/// BS units on the wire (#290).
+/// BS units on the wire.
 final class HudFlagsEyeOffsetTests: XCTestCase {
     func testHudFlagsHonourMask() {
         let c = Client(name: "t", password: "")

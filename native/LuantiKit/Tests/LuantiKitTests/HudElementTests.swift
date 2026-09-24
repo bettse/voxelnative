@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Generic HUD element records (#103): HUDADD captures every field, HUDCHANGE
+/// Generic HUD element records: HUDADD captures every field, HUDCHANGE
 /// updates them with the right value type per stat, HUDRM drops them. Wire
 /// layouts mirror Client::handleCommand_HudAdd / HudChange (proto >= 52).
 final class HudElementTests: XCTestCase {

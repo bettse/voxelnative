@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// AO command handling (#100): PUNCHED hp/flash/death, STOP_ANIMATION, and the
+/// AO command handling: PUNCHED hp/flash/death, STOP_ANIMATION, and the
 /// ObjectProperties tail (nametag, damage_texture_modifier). Wire layouts here
 /// mirror GenericCAO::processMessage and ObjectProperties::serialize.
 final class ActiveObjectsTests: XCTestCase {
@@ -62,7 +62,7 @@ final class ActiveObjectsTests: XCTestCase {
         ao.handleRemoveAdd(addPacket(id: 7, hp: 10))
         XCTAssertEqual(ao.entity(7)?.hp, 10)          // starting hp comes from the add packet
 
-        punch(ao, 7, resultHp: 9)                     // 1 damage -> floored to 0.2s so it's visible (#149)
+        punch(ao, 7, resultHp: 9)                     // 1 damage -> floored to 0.2s so it's visible
         XCTAssertEqual(ao.entity(7)?.hp, 9)
         XCTAssertEqual(ao.entity(7)?.hitFlash ?? -1, 0.20, accuracy: 1e-6)
 
@@ -214,7 +214,7 @@ final class ActiveObjectsTests: XCTestCase {
         XCTAssertEqual(ao.entity(2)?.damageTexMod, "")
     }
 
-    // MARK: - attach offset rotation (#139 riding, shared by passenger AO + rider)
+    // MARK: - attach offset rotation (riding, shared by passenger AO + rider)
 
     private func approx(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ acc: Float = 1e-5, _ msg: String = "",
                         file: StaticString = #filePath, line: UInt = #line) {
@@ -267,7 +267,7 @@ final class ActiveObjectsTests: XCTestCase {
         XCTAssertEqual(ao.entity(2)?.attachParent, 1)
     }
 
-    // MARK: - entity raycast (#146: punch a mob with a sword)
+    // MARK: - entity raycast (punch a mob with a sword)
 
     func testRayAABBEntryDistance() {
         let lo = SIMD3<Float>(0, 0, 0), hi = SIMD3<Float>(1, 1, 1)
@@ -315,7 +315,7 @@ final class ActiveObjectsTests: XCTestCase {
     }
 }
 
-/// #149: the local player's melee hit flashes the mob immediately (client-side)
+/// the local player's melee hit flashes the mob immediately (client-side)
 /// so feedback doesn't wait on the server's PUNCHED, which mcl_mobs doesn't
 /// always send as a clean hp diff.
 extension ActiveObjectsTests {
@@ -428,7 +428,7 @@ extension ActiveObjectsTests {
     }
 }
 
-/// #283: children attached to the local player are hidden, like the engine in
+/// children attached to the local player are hidden, like the engine in
 /// first person (the mcl_burning fire billboard, our own wieldview item).
 extension ActiveObjectsTests {
     func testEntitiesAttachedToTheLocalPlayerAreNotDrawn() {

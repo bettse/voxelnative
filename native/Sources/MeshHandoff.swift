@@ -7,7 +7,7 @@ import LuantiKit
 /// thread (MTLDevice is thread-safe) so the render thread only swaps pointers.
 /// Building buffers inside the render loop used to hitch frames.
 ///
-/// The world is kept PER MAPBLOCK (#183): a dig/place re-meshes only the handful
+/// The world is kept PER MAPBLOCK: a dig/place re-meshes only the handful
 /// of touched blocks and posts them as a delta, instead of re-concatenating and
 /// re-uploading every loaded block's geometry into one giant buffer on every
 /// edit. The renderer keeps its own block->buffers dict and draws one indexed
@@ -15,7 +15,7 @@ import LuantiKit
 final class MeshHandoff {
     struct GPUMesh { let vertices: MTLBuffer; let indices: MTLBuffer; let indexCount: Int }
     // One block's GPU geometry: a shared opaque vertex buffer with solid+cutout
-    // index streams (#164), plus an optional liquid mesh. Any field may be nil
+    // index streams, plus an optional liquid mesh. Any field may be nil
     // (an all-air or all-solid-interior block has no faces of that kind).
     struct BlockGPU {
         let opaqueVerts: MTLBuffer?
@@ -62,7 +62,7 @@ final class MeshHandoff {
         return GPUMesh(vertices: vb, indices: ib, indexCount: indices.count)
     }
 
-    // The node texture array is kept and grown in place (#317): the atlas is
+    // The node texture array is kept and grown in place: the atlas is
     // append-only, so a rebuild usually just adds layers, and re-creating a
     // ~1400-slice array and re-uploading every slice (~23 MB) per generation
     // stalled the mesher queue behind it. Existing slices are re-uploaded only

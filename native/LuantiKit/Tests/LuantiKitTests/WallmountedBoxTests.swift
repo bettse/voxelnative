@@ -3,7 +3,7 @@ import simd
 @testable import LuantiKit
 
 /// A type="wallmounted" node_box has 3 boxes (wall_top, wall_bottom, wall_side);
-/// exactly one is drawn per the wallmounted param2, not all three (#212, the
+/// exactly one is drawn per the wallmounted param2, not all three (the
 /// button plus-clump). Verifies the selection + that walls rotate about Y only.
 final class WallmountedBoxTests: XCTestCase {
     private func box(_ lo: SIMD3<Float>, _ hi: SIMD3<Float>) -> NodeRegistry.Box { NodeRegistry.Box(min: lo, max: hi) }

@@ -18,7 +18,7 @@ public final class TextureAtlas {
     public static let tile = 64
 
     public private(set) var layers: [[UInt8]] = []  // each tile*tile*4 RGBA
-    /// A node-atlas layer that cycles frames over time (#137: lava/fire/furnace).
+    /// A node-atlas layer that cycles frames over time (lava/fire/furnace).
     public struct AnimLayer { public let layer: Int; public let frames: [[UInt8]]; public let secPerFrame: Float }
     public private(set) var animatedLayers: [AnimLayer] = []
     public private(set) var markerLayer: Int32 = 0   // plain white, for entity billboards
@@ -73,8 +73,8 @@ public final class TextureAtlas {
     /// renumbered every tile (dictionary order isn't stable), which is the root
     /// of a whole family of bugs: anything holding a layer index across a
     /// rebuild -- baked vertex floats, particles, icons -- then sampled whatever
-    /// tile landed in that slot (snow drawing as dirt/wheat #256/#201, nether
-    /// particles as blocks #202, wrong chest icons #254). The model-texture array
+    /// tile landed in that slot (snow drawing as dirt/wheat, nether
+    /// particles as blocks, wrong chest icons). The model-texture array
     /// is already append-only and never had this; this makes the node atlas
     /// match it. `dropping` names tiles whose media was re-pushed: they're
     /// evicted so build() re-evaluates their pixels (they get a fresh index,
@@ -122,7 +122,7 @@ public final class TextureAtlas {
         buildStatusIconLayers(media: media)
         buildBreathLayers(media: media)
         buildArmorLayers(media: media)
-        // XP bar (#107): flat colours rather than mcl_experience_bar.png, whose
+        // XP bar: flat colours rather than mcl_experience_bar.png, whose
         // 5x182 strip would smear when squashed into a square tile; at HUD size
         // a flat XP-green fill on a dark track reads the same as the desktop bar.
         xpFillLayer = Int32(layerForColor(SIMD3(0.50, 1.00, 0.125)))   // 0x80FF20
@@ -149,7 +149,7 @@ public final class TextureAtlas {
             if faceLayers[id] != faces { changedFaceIds.insert(id) }   // nil prior (first build) counts as changed
             faceLayers[id] = faces
         }
-        // Animated tiles (#137): a tile flagged with a vertical-frames animation
+        // Animated tiles: a tile flagged with a vertical-frames animation
         // and stored as a plain strip image gets its frames decoded so the
         // renderer can cycle that layer's pixels. Only plain images (no modifier)
         // are handled; lava/fire/furnace-lit are plain.
@@ -183,7 +183,7 @@ public final class TextureAtlas {
                    let strip = TextureAtlas.decodePNGFrames(data, size: TextureAtlas.tile), strip.count > 1 {
                     // No trailing modifiers: decode the base strip directly, the
                     // same path source lava uses. evaluateModifiedFit's verticalframe
-                    // was decoding the lava-FLOW strip near-black (#200); this fixes it.
+                    // was decoding the lava-FLOW strip near-black; this fixes it.
                     frames = strip
                 } else {
                     // Trailing modifiers (water multiply, cauldron [combine): must
@@ -198,7 +198,7 @@ public final class TextureAtlas {
                     animatedLayers.append(AnimLayer(layer: layer, frames: frames,
                                                     secPerFrame: max(0.05, secs / Float(frames.count))))
                 }
-                // Diagnose the black/speckled lava flow (#200): did the frames
+                // Diagnose the black/speckled lava flow: did the frames
                 // build, and is frame 0 actually bright? mean = avg RGB (0..255).
                 if base.contains("lava") {
                     let mean = frames.first.map { f -> Int in
@@ -210,7 +210,7 @@ public final class TextureAtlas {
                 }
             } else if base.contains("lava") {
                 // Animated lava tile that matched NEITHER branch -> stays pinned to
-                // one frame (likely the black/speckled flow, #200). Surface it.
+                // one frame (likely the black/speckled flow). Surface it.
                 print("[lavaanim] tile=\(tileName) branch=NONE (not animated: vf=\(TextureAtlas.verticalFrameParts(tileName)?.n ?? -1))"); fflush(stdout)
             }
         }
@@ -491,7 +491,7 @@ public final class TextureAtlas {
         // The simple ^-overlay path below can't do geometry-changing modifiers
         // ([transform/[resize/[lowpart/[verticalframe) or the bracket generators,
         // so route any tile that uses them through the native compositor, which
-        // handles the full chain (#230). Node tiles are square, so fill is exact.
+        // handles the full chain. Node tiles are square, so fill is exact.
         if tile.contains("[combine") || tile.contains("[fill") || tile.contains("[sheet")
             || tile.contains("[transform") || tile.contains("[resize")
             || tile.contains("[lowpart") || tile.contains("[verticalframe") {
@@ -554,7 +554,7 @@ public final class TextureAtlas {
         let f = spec.dropFirst("[colorize:".count).split(separator: ":", omittingEmptySubsequences: false)
         guard let colorStr = f.first, let c = TextureAtlas.parseColorRGBA(String(colorStr).replacingOccurrences(of: "]", with: "")) else { return }
         let rgb = [c[0], c[1], c[2]]
-        let ratioTok = f.count > 1 ? f[1].replacingOccurrences(of: "]", with: "") : "alpha"   // Luanti: omitted ratio uses the colour's own alpha (#230)
+        let ratioTok = f.count > 1 ? f[1].replacingOccurrences(of: "]", with: "") : "alpha"   // Luanti: omitted ratio uses the colour's own alpha
         let ratio: Float = ratioTok == "alpha" ? c[3] / 255.0 : (Float(ratioTok) ?? 128) / 255.0
         let n = TextureAtlas.tile * TextureAtlas.tile
         for i in 0..<n {
@@ -632,7 +632,7 @@ public final class TextureAtlas {
     /// so they land on the same sub-rect), '(...)' groups, and '[colorize:'.
     /// This is the model-path twin of the 16px atlas evaluate(), so a mob skin
     /// like "horse_chestnut.png^horse_markings_white.png" composites instead of
-    /// dropping the overlay (#72). Returns nil until the base PNG is downloaded.
+    /// dropping the overlay. Returns nil until the base PNG is downloaded.
     /// A texture at its own (native) resolution, premultiplied RGBA, top row
     /// first. The model evaluator composites at native res (so [combine offsets
     /// and mismatched overlays are exact) then fits into the square canvas once.
@@ -951,7 +951,7 @@ public final class TextureAtlas {
         let f = spec.dropFirst("[colorize:".count).split(separator: ":", omittingEmptySubsequences: false)
         guard let colorStr = f.first, let c = parseColorRGBA(String(colorStr).replacingOccurrences(of: "]", with: "")) else { return }
         let rgb = [c[0], c[1], c[2]]
-        let ratioTok = f.count > 1 ? f[1].replacingOccurrences(of: "]", with: "") : "alpha"   // Luanti: omitted ratio uses the colour's own alpha (#230)
+        let ratioTok = f.count > 1 ? f[1].replacingOccurrences(of: "]", with: "") : "alpha"   // Luanti: omitted ratio uses the colour's own alpha
         // "alpha" ratio = use the colour's own alpha channel as the blend ratio
         // (Luanti's [colorize:#RRGGBBAA:alpha), else a 0..255 amount.
         let ratio: Float = ratioTok == "alpha" ? c[3] / 255.0 : (Float(ratioTok) ?? 128) / 255.0
@@ -991,7 +991,7 @@ public final class TextureAtlas {
     /// Parse a `[verticalframe:N:I` modifier out of a tile string. Returns the
     /// frame count N and a closure that rebuilds the tile with a given frame index
     /// (leaving the rest of the modifier chain intact), so the animator can render
-    /// each frame of a liquid tile that the server pinned to one frame (#137).
+    /// each frame of a liquid tile that the server pinned to one frame.
     static func verticalFrameParts(_ tile: String) -> (n: Int, make: (Int) -> String)? {
         guard let r = tile.range(of: "[verticalframe:") else { return nil }
         let tail = tile[r.upperBound...]                    // "N:I<rest>"

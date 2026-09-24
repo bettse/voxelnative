@@ -31,7 +31,7 @@ final class FormspecLegacyTests: XCTestCase {
 }
 
 /// The achievements form (awards/api.lua) is legacy too: converted, the title
-/// label sits under the 3x3 icon instead of across it (#371).
+/// label sits under the 3x3 icon instead of across it.
 final class InfoFormLegacyTests: XCTestCase {
     let awards = "size[11,5]label[1,2.75;Acquire Hardware]image[1,0;3,3;icon.png]" +
                  "textarea[0.25,3.25;4.8,1.7;;Smelt an iron ingot.;]" +

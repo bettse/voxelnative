@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// ACCESS_DENIED (#147): the reason string AND the numeric AccessDeniedCode reach
+/// ACCESS_DENIED: the reason string AND the numeric AccessDeniedCode reach
 /// the consumer, so a fast relaunch's "already connected" (code 8) is retried by
 /// code even if the server sends a custom/localized reason.
 final class AccessDeniedTests: XCTestCase {

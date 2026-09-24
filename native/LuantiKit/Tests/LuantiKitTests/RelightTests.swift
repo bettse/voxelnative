@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Client-side relight on node changes (#278). The engine relights locally in
+/// Client-side relight on node changes. The engine relights locally in
 /// Map::addNodeAndUpdate and the server does not resend relit blocks to the
 /// placer, so a placed torch must light its surroundings on our side.
 final class RelightTests: XCTestCase {
@@ -61,7 +61,7 @@ final class RelightTests: XCTestCase {
         for i in 0..<10 { m.setNode(SIMD3(8, 8, 8), param0: torch); m.removeNode(SIMD3(8, 8, 8)); _ = i }
         let perOp = Date().timeIntervalSince(t0) / 20
         print("[relight-bench] \(perOp * 1000) ms per place/dig")
-        // ~5 ms in a debug build since light_source lights BOTH banks (#323):
+        // ~5 ms in a debug build since light_source lights BOTH banks:
         // in this all-dark volume that is two full spreads per op. Release is
         // 5-10x faster, so it is still a fraction of a tick on device.
         XCTAssertLessThan(perOp, 0.008, "a torch relight should take well under a tick (debug build)")
@@ -102,7 +102,7 @@ final class RelightTests: XCTestCase {
         XCTAssertEqual(Int(m.nodeLight(SIMD3(8, 10, 8)) & 0x0F), 0)
     }
 
-    /// Snow piling up in daylight (#367): VoxeLibre's ABM set_node()s a snow
+    /// Snow piling up in daylight: VoxeLibre's ABM set_node()s a snow
     /// layer (light-propagating, sunlight-propagating) onto sunlit ground. The
     /// ADDNODE param1 is whatever the server had; the layer and its neighbours
     /// must end up in full daylight, not a dark cell the smooth lighting would
@@ -131,7 +131,7 @@ final class RelightTests: XCTestCase {
     /// A torch's averaged night light is fractional at most vertices; packing
     /// it as day + night*16 spilled the fraction into the day bank (night 9.5,
     /// day 15 decoded as night 10, day 7): the dark ring at the edge of held
-    /// torch light and the streak on daytime snow (#359, #367).
+    /// torch light and the streak on daytime snow.
     func testSmoothLightPackingKeepsBanksApart() {
         for (d, n): (Float, Float) in [(15, 9.5), (15, 0.5), (12.75, 8.5), (0, 14.9375), (15, 15), (0, 0)] {
             let u = WorldMesher.unpackLight(WorldMesher.packSmoothLight(day: d, night: n))

@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Client-side mapblock unloading (#97): WorldMap.expire mirrors the engine's
+/// Client-side mapblock unloading: WorldMap.expire mirrors the engine's
 /// Map::timerUpdate (usage timer + timeout + hard limit), and the evicted
 /// positions go out as TOSERVER_DELETEDBLOCKS batched at 255 per packet.
 final class BlockUnloadTests: XCTestCase {

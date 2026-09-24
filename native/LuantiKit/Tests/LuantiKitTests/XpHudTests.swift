@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// VoxeLibre XP via HUD elements (#107): mcl_experience adds an "image" bar
+/// VoxeLibre XP via HUD elements: mcl_experience adds an "image" bar
 /// (fill arrives later as a ^[lowpart:N: texture via HUDCHANGE) and a "text"
 /// level element in XP green. Wire layouts mirror Client::handleCommand_HudAdd
 /// / HudChange.
@@ -76,7 +76,7 @@ final class XpHudTests: XCTestCase {
     }
 
     // hudGeneration must bump on every hudElements mutation: the renderer caches
-    // its sorted view keyed on it (#249), so a missed bump would leave the HUD
+    // its sorted view keyed on it, so a missed bump would leave the HUD
     // stale. Guards against a future mutation path forgetting to increment.
     func testHudGenerationBumpsOnEveryMutation() {
         let c = Client(name: "t", password: "")

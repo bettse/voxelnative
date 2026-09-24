@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Sprite sheets (#125): spritediv/basepos from ObjectProperties, AO_CMD_SET_SPRITE
+/// Sprite sheets: spritediv/basepos from ObjectProperties, AO_CMD_SET_SPRITE
 /// animation stepping like GenericCAO, and the "^[sheet:" cell texture the
 /// billboard draws. Layouts mirror ObjectProperties::serialize and processMessage.
 final class SpriteAnimTests: XCTestCase {

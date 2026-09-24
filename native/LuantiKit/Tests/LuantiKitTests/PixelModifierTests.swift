@@ -4,7 +4,7 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import LuantiKit
 
-/// Per-pixel texture modifiers (#123): [multiply, [hsl, [brighten,
+/// Per-pixel texture modifiers: [multiply, [hsl, [brighten,
 /// [makealpha, [noalpha, [opacity, [invert, [mask, [sheet. Formulas from
 /// imagesource.cpp; checked on both the native path (evaluateModifiedFit)
 /// and the 16 px node-tile path.
@@ -65,7 +65,7 @@ final class PixelModifierTests: XCTestCase {
         let p = at(native("clear.png^[noalpha").px, 2, 2)
         XCTAssertEqual(p.a, 255); XCTAssertEqual(p.r, 0)
         // VoxeLibre's beacon beam: blank.png^[noalpha^[colorize:#b8bab9 -> a grey.
-        // No ratio + a full-alpha colour = full colorize (#230), so the black
+        // No ratio + a full-alpha colour = full colorize, so the black
         // becomes exactly #b8bab9, not a half-blend.
         let q = at(native("clear.png^[noalpha^[colorize:#b8bab9").px, 2, 2)
         XCTAssertEqual(q.a, 255); XCTAssertEqual(q.r, 0xb8, accuracy: 2)
@@ -117,7 +117,7 @@ final class PixelModifierTests: XCTestCase {
         XCTAssertEqual(at(sheet, t / 8, t / 8, w: t).b, 255)           // right crop = all blue
     }
 
-    // #230: the 16 px node-tile path used to drop [transform/[resize/[verticalframe/
+    // the 16 px node-tile path used to drop [transform/[resize/[verticalframe/
     // [lowpart, so it now routes those through the native compositor. Sample
     // proportionally so it holds at any tile size.
     func testNodeTileHonorsVerticalframe() {
@@ -142,7 +142,7 @@ final class PixelModifierTests: XCTestCase {
         let f = try! XCTUnwrap(atlas.evaluateTileForTesting("red.png^[resize:16x16", media: m))
         XCTAssertEqual(at(f, t / 2, t / 2, w: t).r, 255)         // still red after rescale
     }
-    // #230: colorize with the ratio omitted uses the colour's own alpha, not 128.
+    // colorize with the ratio omitted uses the colour's own alpha, not 128.
     func testColorizeOmittedRatioUsesColorAlpha() {
         // Opaque colour (alpha 255) -> full colorize: opaque red becomes blue.
         let full = at(native("red.png^[colorize:#0000ff").px, 2, 2)

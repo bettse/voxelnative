@@ -18,7 +18,7 @@ public final class NodeRegistry {
     /// Luanti tile/wire order +Y,-Y,+X,-X,+Z,-Z (matches WorldMesher's Face.tile
     /// indices and the atlas faceLayers). Empty entry means "no texture, use colour".
     public private(set) var faceTiles: [UInt16: [String]] = [:]
-    /// Base image name -> vertical-frames animation cycle seconds (#137: lava,
+    /// Base image name -> vertical-frames animation cycle seconds (lava,
     /// fire, furnace). The atlas cycles these layers' pixels over time.
     public private(set) var tileAnimSecs: [String: Float] = [:]
     private var colorCache: [UInt16: SIMD3<Float>] = [:]
@@ -36,7 +36,7 @@ public final class NodeRegistry {
     /// Model file names referenced by mesh nodes, so the media layer fetches them.
     public func meshFileNames() -> Set<String> { lock.withLockUnchecked { Set(meshFiles.values) } }
     private var liquids: Set<UInt16> = []
-    // Light flags for the client-side relight on ADDNODE/REMOVENODE (#278):
+    // Light flags for the client-side relight on ADDNODE/REMOVENODE:
     // the engine relights locally (Map::addNodeAndUpdate ->
     // voxalgo::update_lighting_nodes) and the server does NOT resend relit
     // blocks to the placing player, so without this a placed torch lit only
@@ -46,7 +46,7 @@ public final class NodeRegistry {
     private var lightSources: [UInt16: UInt8] = [:]
     /// glasslike / glasslike_framed(_optional) ids: meshed as cubes but see-
     /// through, so they never hide a neighbour's face (a stone wall behind a
-    /// window used to lose its face and read as x-ray, #265). Luanti culls only
+    /// window used to lose its face and read as x-ray). Luanti culls only
     /// the faces shared between two glass nodes of the same content.
     private var glasslike: Set<UInt16> = []
     private var lavas: Set<UInt16> = []
@@ -57,7 +57,7 @@ public final class NodeRegistry {
     public func drawtype(_ id: UInt16) -> Int { lock.withLockUnchecked { drawtypes[id] ?? 0 } }
     /// Fully-solid opaque node (Luanti NDT_solidness == 2: only NDT_NORMAL and
     /// NDT_PLANTLIKE_ROOTED). Glass/leaves/nodebox/mesh are NOT solid here, so
-    /// the head can see through them. Used for the in-a-wall black-out (#60).
+    /// the head can see through them. Used for the in-a-wall black-out.
     public func isSolidCube(_ id: UInt16) -> Bool {
         lock.withLockUnchecked { let dt = drawtypes[id] ?? 0; return (dt == 0 || dt == 17) && (walkables[id] ?? false) }
     }
@@ -113,12 +113,12 @@ public final class NodeRegistry {
     /// connect_sides bitmask (1 top, 2 bottom, 4 front -Z, 8 left -X, 16 back
     /// +Z, 32 right +X; 0 = unspecified). It belongs to the TARGET of a
     /// connection: a fence with front/back/left/right refuses a pane arm from
-    /// above or below (NodeDefManager::nodeboxConnects) (#299).
+    /// above or below (NodeDefManager::nodeboxConnects).
     private var connectSidesMask: [UInt16: UInt8] = [:]
     public func connectSides(_ id: UInt16) -> UInt8 { lock.withLockUnchecked { connectSidesMask[id] ?? 0 } }
     /// nodedef `waving`: 1 = plants (only the top vertices sway), 2 = leaves
     /// (the whole node wobbles); 0 = still. Liquids (3) wave in their own
-    /// pass already. Drives the shader wave class (#300).
+    /// pass already. Drives the shader wave class.
     private var wavingClass: [UInt16: UInt8] = [:]
     public func waving(_ id: UInt16) -> UInt8 { lock.withLockUnchecked { wavingClass[id] ?? 0 } }
 
@@ -137,8 +137,8 @@ public final class NodeRegistry {
         }
     }
     // collision_box, kept separately from the visual node_box: a fence's collision
-    // post is 1.5 nodes tall so you can't jump it, while its visual post is 1.0
-    // (#214). Physics prefers these when present, else falls back to node_box.
+    // post is 1.5 nodes tall so you can't jump it, while its visual post is 1.0.
+    // Physics prefers these when present, else falls back to node_box.
     private var collisionBoxes: [UInt16: [Box]] = [:]
     private var collisionConnectBoxes: [UInt16: [[Box]]] = [:]
     public func collisionBoxesFor(_ id: UInt16) -> [Box]? { lock.withLockUnchecked { collisionBoxes[id] } }
@@ -162,12 +162,12 @@ public final class NodeRegistry {
     /// Nodes whose node_box is type="wallmounted": its 3 boxes are wall_top,
     /// wall_bottom, wall_side and exactly ONE is drawn, picked by the wallmounted
     /// param2 (buttons, floor heads). Without this they'd draw as all three at
-    /// once (a plus-clump). See WorldMesher.wallmountedBox (#212).
+    /// once (a plus-clump). See WorldMesher.wallmountedBox.
     private var wallmountedBoxes: Set<UInt16> = []
     public func isWallmountedBox(_ id: UInt16) -> Bool { lock.withLockUnchecked { wallmountedBoxes.contains(id) } }
     /// Same, but for a wallmounted SELECTION box (torches, wall levers): the
     /// highlight/point path must pick one box by param2, else all three (top/
-    /// bottom/side) draw and their union reads as a full cube (#253/torch).
+    /// bottom/side) draw and their union reads as a full cube (torch).
     private var wallmountedSelBoxes: Set<UInt16> = []
     public func isWallmountedSelBox(_ id: UInt16) -> Bool { lock.withLockUnchecked { wallmountedSelBoxes.contains(id) } }
     /// Movement slowdown while the player box overlaps this node: max of
@@ -176,7 +176,7 @@ public final class NodeRegistry {
     private var resistances: [UInt16: Int] = [:]
     public func moveResistance(_ id: UInt16) -> Int { lock.withLockUnchecked { resistances[id] ?? 0 } }
     /// `buildable_to`: the node is replaceable (air, grass tufts, snow, water) so a
-    /// placed block goes INTO it, not against it (#178). Air's id defaults true.
+    /// placed block goes INTO it, not against it. Air's id defaults true.
     private var buildableTos: [UInt16: Bool] = [:]
     public func isBuildableTo(_ id: UInt16) -> Bool { lock.withLockUnchecked { buildableTos[id] ?? (id == 0) } }
     /// Luanti's `rightclickable`: right-click runs on_rightclick (open door, use
@@ -211,7 +211,7 @@ public final class NodeRegistry {
     /// Whether this node's texture is alpha-blended (translucent) rather than
     /// opaque/alpha-cut. Drives the mesher's blended pass.
     public func isBlended(_ id: UInt16) -> Bool { lock.withLockUnchecked { blended.contains(id) } }
-    /// Flat per-id light tables for WorldMap.relight (#278).
+    /// Flat per-id light tables for WorldMap.relight.
     public struct LightInfo {
         public let propagates: [Bool], sunlight: [Bool], source: [UInt8]
         @inline(__always) public func prop(_ id: UInt16) -> Bool { Int(id) < propagates.count ? propagates[Int(id)] : false }
@@ -308,7 +308,7 @@ public final class NodeRegistry {
     /// path needs, indexed by content id. appendNodeSolidBoxes took the lock up
     /// to 8 times per scanned node (~40 nodes, twice a tick) plus once per
     /// swept particle step; that was ~100k lock acquisitions a second for
-    /// values that only change on NODEDEF (perf #312). Unknown ids read as
+    /// values that only change on NODEDEF. Unknown ids read as
     /// walkable (the unloaded-edge rule of isWalkable).
     public struct PhysicsSnapshot {
         public let version: Int
@@ -400,7 +400,7 @@ public final class NodeRegistry {
         public let kind: [RenderKind]        // by id; .cube for ids past the table
         public let occludes: [Bool]          // opaque cube, not liquid
         public let blended: [Bool]           // translucent (stained glass)
-        public let glass: [Bool]             // glasslike drawtypes (see-through cubes, #265)
+        public let glass: [Bool]             // glasslike drawtypes (see-through cubes)
         public let emissive: [Bool]          // light_source > 0: skip directional face shading (content_mapblock shade_face)
         // Per-id overlay tiles (6 faces, nil when none) and per-face
         // colour-override flags -- folded in here so the hot mesh loop reads
@@ -508,7 +508,7 @@ public final class NodeRegistry {
         let meshFile = r.string16()              // mesh model file (.obj/.b3d)
         let vscale = r.f32()                     // visual_scale
         if dt == 16 && !meshFile.isEmpty { meshFiles[id] = meshFile; visualScales[id] = vscale }
-        if (dt == 9 || dt == 17) && vscale != 1 { visualScales[id] = vscale }   // plantlike(_rooted) visual_scale (#213)
+        if (dt == 9 || dt == 17) && vscale != 1 { visualScales[id] = vscale }   // plantlike(_rooted) visual_scale
         let tileCount = r.u8()
         guard tileCount >= 1 && tileCount <= 6 else { return }
         var tiles: [String] = [], tileColors: [Bool] = []
@@ -602,10 +602,10 @@ public final class NodeRegistry {
             // for physics whenever collision_box is empty, whatever the node
             // looks like. VoxeLibre's ladder is signlike with a wallmounted
             // 1/16 plate, and colliding it as a full cube pinned players against
-            // it when stepping off (#303). Rendering as boxes stays gated on the
+            // it when stepping off. Rendering as boxes stays gated on the
             // nodebox/fencelike drawtypes below (kind); the mesher checks kind first.
             nodeBoxes[id] = boxes
-            if nbType == 2 { wallmountedBoxes.insert(id) }   // wall_top/bottom/side; pick one by param2 (#212)
+            if nbType == 2 { wallmountedBoxes.insert(id) }   // wall_top/bottom/side; pick one by param2
             if let connect { connectBoxes[id] = connect }   // connected: per-direction arms
             if dt == 12 || dt == 10 { kinds[id] = .nodebox }
         }
@@ -621,11 +621,11 @@ public final class NodeRegistry {
         }
         // collision_box: what the player/mobs physically bump into. Kept apart
         // from node_box so fences (1.5-tall collision post) stop a jump even
-        // though they draw 1.0 tall (#214).
+        // though they draw 1.0 tall.
         var collConnect: [[Box]]? = nil
         var collType = 0
         // Allow the collision box to rise to 1.5 above centre (fence posts), so a
-        // taller-than-visual post isn't clamped back down to the node top (#214).
+        // taller-than-visual post isn't clamped back down to the node top.
         let coll = parseNodeBox(r, connect: &collConnect, type: &collType, yHi: 1.5)
         if !coll.isEmpty {   // any drawtype: chests/beds are mesh nodes with a collision_box
             collisionBoxes[id] = coll
@@ -661,7 +661,7 @@ public final class NodeRegistry {
             // use_texture_alpha = "clip": the texture has hard alpha holes the
             // shader must discard (leaves are allfaces, but a cube node can be
             // clip too). The mesher keeps these in the alpha-cutout pass rather
-            // than the early-Z solid pass (#164).
+            // than the early-Z solid pass.
             if alpha == 1 { clip.insert(id) }
         }
     }
@@ -669,7 +669,7 @@ public final class NodeRegistry {
     /// SoundSpec::serializeSimple: string16 name, then f32 gain/pitch/fade.
     /// The gain/pitch are kept per sound NAME (VoxeLibre defines them
     /// consistently per sound: sand footsteps at 0.045, wood at 0.3) so the
-    /// client plays a node sound at the mod's volume, not 1.0 (#280).
+    /// client plays a node sound at the mod's volume, not 1.0.
     private func readSoundSpec(_ r: PacketReader) -> String {
         let name = r.string16()
         let gain = r.f32(), pitch = r.f32(); _ = r.f32()
@@ -687,7 +687,7 @@ public final class NodeRegistry {
     /// don't do neighbour-connection geometry yet.
     // `yHi` caps the box's top corner. Visual node_box stays in the cube (0.5),
     // but a collision_box legitimately rises above it (a fence post is taller so
-    // you can't jump it), so that path passes a higher cap (#214).
+    // you can't jump it), so that path passes a higher cap.
     private func parseNodeBox(_ r: PacketReader, connect: inout [[Box]]?, type: inout Int, yHi: Float = 0.5) -> [Box] {
         guard r.u8() >= 6 else { return [] }             // NodeBox version
         let t = r.u8()   // 0 regular, 1 fixed, 2 wallmounted, 3 leveled, 4 connected

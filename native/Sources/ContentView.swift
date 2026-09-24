@@ -24,7 +24,7 @@ struct ContentView: View {
     @State private var editID: UUID?
     // Which saved server the Play button will launch. Its own source of truth,
     // not editID (which only tracks what the editor sheet has open): tapping a
-    // row selects, Play connects (#353).
+    // row selects, Play connects.
     @State private var selectedID: UUID?
     @State private var label = ""
     @State private var host = ""
@@ -37,11 +37,11 @@ struct ContentView: View {
     @State private var volMaster = VolumeSettings.shared.master
     @State private var volMusic = VolumeSettings.shared.music
     @State private var volSfx = VolumeSettings.shared.sfx
-    @State private var viewBlocks = Double(ViewSettings.shared.blocks)   // view distance (#161)
+    @State private var viewBlocks = Double(ViewSettings.shared.blocks)   // view distance
 
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
-    // pulled alongside native.log/screenshots (#217).
+    // pulled alongside native.log/screenshots.
     @AppStorage("vrdev.testingMode") private var testingMode = false
 
     // The app boots into this launcher window. On Connect it opens the immersive
@@ -93,7 +93,7 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         // A persistent Play button on the glass edge is the obvious primary
-        // action; tapping a server row only selects it now (#353).
+        // action; tapping a server row only selects it now.
         .ornament(attachmentAnchor: .scene(.bottom)) {
             Button {
                 if let p = playTarget { connect(to: p) }
@@ -109,13 +109,13 @@ struct ContentView: View {
         }
         // Let the form fill the window width instead of capping at a fixed max:
         // the window is freely resizable, so a fixed content width left an empty
-        // glass band when you dragged the corner wider (#156). Filling the width
+        // glass band when you dragged the corner wider. Filling the width
         // makes a resize self-correct (the fields/sliders widen with it).
         .glassBackgroundEffect()   // the window itself is .plain, so the panel carries its own glass
         .sheet(isPresented: $showEditor) { editorSheet }
         .onAppear {
             if editID == nil, let s = store.selected { loadFields(from: s) }
-            if selectedID == nil { selectedID = store.selected?.id ?? store.profiles.first?.id }   // Play needs a target (#353)
+            if selectedID == nil { selectedID = store.selected?.id ?? store.profiles.first?.id }   // Play needs a target
             // Automated loop only: auto-connect to the selected server so a
             // screenshot can be taken without tapping Connect.
             if !autoConnectStarted, UserDefaults.standard.bool(forKey: "vrdev.autoConnect") {
@@ -148,14 +148,14 @@ struct ContentView: View {
             } else {
                 // Tapping a row SELECTS it (drives the radio); the Play ornament
                 // launches the selected server. The pencil opens the editor sheet
-                // without launching (#353).
+                // without launching.
                 ForEach(store.profiles) { p in
                     HStack(spacing: 8) {
                         Button { select(p) } label: { serverRow(p) }
                             .buttonStyle(.plain)
                         Button { loadFields(from: p); showEditor = true } label: {
                             Image(systemName: "square.and.pencil").font(.title3).foregroundStyle(.secondary)
-                                .padding(10).contentShape(Rectangle())   // bigger eye+pinch target (#355)
+                                .padding(10).contentShape(Rectangle())   // bigger eye+pinch target
                         }
                         .buttonStyle(.plain)
                     }
@@ -169,7 +169,7 @@ struct ContentView: View {
     }
 
     /// The saved server Play launches: the selected one, else the store's active
-    /// default, else the first. nil only when there are no servers at all (#353).
+    /// default, else the first. nil only when there are no servers at all.
     private var playTarget: ServerProfile? {
         if let id = selectedID, let p = store.profiles.first(where: { $0.id == id }) { return p }
         return store.selected ?? store.profiles.first
@@ -356,7 +356,7 @@ struct ContentView: View {
     }
     /// Launch a favorite directly: load it into the editor (so state stays in
     /// sync and a return to the launcher shows it) and connect in one action, so
-    /// the user doesn't have to populate the form then hit Connect (#218).
+    /// the user doesn't have to populate the form then hit Connect.
     private func connect(to p: ServerProfile) {
         loadFields(from: p)
         connect()
@@ -365,7 +365,7 @@ struct ContentView: View {
     // MARK: - Testing mode (in-headset bug notes)
 
     // Testing mode + the immersive-state readout are dev affordances, not for a
-    // first-time player, so they live collapsed under "Advanced" (#354).
+    // first-time player, so they live collapsed under "Advanced".
     private var advancedSection: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 8) {
@@ -373,7 +373,7 @@ struct ContentView: View {
                 if testingMode {
                     // Bug capture happens in-game (the Kogane menu's "Bug note"),
                     // where you can see the bug -- a launcher text field is useless
-                    // mid-session, so it's gone (#239). This just enables that option.
+                    // mid-session, so it's gone. This just enables that option.
                     Text("Adds a \u{201C}Bug note\u{201D} option to the in-game menu (captures your view + position with the logs).")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -392,7 +392,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Display").font(.headline).foregroundStyle(.secondary)
             // A stepper, not a slider: view distance is a small integer and a
-            // pinch-drag slider is fiddly to land exactly in 3D space (#355).
+            // pinch-drag slider is fiddly to land exactly in 3D space.
             Stepper(value: $viewBlocks, in: Double(ViewSettings.minBlocks)...Double(ViewSettings.maxBlocks), step: 1) {
                 HStack {
                     Text("View distance")

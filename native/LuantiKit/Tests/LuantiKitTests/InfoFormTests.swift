@@ -3,7 +3,7 @@ import XCTest
 
 /// Parsers for the non-inventory info-form widgets VoxeLibre actually uses:
 /// tabheader (doc Help), textlist (achievements, announcements) and hypertext
-/// (announcements, tuning). These feed the read-only info panel (#339).
+/// (announcements, tuning). These feed the read-only info panel.
 final class InfoFormTests: XCTestCase {
 
     func testTabHeaderStandard() {

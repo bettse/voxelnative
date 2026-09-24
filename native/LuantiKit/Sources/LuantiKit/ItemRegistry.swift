@@ -24,7 +24,7 @@ public final class ItemRegistry {
     }
     /// Like `description(for:)` but keeps the item name's leading color as a
     /// packed tint, so a renamed/enchanted item shows in its own color instead
-    /// of default white (the same strip-vs-parse gap that hid the chest label, #254).
+    /// of default white (the same strip-vs-parse gap that hid the chest label).
     public func descriptionColored(for itemString: String) -> (text: String, color: Float?) {
         let n = Self.baseName(itemString)
         let (d, color) = Self.parseEscapes(descriptions[n] ?? n, consumeColor: true, caller: "item-name")
@@ -107,7 +107,7 @@ public final class ItemRegistry {
     public private(set) var placementPrediction: [String: String] = [:]
     /// sound_place per item (sound-group name; "" = none).
     public private(set) var placeSounds: [String: String] = [:]
-    public private(set) var placeFailedSounds: [String: String] = [:]   // sound_place_failed (#268)
+    public private(set) var placeFailedSounds: [String: String] = [:]   // sound_place_failed
     /// range per item (nodes; the engine's default is 4).
     public private(set) var ranges: [String: Float] = [:]
     /// stack_max per item (max items in one slot), for client-side merge/place
@@ -119,12 +119,12 @@ public final class ItemRegistry {
     public private(set) var usables: Set<String> = []
     /// Whether the wielded item throws/uses on the attack button (has on_use).
     public func isUsable(_ itemString: String) -> Bool { usables.contains(Self.baseName(itemString)) }
-    /// Items in the `food`/`eatable` group, for the raise-to-mouth eat gesture (#173).
+    /// Items in the `food`/`eatable` group, for the raise-to-mouth eat gesture.
     public private(set) var eatables: Set<String> = []
     public func isEatable(_ itemString: String) -> Bool { eatables.contains(Self.baseName(itemString)) }
     /// Armor pieces keyed by item name -> mcl_armor slot index (1 head, 2 torso,
     /// 3 legs, 4 feet), from the armor_head/torso/legs/feet groups. Used by the
-    /// inventory shift-click quick-move to route a piece to its slot (#208).
+    /// inventory shift-click quick-move to route a piece to its slot.
     public private(set) var armorSlots: [String: Int] = [:]
     public func armorSlot(_ itemString: String) -> Int? { armorSlots[Self.baseName(itemString)] }
     /// nil = item unknown to us (caller falls back), "" = don't predict.
@@ -140,7 +140,7 @@ public final class ItemRegistry {
     public func range(for itemString: String) -> Float? { ranges[Self.baseName(itemString)] }
     /// place_param2: the param2 a placed node gets BEFORE any facedir/wallmounted
     /// derivation (game.cpp nodePlacement; VoxeLibre crops, kelp, corals,
-    /// lanterns). nil = derive from the placement as usual (#298).
+    /// lanterns). nil = derive from the placement as usual.
     public func placeParam2(for itemString: String) -> Int? { placeParam2s[Self.baseName(itemString)] }
     /// wield_scale from the ITEMDEF, (1,1,1) when unknown.
     public func wieldScale(for itemString: String) -> SIMD3<Float> { wieldScales[Self.baseName(itemString)] ?? SIMD3(1, 1, 1) }
@@ -157,7 +157,7 @@ public final class ItemRegistry {
     /// Strips any count/metadata after a space from an itemstring.
     public static func baseName(_ itemString: String) -> String {
         // Almost every itemstring is a bare name; skip the split (an array and
-        // a String per call, twice per dropped item per tick, perf #311).
+        // a String per call, twice per dropped item per tick).
         guard let sp = itemString.firstIndex(of: " ") else { return itemString }
         return String(itemString[..<sp])
     }
@@ -218,9 +218,9 @@ public final class ItemRegistry {
             if ng < 4096 { for _ in 0..<ng {
                 let gname = def.string16(); let rating = def.s16()
                 // VoxeLibre food carries a `food`/`eatable` group; the raise-to-mouth
-                // eat gesture uses this to fire only on consumables (#173).
+                // eat gesture uses this to fire only on consumables.
                 if rating != 0, gname == "food" || gname == "eatable" { eatable = true }
-                // Armor groups -> mcl_armor slot index (shift-click quick-move, #208).
+                // Armor groups -> mcl_armor slot index (shift-click quick-move).
                 if rating != 0 { switch gname {
                     case "armor_head":  armorSlot = 1
                     case "armor_torso": armorSlot = 2

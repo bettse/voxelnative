@@ -50,7 +50,7 @@ final class NodeChangeTests: XCTestCase {
     }
 }
 
-/// Accessors the dropped-node icon fallback relies on (#129).
+/// Accessors the dropped-node icon fallback relies on.
 final class DroppedNodeFallbackTests: XCTestCase {
     func testFaceTileReturnsTopTile() {
         let stone = NodeFixtures.node(name: "test:stone", drawtype: 0, dugSound: "") { w in w.u8(6).u8(0) }

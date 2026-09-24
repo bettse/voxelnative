@@ -75,7 +75,7 @@ public enum B3DLoader {
 
         /// A joint's model-space transform at a frame: the product of local
         /// matrices down its parent chain, which is what Irrlicht's joint scene
-        /// node reports as its transform. Bone attachments (#282) hang off it.
+        /// node reports as its transform. Bone attachments hang off it.
         public func jointGlobalMatrix(name: String, frame: Float, overrides: [String: JointOverride] = [:]) -> simd_float4x4? {
             guard let idx = joints.firstIndex(where: { $0.name == name }) else { return nil }
             var chain: [Int] = []

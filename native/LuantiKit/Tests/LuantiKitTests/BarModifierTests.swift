@@ -5,7 +5,7 @@ import ImageIO
 import UniformTypeIdentifiers
 @testable import LuantiKit
 
-/// The bar-building texture modifiers (#122): [lowpart, [verticalframe,
+/// The bar-building texture modifiers: [lowpart, [verticalframe,
 /// [transform, [resize, as VoxeLibre's boss bars and XP bar use them.
 /// Semantics mirror imagesource.cpp. Images are 8 px so the 8 px canvas is 1:1.
 final class BarModifierTests: XCTestCase {

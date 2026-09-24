@@ -71,7 +71,7 @@ final class GameInput {
     // One CHHapticEngine per connected controller, made from GCController.haptics
     // (the Game Controller framework's bridge to CoreHaptics). Empty if the Sense
     // exposes no haptics on visionOS -- rumble() then no-ops, so callers never
-    // have to check (#357).
+    // have to check.
     private var hapticEngines: [ObjectIdentifier: CHHapticEngine] = [:]
 
     // Mouse movement is delivered ONLY through a callback (no pollable delta), so
@@ -117,7 +117,7 @@ final class GameInput {
         // pick up anything already paired at launch.
         GCController.startWirelessControllerDiscovery {}
         refresh()
-        GCController.controllers().forEach { setupHaptics($0) }   // haptics for anything paired at launch (#357)
+        GCController.controllers().forEach { setupHaptics($0) }   // haptics for anything paired at launch
         // Keep discovery alive: a second controller turned on well after the
         // first fired no connect in testing, and re-arming discovery gives it
         // (and any late pair) a fresh chance to surface.
@@ -167,7 +167,7 @@ final class GameInput {
         mouseLock.unlock()
     }
 
-    // MARK: - Haptics (#357)
+    // MARK: - Haptics
 
     /// Build (once) a CoreHaptics engine for a controller, if it exposes haptics.
     /// The Sense may report no haptic locality through GameController on visionOS,
@@ -324,7 +324,7 @@ final class GameInput {
                 if p.buttons["Thumbstick Button"]?.isPressed == true { s.sneak = true }
                 // A standalone left Sense labels its two face buttons "Button A"/
                 // "Button B" (device-observed), but accept the PlayStation-glyph
-                // names X/Y too so hotbar prev/next survive a future relabel (#81).
+                // names X/Y too so hotbar prev/next survive a future relabel.
                 if p.buttons["Button A"]?.isPressed == true || p.buttons["Button X"]?.isPressed == true { s.hotbarPrev = true }   // left square
                 if p.buttons["Button B"]?.isPressed == true || p.buttons["Button Y"]?.isPressed == true { s.hotbarNext = true }   // left triangle
             } else {

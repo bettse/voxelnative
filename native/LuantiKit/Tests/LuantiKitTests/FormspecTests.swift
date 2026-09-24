@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// Formspec list[] parsing — enough to drive the spatial container UI (#93).
+/// Formspec list[] parsing — enough to drive the spatial container UI.
 final class FormspecTests: XCTestCase {
     func testParsesPlayerAndNodeLists() {
         // A VoxeLibre chest formspec: the chest's own list (current_name) + the
@@ -69,7 +69,7 @@ extension FormspecTests {
     }
 }
 
-/// #151: the death screen's "Respawn" button label arrives translator-wrapped
+/// the death screen's "Respawn" button label arrives translator-wrapped
 /// (\x1b(T@__builtin)Respawn\x1b(E)); parseButtons must return clean text so the
 /// notice doesn't show raw escape characters.
 final class FormspecCleanTests: XCTestCase {
@@ -96,7 +96,7 @@ final class FormspecCleanTests: XCTestCase {
     }
 }
 
-/// #176: static label[] text (station name + slot captions) is parsed so an
+/// static label[] text (station name + slot captions) is parsed so an
 /// otherwise-bare station UI has something readable.
 final class FormspecLabelTests: XCTestCase {
     func testParsesLabelPositionAndText() {
@@ -121,7 +121,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertTrue(Formspec.parseLabels("label[0,0;]").isEmpty)
     }
 
-    // The anvil form (#229): item lists PLUS a rename field, so the field must be
+    // The anvil form: item lists PLUS a rename field, so the field must be
     // parsed with position so a tappable box can be placed in the panel.
     func testParsesPositionedField() {
         let spec = "field[4.125,0.75;7.25,1;name;;Sword]list[context;input;1.625,2.6;1,1;]"
@@ -153,7 +153,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(bs.first?.label, "Go")
     }
 
-    // #223: the furnace fire gauge / cook arrow are image[] elements whose
+    // the furnace fire gauge / cook arrow are image[] elements whose
     // texture is a modifier chain; parse position, size, and the whole texture.
     func testParsesImageWithModifierTexture() {
         let spec = "image[3.5,2;1,1;default_furnace_fire_bg.png^[lowpart:40:default_furnace_fire_fg.png]" +
@@ -170,7 +170,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertTrue(Formspec.parseImages(spec).isEmpty)
     }
 
-    // #232: item_image[] is an item icon, distinct from image[] (a texture).
+    // item_image[] is an item icon, distinct from image[] (a texture).
     func testParsesItemImageNotImage() {
         let spec = "item_image[1,2;1,1;mcl_core:diamond]image[3.5,2;1,1;fire.png]"
         let items = Formspec.parseItemImages(spec)
@@ -187,7 +187,7 @@ final class FormspecLabelTests: XCTestCase {
         let spec = "item_image_button[0,0;1,1;mcl_core:stone;go;Go]"
         XCTAssertTrue(Formspec.parseItemImages(spec).isEmpty)
     }
-    // #233: image_button[] keeps its icon texture at f[2].
+    // image_button[] keeps its icon texture at f[2].
     func testImageButtonKeepsTexture() {
         let bs = Formspec.parseButtonsPositioned("image_button[5.2,1.5;1,1;mcl_potions_swift.png;swiftness;]")
         XCTAssertEqual(bs.first?.name, "swiftness")
@@ -197,7 +197,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(pb.first?.texture, "")
     }
 
-    // #234: container[x,y] shifts contained elements by a running offset, then
+    // container[x,y] shifts contained elements by a running offset, then
     // the markers are dropped; nested containers add up; container_end pops.
     func testFlattenContainerOffsetsPositions() {
         let spec = "container[4,2]button[0,0;7,1;a;A]image[0,1;1,1;t.png]container_end[]" +
@@ -228,7 +228,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(Formspec.flattenContainers(spec), spec)
     }
 
-    // #235: item_image_button[] carries an item icon + a submit field, and must
+    // item_image_button[] carries an item icon + a submit field, and must
     // NOT be parsed as a plain button/image_button.
     func testParsesItemImageButton() {
         let spec = "item_image_button[1,2;0.875,0.875;mcl_core:stonebrick;recipe_3;]" +
@@ -243,7 +243,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(bs.map { $0.name }, ["done"])
     }
 
-    // #236: tooltip[element;text] maps a widget name to hover text; the rectangle
+    // tooltip[element;text] maps a widget name to hover text; the rectangle
     // form tooltip[x,y;w,h;text] is skipped.
     func testParsesElementTooltip() {
         // Real tooltips carry an actual newline (Lua's \n), not an escaped one.
@@ -255,7 +255,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(t.count, 1)
     }
 
-    // #237: checkbox[x,y;name;label;selected] with selected state.
+    // checkbox[x,y;name;label;selected] with selected state.
     func testParsesCheckbox() {
         let cbs = Formspec.parseCheckboxes("checkbox[5.15,5.25;clear_inv_check;Do not ask again;true]")
         XCTAssertEqual(cbs.count, 1)
@@ -266,7 +266,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertFalse(Formspec.parseCheckboxes("checkbox[0,0;c;Label;]").first?.selected ?? true)
     }
 
-    // #244: background9[...;true] (auto_clip fill) + background[...;auto_clip] (fill), vs a
+    // background9[...;true] (auto_clip fill) + background[...;auto_clip] (fill), vs a
     // plain background[] (positioned art).
     func testParsesBackgrounds() {
         let spec = "background9[1,1;1,1;mcl_base_textures_background9.png;true;7]" +
@@ -279,7 +279,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertFalse(bgs[1].fill)                      // plain background at coords
         XCTAssertEqual(bgs[1].gx, -0.19, accuracy: 1e-4)
     }
-    // #372: background9's 4th field is auto_clip, not draw_border. The creative
+    // background9's 4th field is auto_clip, not draw_border. The creative
     // inventory's own panel leaves it empty and sits at its coordinates.
     func testPositionedBackground9DoesNotFill() {
         let bgs = Formspec.parseBackgrounds("background9[0,1.34;13,8.75;mcl_base_textures_background9.png;;7]")
@@ -296,7 +296,7 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertTrue(bgs.first?.fill ?? false)          // auto_clip true -> fill
     }
 
-    // #254: a leading color escape on formspec text is parsed to a packed tint
+    // a leading color escape on formspec text is parsed to a packed tint
     // (r + g*256 + b*65536) instead of stripped, so dark labels don't render as
     // invisible white. #313131 = 49 + 49*256 + 49*65536.
     private static let dark313131 = Float(0x31 + 0x31 * 256 + 0x31 * 65536)

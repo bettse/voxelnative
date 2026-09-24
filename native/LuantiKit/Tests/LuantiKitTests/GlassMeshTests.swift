@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// Stained glass (use_texture_alpha="blend", #143): the alpha byte parses into
+/// Stained glass (use_texture_alpha="blend"): the alpha byte parses into
 /// the blended flag, and the mesher routes blended cube nodes into the
 /// translucent (liquid) stream instead of the opaque one, without occluding
 /// their neighbours (you see through the glass).
@@ -29,7 +29,7 @@ final class GlassMeshTests: XCTestCase {
     func testBlendedNodeboxGoesToTheTranslucentStream() {
         // A nether-portal-style node: nodebox (drawtype 12) + use_texture_alpha
         // "blend". Its faces must land in the alpha-blend (liquid) stream, not the
-        // cutout/discard pass where the translucent purple vanishes to nothing (#177).
+        // cutout/discard pass where the translucent purple vanishes to nothing.
         let portal = NodeFixtures.node(name: "t:portal", drawtype: 12, dugSound: "",
                                        walkable: false, alphaBlend: true) { w in
             w.u8(6).u8(1); w.u16(1)                       // node_box v6, fixed, one box
@@ -79,7 +79,7 @@ final class GlassMeshTests: XCTestCase {
 
     // PLAIN glass (drawtype glasslike, cutout alpha, not blended) is the common
     // window block. It used to be classed like stone and hid the neighbour's
-    // face, so a wall behind a window lost its face and read as x-ray (#265).
+    // face, so a wall behind a window lost its face and read as x-ray.
     private func plainGlass(_ name: String) -> Data {
         NodeFixtures.node(name: name, drawtype: 4, dugSound: "") { w in w.u8(6).u8(0) }
     }

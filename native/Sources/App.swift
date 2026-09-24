@@ -66,7 +66,7 @@ struct VoxelNativeApp: App {
         // Open tall enough to show the whole launcher form (through the Sound
         // section) without scrolling: with .plain and no explicit size the
         // window came up short and clipped the volume sliders off the bottom
-        // edge, with no obvious way to scroll or resize to them (#154).
+        // edge, with no obvious way to scroll or resize to them.
         .defaultSize(width: 640, height: 900)
         // NOTE: do NOT tie the session to scenePhase. Opening the immersive
         // space backgrounds the 2D window, so a scenePhase .background here
@@ -80,7 +80,7 @@ struct VoxelNativeApp: App {
         // Hide the system's passthrough hands/controllers so only our rendered
         // hand boxes show (otherwise the real controllers show through too).
         .upperLimbVisibility(.hidden)
-        // #84: no system overlays in-world (the look-at-controller menu circle).
+        // no system overlays in-world (the look-at-controller menu circle).
         .persistentSystemOverlays(DisplaySettings.shared.hideSystemOverlays ? .hidden : .visible)
     }
 }

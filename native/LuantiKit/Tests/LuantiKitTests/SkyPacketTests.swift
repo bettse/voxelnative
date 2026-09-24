@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Sky packets (#102): SET_SKY (both layouts), SET_SUN/MOON/STARS,
+/// Sky packets: SET_SKY (both layouts), SET_SUN/MOON/STARS,
 /// CLOUD_PARAMS, SET_LIGHTING parse into Client.sky and publish via onSky.
 /// Wire layouts mirror Client::handleCommand_HudSetSky & co.
 final class SkyPacketTests: XCTestCase {
@@ -52,7 +52,7 @@ final class SkyPacketTests: XCTestCase {
         XCTAssertTrue(c.sky.clouds)
     }
 
-    /// The optional tail after the colour table (#285): body_orbit_tilt, then
+    /// The optional tail after the colour table: body_orbit_tilt, then
     /// fog_distance/fog_start, then fog_color. Present only when the packet is
     /// long enough, and each SET_SKY resets them to "unset".
     func testFogTailParsesAndResets() {

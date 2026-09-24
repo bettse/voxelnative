@@ -79,7 +79,7 @@ final class DrawtypeMeshTests: XCTestCase {
     }
 
     func testSnowLayerOnLeavesCullsItsBottomFace() {
-        // The #220 case: a snow layer resting on leaves. The leaves draw a full
+        // The snow-on-leaves case: a snow layer resting on leaves. The leaves draw a full
         // opaque top face at the same plane as the snow's bottom face; without the
         // boundary cull the two Z-fight. The snow's bottom (-Y) face must be culled.
         let reg = registry([(1, snowLayer()), (2, node("t:leaves", 5))])

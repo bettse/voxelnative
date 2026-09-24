@@ -10,7 +10,7 @@ struct EntityInstance {
     var layer: Float
     var light: Float
     // Packed r + g*256 + b*65536 colour multiplier; white = untinted. Mobs go
-    // red here while their PUNCHED hit-flash timer runs (#100).
+    // red here while their PUNCHED hit-flash timer runs.
     var tint: Float = 16777215
     // Head-locked HUD (crosshair, hearts, hunger, breath, hotbar): `pos` is a
     // head-LOCAL offset in a canonical frame (forward -Z, right +X, up +Y),
@@ -27,7 +27,7 @@ struct EntityInstance {
 /// Thread-safe drop-box for the current entity list (session -> renderer).
 /// Split into world billboards and head-locked HUD at post time (once, on the
 /// tick thread) so the renderer doesn't re-filter the whole list twice every
-/// frame at 90Hz (#186).
+/// frame at 90Hz.
 final class EntityHandoff {
     private let lock = NSLock()
     private var worldE: [EntityInstance] = []

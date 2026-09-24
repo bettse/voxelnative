@@ -29,7 +29,7 @@ final class StripEscapesTests: XCTestCase {
 
     func testParseColor6Digit() {
         // #313131 is the chest "Inventory" label color that used to render as
-        // invisible white on the light panel (#254).
+        // invisible white on the light panel.
         let r = ItemRegistry.parseEscapes("\u{1b}(c@#313131)Inventory", consumeColor: true)
         XCTAssertEqual(r.text, "Inventory")
         XCTAssertEqual(r.color, Float(0x31 + 0x31*256 + 0x31*65536))

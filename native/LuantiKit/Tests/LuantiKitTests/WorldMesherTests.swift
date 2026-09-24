@@ -5,7 +5,7 @@ import simd
 /// WorldMesher geometry rules: faces between two cubes are dropped, the edge
 /// against an unloaded block stays closed (no peeking into the void), and
 /// non-cube drawtypes get their reversed twin quads because the renderer
-/// back-face culls the opaque world (#85).
+/// back-face culls the opaque world.
 final class WorldMesherTests: XCTestCase {
     private let mid = SIMD3(8, 8, 8)   // well inside block (0,0,0)
 
@@ -76,7 +76,7 @@ final class WorldMesherTests: XCTestCase {
         XCTAssertEqual(m.indices.count, q * 6, "one winding per quad")
     }
 
-    // The per-block world render (#183) draws each mapblock's buffer on its own,
+    // The per-block world render draws each mapblock's buffer on its own,
     // so a subset mesh (only: [bpos]) must return indices LOCAL to that block's
     // vertex array (0-based), never global offsets into a concatenated world.
     func testSubsetMeshHasBlockLocalIndices() {

@@ -2,7 +2,7 @@ import XCTest
 import simd
 @testable import LuantiKit
 
-/// Client-side placement param2 prediction (#178), matching Luanti game.cpp
+/// Client-side placement param2 prediction, matching Luanti game.cpp
 /// nodePlacement, so oriented nodes appear facing right without a round-trip.
 final class PlacementParam2Tests: XCTestCase {
     // facedir (pt2 3) / 4dir (12): the node faces the player. Luanti:

@@ -67,7 +67,7 @@ public enum Formspec {
     /// Returns the ring as ordered (loc, list) pairs; shift-clicking a slot moves
     /// its stack to the NEXT ring entry after the source list (wrapping). This is
     /// how a furnace routes fuel vs ingredient: the ring points player `main` at
-    /// the server-side `distr` list, whose put-handler sorts by recipe (#208).
+    /// the server-side `distr` list, whose put-handler sorts by recipe.
     public static func parseListrings(_ spec: String, context: SIMD3<Int>?) -> [(loc: String, list: String)] {
         func resolve(_ s: String) -> String? {
             if s == "current_name" || s == "context" {
@@ -100,7 +100,7 @@ public enum Formspec {
     /// offset into each contained element's leading `x,y` position, then dropping
     /// the container markers. Lets every parser stay container-unaware (the
     /// enchanting table wraps each option row in a container, which otherwise
-    /// collapses all three at the panel origin, #234). Only elements whose FIRST
+    /// collapses all three at the panel origin). Only elements whose FIRST
     /// param is `x,y` are shifted (button/image/label/field/item_image/box); a
     /// list[] (loc-first) inside a container is left as-is (VoxeLibre doesn't do that).
     public static func flattenContainers(_ spec: String) -> String {
@@ -149,7 +149,7 @@ public enum Formspec {
     /// A static text label at a formspec grid position. `color` is the packed
     /// tint (r + g*256 + b*65536) from a leading `\x1b(c@#rgb)` escape, nil for
     /// default white. Labels like the chest "Inventory" title ship a dark color
-    /// that we used to strip, painting white text invisibly on a light panel (#254).
+    /// that we used to strip, painting white text invisibly on a light panel.
     public struct Label: Equatable {
         public let gx: Float, gy: Float
         public let text: String
@@ -157,7 +157,7 @@ public enum Formspec {
     }
 
     /// Parse `label[<x>,<y>;<text>]` (the text stations use to name themselves and
-    /// their slots). Gives an otherwise-bare station UI something readable (#176).
+    /// their slots). Gives an otherwise-bare station UI something readable.
     /// Guards against matching the `vertlabel[` suffix.
     public static func parseLabels(_ spec: String) -> [Label] {
         var out: [Label] = []
@@ -197,7 +197,7 @@ public enum Formspec {
 
     /// A `background[]` / `background9[]` panel image. `fill` (background9, or
     /// background[...;auto_clip=true]) stretches over the whole formspec -- that's
-    /// the global stone panel from the formspec prepend (#244).
+    /// the global stone panel from the formspec prepend.
     public struct Background: Equatable {
         public let gx: Float, gy: Float, w: Float, h: Float
         public let texture: String
@@ -231,7 +231,7 @@ public enum Formspec {
     }
 
     /// A static image element (`image[x,y;w,h;texture]`), e.g. the furnace fire
-    /// gauge and cook-progress arrow, whose texture is a modifier chain (#223).
+    /// gauge and cook-progress arrow, whose texture is a modifier chain.
     public struct Image: Equatable {
         public let gx: Float, gy: Float, w: Float, h: Float
         public let texture: String
@@ -290,7 +290,7 @@ public enum Formspec {
     }
 
     /// An editable text field with its grid position and width, so a list-form
-    /// (anvil rename, etc.) can draw a tappable box for it in the panel (#229).
+    /// (anvil rename, etc.) can draw a tappable box for it in the panel.
     public struct Field: Equatable {
         public let gx: Float, gy: Float, w: Float
         public let name: String
@@ -325,9 +325,9 @@ public enum Formspec {
         public let name: String
         public let label: String
         public let exit: Bool   // button_exit closes the form after submitting
-        public var texture: String = ""   // image_button[]'s icon texture (drawn instead of a plain plate, #233)
-        public var itemName: String = ""  // item_image_button[]'s item, drawn as an icon (stonecutter recipes, #235)
-        public var color: Float? = nil    // packed tint from a leading \x1b(c@#rgb) label color, nil for white (#254)
+        public var texture: String = ""   // image_button[]'s icon texture (drawn instead of a plain plate)
+        public var itemName: String = ""  // item_image_button[]'s item, drawn as an icon (stonecutter recipes)
+        public var color: Float? = nil    // packed tint from a leading \x1b(c@#rgb) label color, nil for white
         public var h: Float = 1           // only the legacy-coordinate conversion needs it
     }
 
@@ -340,7 +340,7 @@ public enum Formspec {
             let kind: String, exit: Bool, image: Bool
             // item_image_button[ ends in "image_button[" and "button[" -- it's a
             // different element (parsed by parseItemImageButtons), so skip any chunk
-            // whose element is item_image_button (#235).
+            // whose element is item_image_button.
             if c.range(of: "item_image_button[") != nil { continue }
             if let r = c.range(of: "image_button_exit[") { kind = String(c[r.upperBound...]); exit = true; image = true }
             else if let r = c.range(of: "image_button[") { kind = String(c[r.upperBound...]); exit = false; image = true }
@@ -365,7 +365,7 @@ public enum Formspec {
 
     /// Parse `item_image_button[x,y;w,h;itemname;name;label]` (stonecutter recipe
     /// buttons, craftguide). Returns buttons carrying the item to draw as an icon
-    /// and the field name to submit on tap (#235).
+    /// and the field name to submit on tap.
     public static func parseItemImageButtons(_ spec: String) -> [PositionedButton] {
         var out: [PositionedButton] = []
         for chunk in spec.split(separator: "]") {
@@ -389,11 +389,11 @@ public enum Formspec {
         public let name: String
         public let label: String
         public let selected: Bool
-        public var color: Float? = nil   // packed tint from a leading label color, nil for white (#254)
+        public var color: Float? = nil   // packed tint from a leading label color, nil for white
     }
 
     /// Parse `checkbox[x,y;name;label;selected]` (the clear-inventory "Do not ask
-    /// again" box, tuning options) (#237). y is the checkbox's vertical CENTER.
+    /// again" box, tuning options). y is the checkbox's vertical CENTER.
     public static func parseCheckboxes(_ spec: String) -> [Checkbox] {
         var out: [Checkbox] = []
         for chunk in spec.split(separator: "]") {
@@ -411,7 +411,7 @@ public enum Formspec {
 
     /// Parse the element form `tooltip[<element_name>;<text>]` into name -> text.
     /// The rectangle form `tooltip[x,y;w,h;text;...]` (first field is a position)
-    /// is skipped. Used to show hover text (enchant cost, etc.) (#236).
+    /// is skipped. Used to show hover text (enchant cost, etc.).
     public static func parseTooltips(_ spec: String) -> [String: (text: String, color: Float?)] {
         var out: [String: (text: String, color: Float?)] = [:]
         for chunk in spec.split(separator: "]") {
@@ -429,7 +429,7 @@ public enum Formspec {
 
     /// A `tabheader[...]` tab strip. The player taps a caption to switch tab,
     /// which submits `name = "<1-based index>"` and the server re-sends the form
-    /// on that tab (doc Help, tuning) (#339).
+    /// on that tab (doc Help, tuning).
     public struct TabHeader: Equatable {
         public let name: String
         public let captions: [String]
@@ -467,7 +467,7 @@ public enum Formspec {
     }
 
     /// Parse `textlist[<X>,<Y>;<W>,<H>;<name>;<item1>,<item2>,...;<selected>;<transparent>]`.
-    /// Items separate on unescaped commas (a `\,` stays literal) (#339).
+    /// Items separate on unescaped commas (a `\,` stays literal).
     public static func parseTextlists(_ spec: String) -> [TextList] {
         var out: [TextList] = []
         for chunk in spec.split(separator: "]") {
@@ -487,7 +487,7 @@ public enum Formspec {
 
     /// A read-only `hypertext[...]` block, reduced to plain wrapped-able lines
     /// (announcements, tuning help). Interactive `<action>` links are flattened
-    /// to their visible text (#339).
+    /// to their visible text.
     public struct Hypertext: Equatable {
         public let gx: Float, gy: Float, w: Float, h: Float
         public let lines: [String]
@@ -519,7 +519,7 @@ public enum Formspec {
     /// into positioned Labels the panel can render read-only: tab captions across
     /// the top (the current tab bracketed), each textlist row on its own line,
     /// and hypertext reduced to text lines. The VR panel has no scrolling yet, so
-    /// long lists/text are capped with a "(+N more)" marker (#339). Coordinates
+    /// long lists/text are capped with a "(+N more)" marker. Coordinates
     /// are formspec grid units, matching label[]/list[] placement.
     public static func infoFormLabels(_ spec: String, legacy: Bool = false) -> [Label] {
         var out: [Label] = []
@@ -600,7 +600,7 @@ public enum Formspec {
 
     /// True when a form has no item lists but does carry info widgets we render
     /// read-only (textlist/tabheader/hypertext) -- an achievements/announcements/
-    /// Help dialog rather than a container or a text-editor form (#339).
+    /// Help dialog rather than a container or a text-editor form.
     public static func isInfoForm(_ spec: String) -> Bool {
         parseTabHeader(spec) != nil || !parseTextlists(spec).isEmpty || !parseHypertexts(spec).isEmpty
     }
@@ -609,7 +609,7 @@ public enum Formspec {
     /// coords infoFormLabels places its text at) plus the field name + value to
     /// submit when tapped. Tabs submit the 1-based tab index; a textlist row
     /// submits "CHG:<1-based index>", mirroring the engine's textlist event so
-    /// the server shows that entry (#346).
+    /// the server shows that entry.
     public struct InfoTarget: Equatable {
         public let gx: Float, gy: Float, w: Float, h: Float
         public let field: String, value: String
@@ -671,12 +671,12 @@ public enum Formspec {
     /// backslashes (`\,` `\;` `\[` `\]` `\\`) and strip the control/translation
     /// escape sequences (`\x1b(T@domain)...\x1b(E)`, color codes). Without this a
     /// translator-wrapped label like the death screen's "Respawn" button showed
-    /// up as raw escape characters (#151).
+    /// up as raw escape characters.
     public static func clean(_ s: String) -> String {
         ItemRegistry.stripEscapes(unescape(s))
     }
     /// Like `clean` but keeps the leading color escape as a packed tint, so a
-    /// dark-colored label renders in its own color instead of default white (#254).
+    /// dark-colored label renders in its own color instead of default white.
     public static func cleanColored(_ s: String, caller: String = "formspec-label") -> (text: String, color: Float?) {
         ItemRegistry.parseEscapes(unescape(s), consumeColor: true, caller: caller)
     }
@@ -696,7 +696,7 @@ public enum Formspec {
     /// `field` whose only buttons are exit buttons named "submit"/"done". The
     /// bed sleep form is NOT one: it carries a chat field plus "chatsubmit" and
     /// a "leave" button_exit, and opening the keyboard on it put a dictation
-    /// pad in the sleeping player's face instead of a way to get up (#304).
+    /// pad in the sleeping player's face instead of a way to get up.
     public static func isTextEditorForm(_ spec: String) -> Bool {
         if spec.contains("textarea[") { return true }
         guard spec.contains("field[") else { return false }

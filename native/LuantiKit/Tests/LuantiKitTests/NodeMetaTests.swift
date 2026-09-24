@@ -24,7 +24,7 @@ final class NodeMetaTests: XCTestCase {
         XCTAssertNil(main[1])
         XCTAssertEqual(main[2]?.name, "mcl_core:dirt")
         // The `formspec` string var is captured so a furnace (no on_rightclick)
-        // can be opened client-side on rightclick (#166).
+        // can be opened client-side on rightclick.
         XCTAssertEqual(map.nodeFormspec(SIMD3(10, 20, 30)), "size[9,9]")
         XCTAssertNil(map.nodeFormspec(SIMD3(0, 0, 0)))
     }

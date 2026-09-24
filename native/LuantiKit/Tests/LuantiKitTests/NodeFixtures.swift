@@ -13,7 +13,7 @@ enum NodeFixtures {
     }
 
     /// A TileDef with a vertical_frames animation (type 1: aspect_w, aspect_h,
-    /// length seconds), for the animated-tile parse test (#137).
+    /// length seconds), for the animated-tile parse test.
     static func tileAnimated(_ w: PacketWriter, _ name: String, secs: Float) {
         w.u8(6).string16(name)
         w.u8(1).u16(1).u16(1).f32(secs)   // vertical_frames, 1:1 aspect, cycle length

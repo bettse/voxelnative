@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// #152: the atlas build runs off the tick queue and reads the media store, while
+/// the atlas build runs off the tick queue and reads the media store, while
 /// poll keeps mutating that store as files land. snapshot() hands the builder its
 /// own copy so the two never touch the same dict, and later writes to the live
 /// store don't leak into an in-flight bake.

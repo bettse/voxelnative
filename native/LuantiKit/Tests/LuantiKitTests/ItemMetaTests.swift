@@ -1,7 +1,7 @@
 import XCTest
 @testable import LuantiKit
 
-/// Itemstring meta field (#271): "name count wear \"\u{1}k\u{2}v\u{3}k2\u{2}v2\u{3}\"",
+/// Itemstring meta field: "name count wear \"\u{1}k\u{2}v\u{3}k2\u{2}v2\u{3}\"",
 /// JSON-quoted on the wire (control chars as \uXXXX): ItemStackMetadata::serialize
 /// writes ONE leading \u{1} then key\u{2}value\u{3} per pair.
 final class ItemMetaTests: XCTestCase {

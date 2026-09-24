@@ -39,7 +39,7 @@ public final class WorldMap {
     }
     /// The `formspec` string in a node's metadata, if any. Furnaces (and other
     /// stations without an on_rightclick) rely on the client opening this on
-    /// rightclick; real Luanti does this client-side (#166).
+    /// rightclick; real Luanti does this client-side.
     public private(set) var nodeFormspecs: [SIMD3<Int>: String] = [:]
     public func nodeFormspec(_ p: SIMD3<Int>) -> String? { nodeFormspecs[p] }
 
@@ -49,7 +49,7 @@ public final class WorldMap {
     /// 14=colored_4dir). `nodepos` is where the block lands, `neighborpos` the
     /// pointed node, `playerpos` the player's node coords. All in the same frame
     /// (differences are frame-independent). Colour bits and torch vertical-rotate
-    /// are left to the server. (#178)
+    /// are left to the server.
     public static func placementParam2(pt2: Int, nodepos: SIMD3<Int>, neighborpos: SIMD3<Int>, playerpos: SIMD3<Int>) -> UInt8 {
         switch pt2 {
         case 4, 10:   // wallmounted: mount to the face you pointed at
@@ -98,7 +98,7 @@ public final class WorldMap {
     }
 
     /// nodeLight with the same one-entry block cursor as nodeId: entity and
-    /// particle loops hit the same few blocks over and over (perf #312).
+    /// particle loops hit the same few blocks over and over.
     public func nodeLight(_ p: SIMD3<Int>, _ c: inout BlockCursor) -> UInt8 {
         let bp = WorldMap.blockPos(p)
         if bp != c.bp { c.bp = bp; c.block = blocks[bp] }
@@ -126,7 +126,7 @@ public final class WorldMap {
 
     /// A block decoded off the hot path: everything but the world mutation. The
     /// heavy work (zstd decompress + 4096-node parse) runs on a background queue;
-    /// `insert` then splices it into the map on the session queue (#179/#180).
+    /// `insert` then splices it into the map on the session queue.
     public struct DecodedBlock {
         public let bpos: SIMD3<Int>
         let block: MapBlock
@@ -275,7 +275,7 @@ public final class WorldMap {
     /// Blocks whose light changed in a relight, for the session to remesh.
     public var onRelit: ((Set<SIMD3<Int>>) -> Void)?
 
-    /// Client-side relight after one node changed at `p` (#278). Mirrors
+    /// Client-side relight after one node changed at `p`. Mirrors
     /// voxalgo::update_lighting_nodes for a single node: first UNLIGHT what the
     /// old node lit (walk outward removing every neighbour whose light is
     /// weaker than the light it got from us, noting the brighter frontier),
@@ -447,7 +447,7 @@ public final class WorldMap {
 
     public func removeNode(_ p: SIMD3<Int>) {
         // A dug cell becomes air. With the node registry's light tables the
-        // relight in setNode fills it properly (#278); before NODEDEF fall back
+        // relight in setNode fills it properly; before NODEDEF fall back
         // to the brightest neighbour minus one so a hole isn't pitch black.
         if lightInfo != nil { setNode(p, param0: WorldMap.CONTENT_AIR, param1: 0); return }
         let nb = neighborLight(p)
