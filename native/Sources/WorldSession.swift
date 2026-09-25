@@ -477,6 +477,17 @@ final class WorldSession {
     }
     private let simAutoDig = false
 
+    /// What the pointing ray stops on for the item in hand: normally only
+    /// pointable nodes, plus liquids when the item is liquids_pointable (the
+    /// selected item, or the hand when the slot is empty, as in game.cpp).
+    private var pointableNow: (UInt16) -> Bool {
+        let wield = client.wieldIndex
+        let item = (wield >= 0 && wield < hotbar.count ? hotbar[wield] : nil) ?? handItemName() ?? ""
+        let nodes = client.nodes
+        guard client.items.isLiquidsPointable(item) else { return nodes.isPointable }
+        return { nodes.isPointable($0) || nodes.isLiquid($0) }
+    }
+
     private let input = GameInput()
     private var worldReadyLogged = false
     private var skyBrightnessSmooth: Float = 1   // day-bank light at the head, 0..1, eased (cave fog)
@@ -1791,7 +1802,7 @@ final class WorldSession {
                 simDigPhase = 1; simDigTimer = 0
             case 1 where simDigTimer > 6:
                 guard let hit = client.world.raycast(origin: player.rayOrigin(), dir: SIMD3(0, -1, 0),
-                                                     maxDist: currentReach, pointable: client.nodes.isPointable, boxes: pointBoxes) else {
+                                                     maxDist: currentReach, pointable: pointableNow, boxes: pointBoxes) else {
                     print("[digtest] no ground under feet yet (still falling/streaming), waiting"); fflush(stdout)
                     simDigTimer = 4   // retry in ~2 s
                     break
@@ -3109,7 +3120,7 @@ final class WorldSession {
             if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove); digNode = nil; digElapsed = 0 }  // cancel any dig
             if gi.dig && !prevDig {
                 let hit = client.world.raycast(origin: player.rayOrigin(), dir: player.aim(), maxDist: currentReach,
-                                               pointable: client.nodes.isPointable, boxes: pointBoxes)
+                                               pointable: pointableNow, boxes: pointBoxes)
                 client.sendInteract(action: 4, under: hit?.under, above: hit?.above)   // INTERACT_USE
                 print("[use] \(wieldName) (throw)"); fflush(stdout)
             }
@@ -3125,8 +3136,8 @@ final class WorldSession {
             let digging = gi.dig && prevDig && digNode != nil
             let obj = digging ? nil : client.objects.raycastEntity(origin: o, dir: a, maxDist: currentReach)
             let nodeHit = obj != nil ? client.world.raycast(origin: o, dir: a, maxDist: currentReach,
-                                                            pointable: client.nodes.isPointable, boxes: pointBoxes) : nil
-            let nodeDist: Float = nodeHit.map { simd_length((SIMD3<Float>($0.under) + SIMD3(0.5, 0.5, 0.5)) - o) } ?? .infinity
+                                                            pointable: pointableNow, boxes: pointBoxes) : nil
+            let nodeDist: Float = nodeHit?.dist ?? .infinity
             if let obj, obj.dist <= nodeDist {
                 if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove); digNode = nil; digElapsed = 0 }
                 // game.cpp handlePointingAtObject: while the trigger is held, a
@@ -3191,7 +3202,7 @@ final class WorldSession {
             digNode = nil; digElapsed = 0
             return
         }
-        guard let hit = client.world.raycast(origin: player.rayOrigin(), dir: player.aim(), maxDist: currentReach, pointable: client.nodes.isPointable, boxes: pointBoxes) else {
+        guard let hit = client.world.raycast(origin: player.rayOrigin(), dir: player.aim(), maxDist: currentReach, pointable: pointableNow, boxes: pointBoxes) else {
             if let dn = digNode { client.sendInteract(action: 1, under: dn, above: digAbove) }
             digNode = nil; digElapsed = 0
             return
@@ -3254,10 +3265,23 @@ final class WorldSession {
         let wieldName = (wield >= 0 && wield < hotbar.count) ? hotbar[wield] : nil
         // The real hand item first (survival vs creative caps), then the
         // ITEMDEF-wide guess until the "hand" list has arrived.
+        // A stack's own tool_capabilities (metadata) win over its itemdef, like
+        // ItemStack::getToolCapabilities: Efficiency on the pick, Haste or
+        // Mining Fatigue on the hand. Ignoring them, a Fatigue dig finished
+        // early and the server refused it (the block popped back).
+        func metaCaps(_ st: Client.ItemStack?) -> ItemRegistry.ToolCaps? {
+            guard let js = st?.meta["tool_capabilities"], let c = ItemRegistry.capsFromJSON(js), !c.groupCaps.isEmpty else { return nil }
+            return c
+        }
         var hand = client.items.handCaps()
         var handSource = "hand"
         if let hn = handItemName(), let hc = client.items.caps(for: hn), !hc.groupCaps.isEmpty { hand = hc; handSource = hn }
+        if let hc = metaCaps(client.inventory["hand"]?.first ?? nil) { hand = hc; handSource = "hand(meta)" }
         guard hand != nil || wieldName != nil else { return (0.55, nil, "empty", "flat") }   // no ITEMDEF yet
+        let wieldStack = client.inventory["main"].flatMap { wield >= 0 && wield < $0.count ? $0[wield] : nil }
+        if wieldName != nil, let wc = metaCaps(wieldStack), let r = DigParams.params(groups: groups, caps: wc) {
+            return (r.time, r.group, wieldName!, wieldName! + "(meta)")
+        }
         if let wieldName, let wc = client.items.caps(for: wieldName), !wc.groupCaps.isEmpty,
            let r = DigParams.params(groups: groups, caps: wc) {
             return (r.time, r.group, wieldName, wieldName)
@@ -3275,7 +3299,7 @@ final class WorldSession {
     }
 
     private func performDig(dir: SIMD3<Float>? = nil) {
-        guard let hit = client.world.raycast(origin: player.rayOrigin(), dir: dir ?? player.aim(), maxDist: currentReach, pointable: client.nodes.isPointable, boxes: pointBoxes) else { return }
+        guard let hit = client.world.raycast(origin: player.rayOrigin(), dir: dir ?? player.aim(), maxDist: currentReach, pointable: pointableNow, boxes: pointBoxes) else { return }
         print("[dig] \(hit.under)"); fflush(stdout)
         client.sendInteract(action: 0, under: hit.under, above: hit.above)   // start
         client.sendInteract(action: 2, under: hit.under, above: hit.above)   // completed
@@ -3365,22 +3389,19 @@ final class WorldSession {
     @discardableResult
     private func performPlace(sneak: Bool = false, aim: SIMD3<Float>? = nil) -> Bool {
         let o = player.rayOrigin(), a = aim ?? player.aim()   // aim override: sim harnesses only
-        let nodeHit = client.world.raycast(origin: o, dir: a, maxDist: currentReach, pointable: client.nodes.isPointable, boxes: pointBoxes)
+        let nodeHit = client.world.raycast(origin: o, dir: a, maxDist: currentReach, pointable: pointableNow, boxes: pointBoxes)
         // Right-click on a nearby entity (horse, boat, villager, ...) is an object
         // rightclick, not a node place: this is how you mount a horse or trade.
         // Send INTERACT_PLACE with the pointed object when it's nearer than the
         // node under the gaze. Mirrors the melee path (which punches objects on
         // the dig button); without it grip only ever hit the node behind the mob.
         if let obj = client.objects.raycastEntity(origin: o, dir: a, maxDist: currentReach) {
-            let nodeDist: Float = nodeHit.map { simd_length((SIMD3<Float>($0.under) + SIMD3(0.5, 0.5, 0.5)) - o) } ?? .infinity
-            // A rightclickable NODE wins over an overlapping decorative entity:
-            // VoxeLibre chests/furnaces are nodes with on_rightclick plus a visual
-            // lid/flame ENTITY sitting right on them. An earlier fix diverted the grip to
-            // that entity (whose object-rightclick does nothing), so containers
-            // wouldn't open. Only rightclick the object when the node under
-            // it isn't itself rightclickable (so mounting a horse on grass still works).
-            let nodeRightclick = nodeHit.map { client.nodes.isRightclickable(client.world.nodeId($0.under)) } ?? false
-            if obj.dist <= nodeDist, !nodeRightclick {
+            // Nearest wins, like game.cpp: a villager in front of a bed trades.
+            // VoxeLibre's decorative entities on nodes (chest lids, furnace
+            // flames, item frames) are pointable = false, so raycastEntity already
+            // skips them and the chest under its lid still opens.
+            let nodeDist: Float = nodeHit?.dist ?? .infinity
+            if obj.dist <= nodeDist {
                 client.sendInteract(action: 3, objectId: obj.id)   // rightclick object (mount horse, ...)
                 print("[place] rightclick object \(obj.id)"); fflush(stdout)
                 return false
@@ -5695,7 +5716,11 @@ final class WorldSession {
         // is the targeting cue, and a reticle at a guessed depth reads badly in
         // stereo.
         let aimOrigin = player.rayOrigin(), aimDir = player.aim()
-        let aimHit = client.world.raycast(origin: aimOrigin, dir: aimDir, maxDist: currentReach, pointable: client.nodes.isPointable, boxes: pointBoxes)
+        var aimHit = client.world.raycast(origin: aimOrigin, dir: aimDir, maxDist: currentReach, pointable: pointableNow, boxes: pointBoxes)
+        // Pointing at a mob in front of the node: no node outline, like the
+        // engine (the trigger will punch the mob, not dig the block behind it).
+        if let hit = aimHit, let obj = client.objects.raycastEntity(origin: aimOrigin, dir: aimDir, maxDist: currentReach),
+           obj.dist <= hit.dist { aimHit = nil }
         // Head-locked HUD is authored in a canonical head-local frame (origin at
         // the head, looking down -Z) and tagged headLocal, so the renderer can
         // re-anchor it to the CURRENT frame's head pose at draw time. Baking it

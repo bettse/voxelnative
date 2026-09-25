@@ -399,7 +399,7 @@ extension ActiveObjectsTests {
         XCTAssertNil(ao.raycastEntity(origin: SIMD3(c.x - 2, c.y, c.z), dir: SIMD3(1, 0, 0), maxDist: 5))
     }
 
-    func testRaycastSkipsAttachedEntity() {
+    func testRaycastPointsAtAttachedEntity() {
         let ao = ActiveObjects()
         ao.handleRemoveAdd(addPacket(id: 1, name: "boat", hp: 10))
         ao.handleMessages(msg(1, propsPacket(pointable: 0)))   // parent won't be hit, isolates the child
@@ -411,8 +411,10 @@ extension ActiveObjectsTests {
         // ATTACH_TO cmd 8: parent, bone, pos(v3f), rot(v3f), forceVisible.
         ao.handleMessages(msg(2, PacketWriter().u8(8).s16(1).string16("")
             .f32(0).f32(0).f32(0).f32(0).f32(0).f32(0).u8(0)))
-        XCTAssertNil(ao.raycastEntity(origin: SIMD3(c.x - 2, c.y, c.z), dir: SIMD3(1, 0, 0), maxDist: 5),
-                     "an attached child is not pointable")
+        // Like GenericCAO::getSelectionBox: attachment doesn't make an object
+        // unpointable (a player riding a boat, a shoulder parrot).
+        XCTAssertEqual(ao.raycastEntity(origin: SIMD3(c.x - 2, c.y, c.z), dir: SIMD3(1, 0, 0), maxDist: 5)?.id, 2,
+                       "an attached child stays pointable")
     }
 
     func testRaycastUsesSelectionBoxNotCollisionBox() {

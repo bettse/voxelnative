@@ -617,8 +617,11 @@ public final class ActiveObjects {
         let selfId = localPlayerId
         var best: (id: Int, dist: Float)?
         // The engine (GenericCAO::getSelectionBox) returns no box -> not pointable
-        // when the object is non-pointable, invisible, or attached to a parent.
-        for (id, o) in objects where id != selfId && o.pointable && o.isVisible && o.attachParent == 0 {
+        // only when the object is non-pointable, invisible, or the local player.
+        // Attached objects stay pointable (a player riding a boat, a shoulder
+        // parrot); only things riding the local player are skipped, since the
+        // ray starts inside them.
+        for (id, o) in objects where id != selfId && o.pointable && o.isVisible && (o.attachParent == 0 || o.attachParent != selfId) {
             // Point at the selectionbox, not the collisionbox; fall back to the
             // collisionbox when the selectionbox is degenerate (zero-size).
             let degenerate = o.selMin == o.selMax

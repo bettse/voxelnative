@@ -16,6 +16,29 @@ public final class ItemRegistry {
         public var groupCaps: [String: GroupCap] = [:]
     }
 
+    /// A stack's tool_capabilities override from its metadata (the JSON
+    /// ToolCapabilities::serializeJson writes): VoxeLibre stores Efficiency and
+    /// Unbreaking this way, and Haste / Mining Fatigue on the hand stack. `times`
+    /// is an array indexed by group rating, with nulls for unset ratings.
+    /// nil when the string isn't a caps object.
+    public static func capsFromJSON(_ json: String) -> ToolCaps? {
+        guard let data = json.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var caps = ToolCaps()
+        if let f = root["full_punch_interval"] as? NSNumber { caps.fullPunchInterval = f.floatValue }
+        if let m = root["max_drop_level"] as? NSNumber { caps.maxDropLevel = m.intValue }
+        for (group, v) in root["groupcaps"] as? [String: Any] ?? [:] {
+            guard let g = v as? [String: Any] else { continue }
+            var times: [Int: Float] = [:]
+            for (i, t) in (g["times"] as? [Any] ?? []).enumerated() {
+                if let n = t as? NSNumber { times[i] = n.floatValue }
+            }
+            caps.groupCaps[group] = GroupCap(uses: (g["uses"] as? NSNumber)?.intValue ?? 20,
+                                             maxLevel: (g["maxlevel"] as? NSNumber)?.intValue ?? 1, times: times)
+        }
+        return caps
+    }
+
     public private(set) var inventoryImage: [String: String] = [:]
     public private(set) var descriptions: [String: String] = [:]
     /// Human-readable item name (first line of the description), for the inventory panel.
@@ -119,6 +142,10 @@ public final class ItemRegistry {
     public private(set) var usables: Set<String> = []
     /// Whether the wielded item throws/uses on the attack button (has on_use).
     public func isUsable(_ itemString: String) -> Bool { usables.contains(Self.baseName(itemString)) }
+    /// ItemDefinition liquids_pointable: pointing with this item stops on liquid
+    /// nodes (environment.cpp isPointableNode), so a boat or lily pad can target water.
+    public private(set) var liquidsPointables: Set<String> = []
+    public func isLiquidsPointable(_ itemString: String) -> Bool { liquidsPointables.contains(Self.baseName(itemString)) }
     /// Items in the `food`/`eatable` group, for the raise-to-mouth eat gesture.
     public private(set) var eatables: Set<String> = []
     public func isEatable(_ itemString: String) -> Bool { eatables.contains(Self.baseName(itemString)) }
@@ -208,7 +235,7 @@ public final class ItemRegistry {
             let wieldScale = SIMD3<Float>(def.f32(), def.f32(), def.f32())   // wield_scale (VoxeLibre tools 1.8, shields 2)
             let stackMaxVal = Int(def.s16())   // stack_max (for client-side merge prediction)
             let usableFlag = def.u8() != 0   // has on_use (throwables, bow, food-ish)
-            _ = def.u8()                 // liquids_pointable
+            let liquidsPointable = def.u8() != 0   // boats, lily pads, glass bottles point at water
             let tc = def.bytes16()       // tool_capabilities (nested binary; empty = none)
             // groups: u16 count x (string16 name, s16 rating). Then the fields
             // the place path wants (ItemDefinition::deSerialize order).
@@ -259,6 +286,7 @@ public final class ItemRegistry {
                 wieldScales[name] = wieldScale
                 if let p2 = placeP2 { placeParam2s[name] = p2 }
                 if usableFlag { usables.insert(name) }
+                if liquidsPointable { liquidsPointables.insert(name) }
                 if eatable { eatables.insert(name) }
                 if armorSlot != 0 { armorSlots[name] = armorSlot }
                 if stackMaxVal > 0 { stackMaxes[name] = stackMaxVal }

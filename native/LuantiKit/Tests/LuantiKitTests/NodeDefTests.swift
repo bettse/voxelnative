@@ -274,4 +274,38 @@ final class NodeDefTests: XCTestCase {
         let low = map.raycast(origin: SIMD3(0.5, 3.25, 2.5), dir: SIMD3(0, 0, -1), maxDist: 8, boxes: boxes)
         XCTAssertEqual(low?.under, SIMD3(0, 3, 0)); XCTAssertEqual(low?.above, SIMD3(0, 3, 1))
     }
+
+    func testRaycastStartCellAndDistance() {
+        // A ladder plate on the -Z side of the head's own cell (0,5,0), stone
+        // behind it: pointing at the ladder from inside its cell hits the
+        // ladder (the engine tests the start cell), not the wall.
+        let map = WorldMap()
+        let ladder: UInt16 = 9, stone: UInt16 = 8
+        map.setNode(SIMD3(0, 5, 0), param0: ladder)
+        map.setNode(SIMD3(0, 5, -1), param0: stone)
+        let boxes: (SIMD3<Int>, UInt16) -> [(lo: SIMD3<Float>, hi: SIMD3<Float>)]? = { _, id in
+            id == ladder ? [(SIMD3(0, 0, 0), SIMD3(1, 1, 0.0625))] : nil
+        }
+        let hit = map.raycast(origin: SIMD3(0.5, 5.5, 0.5), dir: SIMD3(0, 0, -1), maxDist: 4, boxes: boxes)
+        XCTAssertEqual(hit?.under, SIMD3(0, 5, 0)); XCTAssertEqual(hit?.above, SIMD3(0, 5, 1))
+        XCTAssertEqual(hit?.dist ?? -1, 0.4375, accuracy: 1e-4)
+        // A full cube hit reports where the ray entered its cell.
+        let wall = map.raycast(origin: SIMD3(0.5, 5.5, 2.5), dir: SIMD3(0, 0, -1), maxDist: 8)
+        XCTAssertEqual(wall?.under, SIMD3(0, 5, 0)); XCTAssertEqual(wall?.dist ?? -1, 1.5, accuracy: 1e-4)
+        // Air start cell is still skipped.
+        XCTAssertEqual(map.raycast(origin: SIMD3(0.5, 7.5, 0.5), dir: SIMD3(0, 1, 0), maxDist: 3)?.under, nil)
+    }
+
+    func testToolCapsFromStackMetaJSON() {
+        // What ToolCapabilities::serializeJson writes (jsoncpp turns the int-keyed
+        // times into an array with nulls for unset ratings).
+        let js = #"{"damage_groups":{"fleshy":4},"full_punch_interval":0.83,"groupcaps":{"pickaxey":{"maxlevel":0,"times":[null,0.3,0.45],"uses":1562}},"max_drop_level":5,"punch_attack_uses":0}"#
+        let caps = ItemRegistry.capsFromJSON(js)
+        XCTAssertEqual(caps?.maxDropLevel, 5)
+        XCTAssertEqual(caps?.groupCaps["pickaxey"]?.uses, 1562)
+        XCTAssertEqual(caps?.groupCaps["pickaxey"]?.times[1] ?? -1, 0.3, accuracy: 1e-6)
+        XCTAssertEqual(caps?.groupCaps["pickaxey"]?.times[2] ?? -1, 0.45, accuracy: 1e-6)
+        XCTAssertNil(caps?.groupCaps["pickaxey"]?.times[0])
+        XCTAssertNil(ItemRegistry.capsFromJSON("not json"))
+    }
 }

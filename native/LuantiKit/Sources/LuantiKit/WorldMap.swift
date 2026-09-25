@@ -471,7 +471,10 @@ public final class WorldMap {
         return p
     }
 
-    public struct RayHit { public let under: SIMD3<Int>; public let above: SIMD3<Int> }
+    public struct RayHit {
+        public let under: SIMD3<Int>; public let above: SIMD3<Int>
+        public var dist: Float = 0   // along the (normalised) ray to where it enters `under`
+    }
 
     /// Voxel ray walk (Amanatides & Woo) in node space. Returns the first solid
     /// node hit (`under`) and the air node just before it (`above`, the place
@@ -496,14 +499,21 @@ public final class WorldMap {
         }
         var tMax = SIMD3<Float>(tvals(0).tMax, tvals(1).tMax, tvals(2).tMax)
         let tDelta = SIMD3<Float>(tvals(0).tDelta, tvals(1).tDelta, tvals(2).tDelta)
+        let start = pos
         var prev = pos
         var t: Float = 0
         var guardCount = 0
         while t <= maxDist && guardCount < 256 {
             guardCount += 1
             let id = nodeId(pos)
-            if id != WorldMap.CONTENT_IGNORE && id != WorldMap.CONTENT_AIR && prev != pos && pointable(id) {
-                guard let bx = boxes(pos, id) else { return RayHit(under: pos, above: prev) }
+            // The start cell counts too, like the engine's first iteration
+            // (environment.cpp): with your head in a ladder, vine or a door's top
+            // half, that's what you're pointing at, not the wall behind it.
+            if id != WorldMap.CONTENT_IGNORE && id != WorldMap.CONTENT_AIR && pointable(id) {
+                let cube: [(lo: SIMD3<Float>, hi: SIMD3<Float>)] = [(SIMD3(0, 0, 0), SIMD3(1, 1, 1))]
+                guard let bx = boxes(pos, id) ?? (pos == start ? cube : nil) else {
+                    return RayHit(under: pos, above: prev, dist: t)
+                }
                 // Partial node: slab-test each box; the nearest entry face gives `above`.
                 let base = SIMD3<Float>(Float(pos.x), Float(pos.y), Float(pos.z))
                 var best: (t: Float, axis: Int, sign: Int)? = nil
@@ -529,8 +539,15 @@ public final class WorldMap {
                 }
                 if let best {
                     var above = pos
-                    above[best.axis] += best.sign
-                    return RayHit(under: pos, above: above)
+                    if best.t <= 0 {
+                        // The ray starts inside the box: no entry face, so place
+                        // back toward the eye along the ray's main axis.
+                        let ax = abs(d.x) >= abs(d.y) && abs(d.x) >= abs(d.z) ? 0 : (abs(d.y) >= abs(d.z) ? 1 : 2)
+                        above[ax] -= step[ax]
+                    } else {
+                        above[best.axis] += best.sign
+                    }
+                    return RayHit(under: pos, above: above, dist: best.t)
                 }
                 // Ray misses every box of this node: keep walking.
             }
