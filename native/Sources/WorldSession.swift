@@ -138,7 +138,7 @@ final class WorldSession {
     weak var appModel: AppModel?               // set by AppModel so the menu can leave the space
     private var koganeLayer = -1               // the companion sprite, eyes open
     private var koganeClosedLayer = -1         // eyes closed (shown until you look at it)
-    private var koganeTitleLayer = -1          // "Kogane" heading
+    private var koganeTitleLayer = -1          // "Menu" heading
     private var koganeOptionLayers: [Int] = [] // one text layer per menu option
     // "Resume" is first and is the default selection, so opening the menu and
     // confirming (a double trigger) just closes it — no accidental exit.
@@ -6936,7 +6936,7 @@ final class WorldSession {
         if koganeClosedLayer < 0, let px = Self.renderKoganeRGBA(canvas: ModelTextureHandoff.size, closed: true) {
             koganeClosedLayer = registerRGBALayer("#koganeclosed", px); changed = true
         }
-        if koganeTitleLayer < 0, let px = Self.renderTextRGBA("Kogane", canvas: ModelTextureHandoff.size, fontFrac: 0.17) {
+        if koganeTitleLayer < 0, let px = Self.renderTextRGBA("Menu", canvas: ModelTextureHandoff.size, fontFrac: 0.17) {
             koganeTitleLayer = registerRGBALayer("#koganetitle", px); changed = true
         }
         if koganeOptionLayers.isEmpty {
@@ -7995,8 +7995,11 @@ final class WorldSession {
         let rowStep: Float = 0.085
         let topOy: Float = Float(n - 1) * rowStep * 0.5      // rows centred about 0
         let titleOy = topOy + 0.10
-        let backHalf = titleOy + 0.10
-        appendQuad(center: at(0.60, 0, 0), right: hr, up: hu, hw: 0.26, hh: backHalf,
+        // Backdrop from just above the title to just below the last row. It was
+        // centred on the rows with the title's margin mirrored below, which left
+        // an empty band under the last option.
+        let backTop = titleOy + 0.10, backBottom = -topOy - 0.075
+        appendQuad(center: at(0.60, 0, (backTop + backBottom) * 0.5), right: hr, up: hu, hw: 0.26, hh: (backTop - backBottom) * 0.5,
                    layer: highlightLayer, tint: Self.packTint(24, 22, 30), v: &v, idx: &idx)
         if koganeTitleLayer >= 0 {
             appendQuad(center: at(0.58, 0, titleOy), right: hr, up: hu, hw: 0.075, hh: 0.06,
