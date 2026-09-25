@@ -33,7 +33,6 @@ final class GameInput {
         var jump = false
         var fast = false        // sprint (aux1); in a panel also the quick-move modifier (left grip / E / Ctrl)
         var sneak = false
-        var snap = false        // both grips: take a screenshot
         var hotbarPrev = false  // LEFT face button (square / Button A on the left Sense)
         var hotbarNext = false  // LEFT face button (triangle / Button B on the left Sense)
         var inventory = false   // RIGHT O (Button B): toggle the inventory panel
@@ -338,7 +337,6 @@ final class GameInput {
             if p.buttons["Button Menu"]?.isPressed == true { s.cancel = true }
         }
         if debug { fflush(stdout) }
-        if leftGrip && rightGrip { s.snap = true }   // both grips = screenshot
         // A BLE keyboard is an alternative to the Sense controllers: gaze still
         // aims, the keyboard drives movement + actions. Applied after the sticks
         // so a key press wins only when actually held (either input works).

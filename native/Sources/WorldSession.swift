@@ -101,7 +101,6 @@ final class WorldSession {
     let handHudHandoff: HandHudHandoff
     let screenshotFlag: ScreenshotFlag
     let player: PlayerState
-    private var prevSnap = false
     // Parsed models + model-texture atlas assignment, built lazily as mobs stream.
     private var modelCache: [String: B3DLoader.Mesh] = [:]
     // Parsed node mesh models (drawtype "mesh"), keyed by model file name. Failed
@@ -505,6 +504,7 @@ final class WorldSession {
     private var simAutoWalk = false
     private var simAutoSneak = false
     private var simReconnectPhase = 0, simReconnectTimer = 0.0   // -vrdev.reconnectTest
+    private var simTapDone = false                                // -vrdev.tapField
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
     private var simChurnTimer: Float = 0                // -vrdev.weatherTest: time since the last spawner swap
@@ -1879,6 +1879,15 @@ final class WorldSession {
                 }
             }
         }
+        // -vrdev.tapField <name>: tap the named button on the open panel once
+        // (with -vrdev.openInventory 1: the recipe book is "__mcl_craftguide"),
+        // to drive the player-form submit path headless.
+        if !simTapDone, let want = UserDefaults.standard.string(forKey: "vrdev.tapField"), !want.isEmpty,
+           formspecOpen, let w = invWidgets.first(where: { $0.button?.name == want }) {
+            simTapDone = true
+            print("[taptest] tapping \(want) on '\(formspecName)'"); fflush(stdout)
+            tapWidget(w)
+        }
         // -vrdev.reconnectTest 1: drop the connection once the world is up, then
         // pass when the new session has sent our player object again (the
         // reconnect reset clears objects, so it only comes back on a real rejoin).
@@ -2843,18 +2852,13 @@ final class WorldSession {
         let a = (Self.wickedTimeOfDay(client.timeFraction) - 0.25) * 2 * .pi
         player.setSunDir(simd_normalize(SIMD3<Float>(cos(a), sin(a), 0)))
 
-        // Both grips = screenshot. Suppress dig/place that frame so the gesture
-        // doesn't also break/place a block.
         var act = gi
         #if targetEnvironment(simulator)
         if simChordHold { act.dig = true; act.place = true }
         if simTapPlace { act.place = true; simTapPlace = false }
         #endif
-        if gi.snap && !prevSnap { screenshotFlag.request(); print("[shot] requested"); fflush(stdout) }
         if inventoryOpen { handleInventoryInput(gi); act.dig = false; act.place = false }   // trigger/grip belong to the panel
         else { (invPrevPrimary, invPrevSecondary) = panelClicks(gi) }
-        prevSnap = gi.snap
-        if gi.snap { act.dig = false; act.place = false }
         let pA = perf.now()
         handleInteraction(act, dt: dt)
         let pB = perf.now()
@@ -3621,7 +3625,8 @@ final class WorldSession {
     private var invLabels: [(u: Float, v: Float, text: String, color: Float?)] = []     // laid-out label positions (panel plane, metres)
     private var formspecFields: [Formspec.Field] = []                    // editable fields on a list-form (anvil rename)
     private var formspecButtons: [Formspec.PositionedButton] = []        // tappable buttons on a list-form
-    private var invWidgets: [(u: Float, v: Float, hw: Float, hh: Float, field: Formspec.Field?, button: Formspec.PositionedButton?)] = []   // laid-out tappable field/button boxes
+    private typealias InvWidget = (u: Float, v: Float, hw: Float, hh: Float, field: Formspec.Field?, button: Formspec.PositionedButton?)
+    private var invWidgets: [InvWidget] = []   // laid-out tappable field/button boxes
     private var formspecInfoTargets: [Formspec.InfoTarget] = []   // info-form tab/row tap regions in grid coords
     private var infoTargets: [(u: Float, v: Float, hw: Float, hh: Float, field: String, value: String)] = []   // laid out in panel metres
     private var formspecImages: [Formspec.Image] = []                    // static image[] elements (furnace fire/arrow)
@@ -3819,6 +3824,29 @@ final class WorldSession {
     /// (the achievement icon) and background art. Tabs and textlist rows are
     /// tappable (infoTargets); clicking off the panel sends the form's
     /// quit like any other.
+    /// Send fields for the open form: a node's meta form goes to that node,
+    /// anything else (the player inventory's recipe book / settings /
+    /// achievements icons, the craft guide) as INVENTORY_FIELDS by form name.
+    /// Before, only node forms submitted, so those icons did nothing.
+    private func submitFormFields(_ fields: [String: String]) {
+        if let ctx = formspecContext {
+            client.sendNodeFields(pos: ctx, formname: formspecName, fields: fields)
+        } else {
+            client.sendPlayerFields(formname: formspecName, fields: fields)
+        }
+    }
+
+    /// A tapped field (opens the keyboard) or button (submits) on the panel.
+    private func tapWidget(_ w: InvWidget) {
+        if let f = w.field {
+            openKeyboard(prefill: f.value) { [weak self] text in self?.submitFormFields([f.name: text]) }
+        } else if let b = w.button {
+            submitFormFields([b.name: "true"])
+            print("[formspec] tap \(b.name) form='\(formspecName)'"); fflush(stdout)
+            if b.exit { closeFormspec() }
+        }
+    }
+
     private func openInfoFormspec(spec: String, name: String, legacy: Bool) {
         // A re-send of the SAME form (tab switch, row select echo) should keep
         // the panel where it is instead of re-anchoring in front of the player
@@ -3873,7 +3901,12 @@ final class WorldSession {
         let spec = Formspec.flattenContainers(rawSpec)
         let legacy = Formspec.Legacy.applies(to: rawSpec0)   // old coordinates: the body decides, not the prepend
         let lists = Formspec.parseLists(spec, context: formspecContext)
-        guard !lists.isEmpty else {
+        // A list-less form that's mostly buttons (the craft guide: icon buttons,
+        // an item grid of item_image_buttons, a search field, page arrows) is a
+        // real panel, not a bed-style dialog: that path showed "press O".
+        let panelButtons = Formspec.parseButtonsPositioned(spec).count + Formspec.parseItemImageButtons(spec).count
+        let buttonPanel = lists.isEmpty && panelButtons >= 3 && !Formspec.parseButtons(spec).contains { $0.name == "leave" }
+        guard !lists.isEmpty || buttonPanel else {
             // No item grids: a text dialog (sign, command block). If it's a pure
             // text editor and we know the node, edit it with the keyboard. A
             // form that also carries real buttons (the bed sleep form: chat
@@ -3915,7 +3948,7 @@ final class WorldSession {
         formspecLabelsRaw = vis.labels
         // A list-form can also carry an editable field (anvil rename) or a button;
         // surface them as tappable boxes in the panel instead of dropping them.
-        formspecFields = formspecContext != nil ? Formspec.parseFieldsPositioned(spec) : []
+        formspecFields = Formspec.parseFieldsPositioned(spec)   // node forms submit to the node, others by form name
         formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)   // + stonecutter recipes
         formspecImages = vis.images
         formspecModels = vis.models
@@ -4253,30 +4286,20 @@ final class WorldSession {
         if primary, invHeld == nil, invHover == nil, let cur = invCursor, !invWidgets.isEmpty {
             let rel = cur - fr.center
             let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
-            if let w = invWidgets.first(where: { abs(u - $0.u) <= $0.hw && abs(v - $0.v) <= $0.hh }),
-               let ctx = formspecContext {
-                let fname = formspecName
-                if let f = w.field {
-                    openKeyboard(prefill: f.value) { [weak self] text in
-                        self?.client.sendNodeFields(pos: ctx, formname: fname, fields: [f.name: text])
-                    }
-                } else if let b = w.button {
-                    client.sendNodeFields(pos: ctx, formname: fname, fields: [b.name: "true"])
-                    if b.exit { closeFormspec() }
-                }
+            if let w = invWidgets.first(where: { abs(u - $0.u) <= $0.hw && abs(v - $0.v) <= $0.hh }) {
+                tapWidget(w)
                 return
             }
         }
         // Tap a checkbox: flip local state and submit its field.
-        if primary, invHeld == nil, invHover == nil, let cur = invCursor, !invCheckboxes.isEmpty,
-           let ctx = formspecContext {
+        if primary, invHeld == nil, invHover == nil, let cur = invCursor, !invCheckboxes.isEmpty {
             let rel = cur - fr.center
             let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
             // Hit target spans the box plus its label to the right (~3 cells).
             if let cb = invCheckboxes.first(where: { u >= $0.u - $0.hw && u <= $0.u + Self.invCell * 3 && abs(v - $0.v) <= $0.hh }) {
                 let now = !(checkboxState[cb.name] ?? false)
                 checkboxState[cb.name] = now
-                client.sendNodeFields(pos: ctx, formname: formspecName, fields: [cb.name: now ? "true" : "false"])
+                submitFormFields([cb.name: now ? "true" : "false"])
                 return
             }
         }
@@ -4289,14 +4312,11 @@ final class WorldSession {
         // and not clicking a slot, so item moves still work (Eric: "grip that
         // opens the chest should also close it"). Only for server formspecs, not
         // the plain player inventory (which has its own toggle).
-        // ...but not while both grips are held for a screenshot (right grip is
-        // part of that gesture): otherwise you can never screenshot an open
-        // container. gi.snap = both grips (GameInput).
         // Only when truly OFF the panel, matching the primary close above. Gating
         // on invHover==nil closed the container on any grip that landed in the gap
         // between slots -- with a jittery VR ray that shut the chest constantly.
         // The backdrop is a safe zone.
-        if secondary, !gi.snap, formspecOpen, invHeld == nil, !overPanel { closeFormspec(); return }
+        if secondary, formspecOpen, invHeld == nil, !overPanel { closeFormspec(); return }
         let hover = invHover.map { invSlots[$0] }
         if let held = invHeld {
             if let h = hover {
@@ -5509,15 +5529,22 @@ final class WorldSession {
     private var entStepDist: [Int: Float] = [:]
     private func stepEntityFootsteps(_ ents: [ActiveObjects.Entity]) {
         var seen = Set<Int>()
+        let me = player.snapshot().feet
         for e in ents where e.makesFootstepSound {
             seen.insert(e.id)
             guard let last = entStepLast[e.id] else { entStepLast[e.id] = e.pos; continue }
             entStepLast[e.id] = e.pos
-            let moved = simd_distance(last, e.pos)
+            // Horizontal distance only: a mob bobbing in water or nudged by
+            // position updates while standing isn't walking, and counting that
+            // made a constant patter (Eric heard feet from far away).
+            let moved = simd_length(SIMD2(e.pos.x - last.x, e.pos.z - last.z))
             guard moved < 4 else { continue }   // a teleport isn't walking
             let d = (entStepDist[e.id] ?? 0) + moved
             if d <= 1.5 { entStepDist[e.id] = d; continue }
             entStepDist[e.id] = 0
+            // Only nearby ones: our distance falloff flattens past a few nodes, so
+            // a field of walking animals was a steady background of feet.
+            guard simd_distance(e.pos, me) < 16 else { continue }
             let p = e.pos + SIMD3(0, e.cbMin.y - 0.5, 0)
             let under = SIMD3(Int(floor(p.x)), Int(floor(p.y)), Int(floor(p.z)))
             guard let name = client.nodes.footstepSound(client.world.nodeId(under)), !name.isEmpty else { continue }

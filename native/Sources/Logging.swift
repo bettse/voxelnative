@@ -26,7 +26,8 @@ func redirectStdioToFile() {
 /// normal launch never wipes pending shots.
 /// Wipe all in-headset screenshots on every launch, so the app container only
 /// ever holds shots from the current session: whatever is pulled off the device
-/// is by definition new. Screenshots are manual (both grips), so there is
+/// is by definition new. In-app shots only come from bug notes now (players
+/// use the visionOS screenshot), so there is
 /// nothing auto-captured to lose; the tradeoff is that a batch must be pulled
 /// before the next relaunch or it's gone (fine for the play -> pull -> relaunch
 /// loop). -vrdev.keepShots opts out (e.g. to accumulate across sessions).
