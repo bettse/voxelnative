@@ -1066,18 +1066,21 @@ actor Renderer {
                     // itself, not only when wielded.
                     if ic.wear < 0.999 {
                         let rem = max(0, min(1, ic.wear))
-                        let bot = base + radial * 0.002 - along * (cell * 0.42)
+                        // Layered 1 mm apart off the wrist: icon 1, select frame 1.5,
+                        // bar backing 2.5, fill 3.5. The backing, fill and frame all
+                        // sat at 2 mm and z-fought (Eric saw it flicker).
+                        let bot = base + radial * 0.0025 - along * (cell * 0.42)
                         let full = cell * 0.42
                         emitHandRect(m, center: bot, wAxis: tangent, hAxis: along, halfW: full, halfH: cell * 0.06,
                                      layer: hud.whiteLayer, tint: Float(20 + 20*256 + 20*65536), into: &v, idx: &idx)
                         let fw = max(0.001, full * rem)
-                        emitHandRect(m, center: bot + tangent * (fw - full), wAxis: tangent, hAxis: along,
+                        emitHandRect(m, center: bot + radial * 0.001 + tangent * (fw - full), wAxis: tangent, hAxis: along,
                                      halfW: fw, halfH: cell * 0.06, layer: hud.whiteLayer,
                                      tint: Float(Int((1 - rem) * 255) + Int(rem * 255) * 256), into: &v, idx: &idx)
                     }
                 }
                 if i == hud.wieldIndex {
-                    emitHandQuadFrame(m, center: base + radial * 0.002, wAxis: tangent, hAxis: along,
+                    emitHandQuadFrame(m, center: base + radial * 0.0015, wAxis: tangent, hAxis: along,
                                       half: cell * 0.5, layer: hud.selectLayer, uv: SIMD2(1, 1), into: &v, idx: &idx)
                 }
             }
