@@ -113,6 +113,12 @@ final class AudioManager: NSObject {
         var fadeTimer: DispatchSourceTimer?
         var format: AVAudioFormat?              // what the chain is currently connected with
         var generation = 0                      // bumped per play; a stale completion must not finish the next sound
+        // Gain above 1 (thunder is 10, fireworks 3-4): the engine gives
+        // min(1, 3*gain/d), but a player volume caps at 1 and the environment's
+        // reference distance is shared. So the source sits `boost` times nearer
+        // along the line to the listener, which is the same curve.
+        var boost: Float = 1
+        var truePos = SIMD3<Float>(0, 0, 0)
         init(positional: Bool, channel: VolumeSettings.Channel, baseVolume: Float) {
             self.positional = positional; self.channel = channel; self.baseVolume = baseVolume
         }
@@ -205,6 +211,9 @@ final class AudioManager: NSObject {
         q.async { [weak self] in
             guard let self, self.engineStarted else { return }
             self.env.listenerPosition = AVAudio3DPoint(x: pos.x, y: pos.y, z: -pos.z)
+            self.listenerPos = pos
+            for src in self.sources.values where src.boost > 1 { self.place(src) }
+            for src in self.oneShots.values where src.boost > 1 { self.place(src) }
             self.env.listenerVectorOrientation = AVAudio3DVectorOrientation(
                 forward: AVAudio3DVector(x: forward.x, y: forward.y, z: -forward.z),
                 up: AVAudio3DVector(x: up.x, y: up.y, z: -up.z))
@@ -215,8 +224,15 @@ final class AudioManager: NSObject {
     func setPosition(id: Int, pos: SIMD3<Float>) {
         q.async { [weak self] in
             guard let self, let src = self.sources[id], src.positional else { return }
-            src.player.position = AVAudio3DPoint(x: pos.x, y: pos.y, z: -pos.z)
+            src.truePos = pos
+            self.place(src)
         }
+    }
+
+    private var listenerPos = SIMD3<Float>(0, 0, 0)   // audio queue copy, for boosted sources
+    private func place(_ src: Source) {
+        let p = src.boost > 1 ? listenerPos + (src.truePos - listenerPos) / src.boost : src.truePos
+        src.player.position = AVAudio3DPoint(x: p.x, y: p.y, z: -p.z)
     }
 
     /// Decode .ogg -> PCM buffer via a temp WAV (AVAudioFile can't read Ogg).
@@ -260,7 +276,9 @@ final class AudioManager: NSObject {
             // Luanti multiplies positional gain by 3 (see the 3-node reference
             // distance in startEngine); the clamp to 1 below is the near-field
             // ceiling, the distance curve does the rest.
-            let base = spec.gain * (positional ? 3 : 1)
+            // Gain above 1 is carried by the source's distance boost instead
+            // (see Source.boost), so the sliders still scale it.
+            let base = positional && spec.gain > 1 ? 1 : spec.gain * (positional ? 3 : 1)
             var vol = VolumeSettings.shared.volume(base: base, channel: channel)
             // A muted channel (music off, master 0) must be SILENT. Setting the
             // player volume to 0 didn't reliably silence a long music track on
@@ -338,8 +356,9 @@ final class AudioManager: NSObject {
                 src.format = buf.format
                 if positional { src.player.renderingAlgorithm = .HRTFHQ }
             }
-            if positional, let p = pos { src.player.position = AVAudio3DPoint(x: p.x, y: p.y, z: -p.z) }
-            src.speed.rate = max(0.5, min(2.0, spec.pitch))   // OpenAL AL_PITCH = playback rate
+            src.boost = positional ? max(1, spec.gain) : 1
+            if positional, let p = pos { src.truePos = p; self.place(src) }
+            src.speed.rate = max(0.25, min(4.0, spec.pitch))   // AL_PITCH = playback rate; varispeed range, fireworks use 2-3
             src.player.volume = spec.fade > 0 ? 0 : vol
             let key = ObjectIdentifier(src)
             src.generation += 1
@@ -393,7 +412,9 @@ final class AudioManager: NSObject {
             // replace the previous one: a door click cut off a mob call, a
             // footstep cut off the dug sound. Only real handles (> 0)
             // are tracked for STOP/FADE.
-            if spec.id > 0 {
+            // Ids <= -1000 are local handles WorldSession gives one-shots attached
+            // to a mob, so the sound can follow it; they're never reported back.
+            if spec.id > 0 || spec.id <= -1000 {
                 if let old = self.sources[spec.id] { self.tearDown(old) }   // replace any prior sound on this id
                 self.sources[spec.id] = src
             } else {

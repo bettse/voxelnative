@@ -233,6 +233,7 @@ final class WorldSession {
     private let client = Client(name: WorldSession.playerName, password: WorldSession.password)
     private let audio = AudioManager()
     private let finishedSounds = OSAllocatedUnfairLock<[Int]>(initialState: [])   // server sound ids that ended (audio queue -> tick)
+    private var localSoundId = -1000   // counts down: handles for object-attached one-shots
     private var attachedSounds: [Int: Int] = [:]   // sound id -> object id (type 2 sounds follow their mob)
     private let queue = DispatchQueue(label: "world.session", qos: .userInitiated)
     // Meshing runs here, off the poll/input queue, so a whole-world rebuild
@@ -986,7 +987,11 @@ final class WorldSession {
         // An uncontended unfair lock is ~20 ns; the audio queue only ever
         // appends here when a handled sound actually ends.
         let doneSounds = finishedSounds.withLock { l -> [Int] in let d = l; l.removeAll(keepingCapacity: true); return d }
-        if !doneSounds.isEmpty { client.sendRemovedSounds(doneSounds); attachedSounds = attachedSounds.filter { !doneSounds.contains($0.key) } }
+        if !doneSounds.isEmpty {
+            let serverIds = doneSounds.filter { $0 > 0 }   // local follow handles (<= -1000) aren't the server's
+            if !serverIds.isEmpty { client.sendRemovedSounds(serverIds) }
+            attachedSounds = attachedSounds.filter { !doneSounds.contains($0.key) }
+        }
         guard player.haveSpawn else { return }
         let pStart = perf.now()
         defer { perf.add("total", pStart, perf.now()) }
@@ -2754,8 +2759,12 @@ final class WorldSession {
         var listenFwd = aim
         if abs(aim.y) > 0.98 { let bf = player.bodyForward(); listenFwd = SIMD3(bf.x, 0, bf.z) }
         audio.setListener(pos: player.rayOrigin(), forward: listenFwd, up: SIMD3<Float>(0, 1, 0))
+        let me = client.objects.localPlayerId, myFeet = player.snapshot().feet
         for (sid, oid) in attachedSounds {
-            if let e = client.objects.entity(oid) { audio.setPosition(id: sid, pos: e.pos) }
+            // The server never sends your own position back, so your player
+            // object's pos is frozen where you joined: follow the live feet.
+            if oid == me, me != 0 { audio.setPosition(id: sid, pos: myFeet) }
+            else if let e = client.objects.entity(oid) { audio.setPosition(id: sid, pos: e.pos) }
             else { attachedSounds.removeValue(forKey: sid) }
         }
         // Clipping diagnostics: log when the feet end up below where the ground
@@ -2995,7 +3004,11 @@ final class WorldSession {
         guard let name, !name.isEmpty else { return }
         let pos = SIMD3<Float>(Float(node.x) + 0.5, Float(node.y) + 0.5, Float(node.z) + 0.5)   // node centre in our [g,g+1] grid (built locally, so gridShift is not applied)
         let g = client.nodes.soundGain(name)   // the NODEDEF's gain/pitch for this sound
-        playSound(SoundSpec(id: -1, name: name, gain: g.gain, type: 1, pos: pos,
+        // The engine plays these client-made sounds 2D at their own gain
+        // (sound_maker.cpp); positional playback multiplies by 3, and at the
+        // sub-3-node distance of your own feet or hands nothing attenuates
+        // that, so they were up to 3x louder than desktop. A third cancels it.
+        playSound(SoundSpec(id: -1, name: name, gain: g.gain / 3, type: 1, pos: pos,
                             objectId: 0, loop: false, fade: 0, pitch: g.pitch, ephemeral: true))
     }
     private var digSoundTimer: Float = 0
@@ -3024,13 +3037,23 @@ final class WorldSession {
         // sources; local sounds (type 0) play flat 2D. Positions arrive already
         // shifted into our grid by Client.gridShift.
         var pos: SIMD3<Float>? = nil
+        var spec = spec
         if spec.type == 2 {
             // Bind the id->object mapping even if the object hasn't streamed in
             // yet, so setPosition upgrades it to 3D once it arrives (else it'd
             // stay flat 2D forever). Start at the object's pos, or spec.pos as a
             // best-guess origin until the first UPDATE_POSITION.
-            if spec.id > 0 { attachedSounds[spec.id] = spec.objectId }   // ephemerals (id -1) start at the mob and play out
-            pos = client.objects.entity(spec.objectId)?.pos ?? spec.pos
+            // Ephemerals (id -1) get a local handle so a groan follows its mob
+            // (clientpackethandler.cpp tracks them when attached to an object).
+            if spec.id <= 0 {
+                localSoundId -= 1
+                spec = SoundSpec(id: localSoundId, name: spec.name, gain: spec.gain, type: spec.type, pos: spec.pos,
+                                 objectId: spec.objectId, loop: spec.loop, fade: spec.fade, pitch: spec.pitch, ephemeral: spec.ephemeral)
+            }
+            attachedSounds[spec.id] = spec.objectId
+            let me = client.objects.localPlayerId
+            pos = spec.objectId == me && me != 0 ? player.snapshot().feet
+                : client.objects.entity(spec.objectId)?.pos ?? spec.pos
         } else if spec.type != 0 {
             pos = spec.pos
         }
@@ -4352,7 +4375,7 @@ final class WorldSession {
             invHeld = (h.loc, "craftresult", 0, 0)   // count 0 = whole stack on a Move
             return
         }
-        invHeld = (h.loc, h.list, h.index, secondary ? max(1, stack.count / 2) : 0)
+        invHeld = (h.loc, h.list, h.index, secondary ? max(1, (stack.count + 1) / 2) : 0)   // half rounds up, like guiFormSpecMenu
     }
 
     /// Resolve every stack's icon tile (same rule as the hotbar) and pull any
@@ -5445,6 +5468,36 @@ final class WorldSession {
     /// AppClock.seconds read once per postEntities, so every spinning entity
     /// in a frame shares one reading.
     private var frameUptime: TimeInterval = 0
+    /// Other mobs' and players' footsteps, like GenericCAO::step: every 1.5
+    /// nodes an object with makes_footstep_sound moves, play the footstep of the
+    /// node under it at 0.6 gain, positioned at the object. A zombie walking up
+    /// behind you is heard. The snapshot already skips the local player.
+    private var entStepLast: [Int: SIMD3<Float>] = [:]
+    private var entStepDist: [Int: Float] = [:]
+    private func stepEntityFootsteps(_ ents: [ActiveObjects.Entity]) {
+        var seen = Set<Int>()
+        for e in ents where e.makesFootstepSound {
+            seen.insert(e.id)
+            guard let last = entStepLast[e.id] else { entStepLast[e.id] = e.pos; continue }
+            entStepLast[e.id] = e.pos
+            let moved = simd_distance(last, e.pos)
+            guard moved < 4 else { continue }   // a teleport isn't walking
+            let d = (entStepDist[e.id] ?? 0) + moved
+            if d <= 1.5 { entStepDist[e.id] = d; continue }
+            entStepDist[e.id] = 0
+            let p = e.pos + SIMD3(0, e.cbMin.y - 0.5, 0)
+            let under = SIMD3(Int(floor(p.x)), Int(floor(p.y)), Int(floor(p.z)))
+            guard let name = client.nodes.footstepSound(client.world.nodeId(under)), !name.isEmpty else { continue }
+            let g = client.nodes.soundGain(name)
+            playSound(SoundSpec(id: -1, name: name, gain: g.gain * 0.6, type: 1, pos: e.pos,
+                                objectId: 0, loop: false, fade: 0, pitch: g.pitch, ephemeral: true))
+        }
+        if entStepLast.count > seen.count {
+            entStepLast = entStepLast.filter { seen.contains($0.key) }
+            entStepDist = entStepDist.filter { seen.contains($0.key) }
+        }
+    }
+
     private func postEntities() {
         frameUptime = AppClock.seconds
         guard atlasBuilt else { return }
@@ -5455,6 +5508,7 @@ final class WorldSession {
         let pe0 = perf.now()
         let ents = client.objects.snapshot()
         ensureModelTextures(ents)
+        stepEntityFootsteps(ents)
         let pe1 = perf.now(); perf.add("e.snap", pe0, pe1)
         let s = player.snapshot()
         let eye = player.origin()   // origin-space (0,0,0) in node coords: the floor under you on device, the nominal eye in the sim
@@ -8034,7 +8088,9 @@ final class WorldSession {
     /// (no z-fight) and reads from any angle (cull is off). tint 0 -> flat black.
     private func appendHighlight(node n: SIMD3<Int>, layer: Int, eye: SIMD3<Float>,
                                  cosY: Float, sinY: Float, v: inout [Float], idx: inout [UInt32]) {
-        let inset: Float = 0.006   // proud of the block face
+        // inset < th: with them equal, each edge's inner faces sat exactly on
+        // the node's boundary planes and the bottom edges z-fought the ground.
+        let inset: Float = 0.004   // proud of the block face
         let th: Float = 0.006      // edge half-thickness (thin wireframe)
         let light: Float = 255
         // Outline the node's actual selection boxes (slab/stair/nodebox), matching

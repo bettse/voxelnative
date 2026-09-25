@@ -2017,7 +2017,10 @@ public final class Client {
         let pt = PacketWriter()
         pt.u8(0).u8(2).u16(objectId)                // version, type: object, id
         let w = PacketWriter().u8(action).u16(wieldIndex).bytes32(pt.data)
-        w.raw(playerPosBlockData(keys: 0))
+        // Real key state, like Client::interact: VoxeLibre opens a horse or
+        // llama chest only on sneak+rightclick, else it mounts.
+        let keys = (action == 0 ? 128 : 0) | (action == 3 ? 256 : 0) | heldKeys
+        w.raw(playerPosBlockData(keys: keys))
         return w.data
     }
 

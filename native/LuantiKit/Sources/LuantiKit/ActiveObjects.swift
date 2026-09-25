@@ -71,6 +71,7 @@ public final class ActiveObjects {
         public var roll: Float = 0
         public var acc: SIMD3<Float> = .zero   // acceleration (nodes/s^2), integrated each step like GenericCAO
         public var physical = false            // ObjectProperties physical: collides with the world (items, mobs)
+        public var makesFootstepSound = false  // ObjectProperties makes_footstep_sound
         // rot_translator state: yaw eases from yawOld toward yawTarget over
         // animTime (the server's update_interval), shortest way round.
         public var yawOld: Float = 0
@@ -442,7 +443,7 @@ public final class ActiveObjects {
         o.spriteBase = SIMD2(r.s16(), r.s16())
         registerSpriteCells(o)
         o.isVisible = r.u8() != 0         // false: not drawn, not pointable
-        _ = r.u8()                        // makes_footstep_sound
+        o.makesFootstepSound = r.u8() != 0   // mobs and players: footsteps every 1.5 nodes
         o.automaticRotate = r.f32()       // rad/s constant spin (spawner dolls)
         let mesh = r.string16()           // mesh model filename
         if !mesh.isEmpty { o.mesh = mesh; meshes.insert(mesh) }
