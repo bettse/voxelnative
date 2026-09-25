@@ -618,7 +618,8 @@ actor Renderer {
         // space with nothing to ground it. Showing the box makes the wield
         // read as held (the item sits just above the palm; see buildHandHud).
         accessoryLock.lock(); let xs = accessoryXforms; accessoryLock.unlock()
-        for (_, m) in xs {
+        for (k, m) in xs {
+            if rightArmSkinned, k.lowercased().contains("right") { continue }   // drawn as the skin's arm
             appendHandBox(m, v: &v, idx: &idx)
         }
     }
@@ -803,6 +804,41 @@ actor Renderer {
 
     /// A tinted rectangle in a hand frame (explicit half-width/height), for the
     /// wield durability bar. `tint` is packed r + g*256 + b*65536.
+    /// Half the arm's square cross-section (the skin arm is 4x4x12 px, so
+    /// 6 cm square by 18 cm long).
+    static let armHalf: Float = 0.03
+    private var rightArmSkinned = false
+    /// The right hand as the skin's arm, like desktop's first-person hand: a
+    /// 4x4x12 px box running from the fist (hand-local -Z) back toward the
+    /// elbow, each face cut from the standard skin layout (right arm: top
+    /// 44,16  fist 48,16  outer 40,20  front 44,20  inner 48,20  back 52,20).
+    /// The arm points forward, so the skin's front faces up (+Y) and the
+    /// sleeve (top of the texture) sits at the elbow end. Drawn in the model
+    /// texture stream, where the skin lives.
+    private func emitSkinArm(_ m: simd_float4x4, hud: HandHudState, into v: inout [Float], idx: inout [UInt32]) {
+        let a = Renderer.armHalf, z0: Float = -0.06, z1: Float = 0.12
+        let layer = Float(hud.skinLayer), light = hud.wieldLight
+        func xf(_ p: SIMD3<Float>) -> SIMD3<Float> { let q = m * SIMD4<Float>(p, 1); return SIMD3(q.x, q.y, q.z) }
+        // p00 sits at the rect's (x, y) corner, p10 at (x + w, y), p11 at the far corner.
+        func face(_ p00: SIMD3<Float>, _ p10: SIMD3<Float>, _ p11: SIMD3<Float>, _ p01: SIMD3<Float>,
+                  _ x: Float, _ y: Float, _ w: Float, _ h: Float, shade: Float) {
+            let sx = hud.skinUV.x / hud.skinSize.x, sy = hud.skinUV.y / hud.skinSize.y
+            let e: Float = 0.02   // keep nearest sampling inside the rect
+            let u0 = (x + e) * sx, u1 = (x + w - e) * sx, v0 = (y + e) * sy, v1 = (y + h - e) * sy
+            let base = UInt32(v.count / 9)
+            for (p, u, t) in [(p00, u0, v0), (p10, u1, v0), (p11, u1, v1), (p01, u0, v1)] {
+                let w = xf(p)
+                pushV9(&v, w.x, w.y, w.z, u, t, layer, shade, light, 16777215)
+            }
+            pushQuad(&idx, base)
+        }
+        face(SIMD3(a, a, z1), SIMD3(-a, a, z1), SIMD3(-a, a, z0), SIMD3(a, a, z0), 44, 20, 4, 12, shade: 1.0)       // front, up
+        face(SIMD3(a, -a, z1), SIMD3(a, a, z1), SIMD3(a, a, z0), SIMD3(a, -a, z0), 40, 20, 4, 12, shade: 0.8)       // outer
+        face(SIMD3(-a, a, z1), SIMD3(-a, -a, z1), SIMD3(-a, -a, z0), SIMD3(-a, a, z0), 48, 20, 4, 12, shade: 0.8)   // inner
+        face(SIMD3(-a, -a, z1), SIMD3(a, -a, z1), SIMD3(a, -a, z0), SIMD3(-a, -a, z0), 52, 20, 4, 12, shade: 0.6)   // back, down
+        face(SIMD3(a, a, z0), SIMD3(-a, a, z0), SIMD3(-a, -a, z0), SIMD3(a, -a, z0), 48, 16, 4, 4, shade: 0.9)      // fist end
+        face(SIMD3(a, -a, z1), SIMD3(-a, -a, z1), SIMD3(-a, a, z1), SIMD3(a, a, z1), 44, 16, 4, 4, shade: 0.9)      // shoulder end
+    }
     private var countTurn = 0   // which quarter turn the hand-tattoo count uses
     private func emitHandRect(_ m: simd_float4x4, center: SIMD3<Float>,
                               wAxis: SIMD3<Float>, hAxis: SIMD3<Float>, halfW: Float, halfH: Float,
@@ -875,6 +911,11 @@ actor Renderer {
         // tilt; hand-local axes are +Y up, -Z forward (matching the wield offsets).
         // Numbers are a starting point to tune on device (the sim's fake hand is
         // not a real controller pose).
+        rightArmSkinned = false
+        if hud.skinLayer >= 0, let hand = handPose(left: false) {
+            emitSkinArm(hand, hud: hud, into: &vt, idx: &idxt)
+            rightArmSkinned = true
+        }
         if let w = hud.wield, let hand = handPose(left: false) {
             // Animate: a quick drop-and-pop when the wield changes, and a
             // continuous swing while digging. Both ride on top of the grip so the
@@ -900,7 +941,7 @@ actor Renderer {
                 // Tilt to a 3D corner (top + front + side) like a held block.
                 let m = grip * matrix4x4_rotation(radians: -0.5, axis: SIMD3(0, 1, 0))
                              * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
-                emitHandCube(m, offset: .zero, size: 0.11, layers: layers, light: hud.wieldLight, into: &v, idx: &idx)
+                emitHandCube(m, offset: .zero, size: 0.08, layers: layers, light: hud.wieldLight, into: &v, idx: &idx)
             case .mesh(let model, let layer):
                 // A mesh node (chest etc): draw the real model at the same 3/4
                 // presentation angle as a held block, textured with its one tile.
@@ -944,7 +985,7 @@ actor Renderer {
             // A stackable item never has wear, so the two share this spot freely.
             let watchAcross = SIMD3<Float>(1, 0, 0)          // around the wrist (band width)
             let watchAlong  = SIMD3<Float>(0, 0, 1)          // toward the elbow (band length)
-            let watchCenter = SIMD3<Float>(0, 0.040, 0.055)  // top of the wrist, just above the surface
+            let watchCenter = SIMD3<Float>(0, Renderer.armHalf + 0.002, 0.055)  // top of the wrist, on the surface
             // Stack count: inked on the back of the hand like a tattoo, lying
             // on the skin (the hand box's top face) instead of floating. A flat
             // label used to read mirrored or upside down at some hand angles,
@@ -955,7 +996,7 @@ actor Renderer {
             if hud.wieldCountLayer >= 0 {
                 let th: Float = 0.011
                 let tw = th * max(0.3, hud.wieldCountAspect)
-                let skin = SIMD3<Float>(0, 0.0285, 0.048)       // back of the hand by the wrist, clear of the held item
+                let skin = SIMD3<Float>(0, Renderer.armHalf + 0.0005, -0.03)        // back of the bare hand (a skin arm is sleeve toward the elbow)
                 let head = appModel.player.headXform()
                 let hu = simd_normalize(SIMD3<Float>(head.columns.1.x, head.columns.1.y, head.columns.1.z))
                 // Quarter turns of (right, up) = (+X, -Z) about the hand's +Y.

@@ -8998,6 +8998,10 @@ final class WorldSession {
         // HUD_SET_FLAGS: bit 8 wielditem (mcl_shields hides the hand while
         // blocking, the spyglass while zoomed), bit 1 hotbar.
         let hudF = client.hudFlags
+        var skin: (layer: Int, uv: SIMD2<Float>, src: SIMD2<Float>)? = nil
+        if let me = client.objects.entity(client.objects.localPlayerId), let tex = me.textures.first, !tex.isEmpty {
+            skin = hudImage(tex)
+        }
         handHudHandoff.post(HandHudState(wield: hudF & 8 != 0 ? wield : nil, digging: digging, wieldLight: wieldLight,
                                          wieldSilhouette: hudF & 8 != 0 ? sil : nil, wieldWear: wieldWear,
                                          wieldScale: wieldName.map { max(0.5, min(2.5, client.items.wieldScale(for: $0).x)) } ?? 1,
@@ -9009,7 +9013,10 @@ final class WorldSession {
                                          armor: armorForHud,
                                          armorFullLayer: atlas.armorFullLayer,
                                          armorHalfLayer: atlas.armorHalfLayer,
-                                         armorEmptyLayer: atlas.armorEmptyLayer))
+                                         armorEmptyLayer: atlas.armorEmptyLayer,
+                                         skinLayer: Int32(skin?.layer ?? -1),
+                                         skinUV: skin?.uv ?? SIMD2(1, 1),
+                                         skinSize: skin?.src ?? SIMD2(64, 64)))
     }
 
     /// A node changed at `p` (dig/place): re-mesh its mapblock and the six

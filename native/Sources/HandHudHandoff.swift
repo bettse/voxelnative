@@ -53,6 +53,12 @@ struct HandHudState {
     var armorFullLayer: Int32 = 0
     var armorHalfLayer: Int32 = 0
     var armorEmptyLayer: Int32 = 0
+    // The local player's skin in the MODEL texture array, so the right hand
+    // draws as the skin's arm like desktop's first-person hand. -1 = no skin
+    // yet (plain box). uv scales 0..1 onto the layer; size is the skin in px.
+    var skinLayer: Int32 = -1
+    var skinUV = SIMD2<Float>(1, 1)
+    var skinSize = SIMD2<Float>(64, 64)
 }
 
 final class HandHudHandoff {
