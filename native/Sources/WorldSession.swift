@@ -143,9 +143,9 @@ final class WorldSession {
     private var koganeOptionLayers: [Int] = [] // one text layer per menu option
     // "Resume" is first and is the default selection, so opening the menu and
     // confirming (a double trigger) just closes it — no accidental exit.
-    // "Bug note" appears only in testing mode (-vrdev.testingMode / the launcher
-    // toggle): capture a bug from inside the world without leaving to the
-    // launcher. Testing mode doesn't flip mid-session, so reading it here (used
+    // "Bug note" appears only in testing mode, a developer setting with no
+    // launcher UI (pass -vrdev.testingMode 1 at launch): capture a bug from
+    // inside the world without leaving to the launcher. Testing mode doesn't flip mid-session, so reading it here (used
     // for nav bounds, render, highlight and dispatch) stays consistent per frame.
     // Audio is controlled by the launcher's volume sliders now, so the old
     // in-game music/sound toggles are gone (they duplicated the sliders and

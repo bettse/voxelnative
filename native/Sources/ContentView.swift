@@ -42,7 +42,6 @@ struct ContentView: View {
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
     // pulled alongside native.log/screenshots.
-    @AppStorage("vrdev.testingMode") private var testingMode = false
 
     // The app boots into this launcher window. On Connect it opens the immersive
     // world and DISMISSES this window (so its move/close chrome doesn't float in
@@ -85,8 +84,6 @@ struct ContentView: View {
                 displaySection
                 Divider()
                 soundSection
-                Divider()
-                advancedSection
             }
             .padding(40)
             .padding(.bottom, 40)   // room above the Play ornament
@@ -360,30 +357,6 @@ struct ContentView: View {
     private func connect(to p: ServerProfile) {
         loadFields(from: p)
         connect()
-    }
-
-    // MARK: - Testing mode (in-headset bug notes)
-
-    // Testing mode + the immersive-state readout are dev affordances, not for a
-    // first-time player, so they live collapsed under "Advanced".
-    private var advancedSection: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle("Testing mode", isOn: $testingMode).toggleStyle(.switch).frame(maxWidth: 320)
-                if testingMode {
-                    // Bug capture happens in-game (the Kogane menu's "Bug note"),
-                    // where you can see the bug -- a launcher text field is useless
-                    // mid-session, so it's gone. This just enables that option.
-                    Text("Adds a \u{201C}Bug note\u{201D} option to the in-game menu (captures your view + position with the logs).")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                }
-                Text("Immersive: \(String(describing: appModel.immersiveSpaceState))")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            .padding(.top, 6)
-        } label: {
-            Text("Advanced").font(.headline).foregroundStyle(.secondary)
-        }
     }
 
     // MARK: - Display
