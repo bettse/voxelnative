@@ -659,6 +659,51 @@ actor Renderer {
     }
     private func handPose(left: Bool) -> simd_float4x4? { left ? poseLeft : poseRight }
 
+    /// One-euro filter (Casiez et al.) for a 3-vector: heavy smoothing when
+    /// the signal barely moves, almost none when it moves fast, so natural
+    /// hand tremor stops shaking the pointer without making real motion lag.
+    struct OneEuro3 {
+        var minCutoff: Float, beta: Float, dCutoff: Float = 1
+        private var x: SIMD3<Float>?, dx = SIMD3<Float>(repeating: 0)
+        init(minCutoff: Float, beta: Float) { self.minCutoff = minCutoff; self.beta = beta }
+        private static func alpha(_ cutoff: Float, _ dt: Float) -> Float {
+            let tau = 1 / (2 * .pi * cutoff)
+            return 1 / (1 + tau / dt)
+        }
+        mutating func filter(_ v: SIMD3<Float>, dt: Float) -> SIMD3<Float> {
+            guard let prev = x, dt > 0 else { x = v; dx = .zero; return v }
+            let rawDx = (v - prev) / dt
+            dx += (rawDx - dx) * Self.alpha(dCutoff, dt)
+            let cutoff = minCutoff + beta * simd_length(dx)
+            let out = prev + (v - prev) * Self.alpha(cutoff, dt)
+            x = out
+            return out
+        }
+        mutating func reset() { x = nil }
+    }
+    // Panel pointing only: the right controller's ray origin and direction,
+    // filtered. The dot and the tick's hover/click both use this pose, so the
+    // trigger hits exactly where the dot sits. Tuned by feel (Eric: the dot
+    // "jitters a touch because of natural hand jitter").
+    private var pointerPos = OneEuro3(minCutoff: 1.0, beta: 0.5)
+    private var pointerDir = OneEuro3(minCutoff: 1.0, beta: 1.5)
+    private var pointerTime: TimeInterval = 0
+    private func smoothedPointerPose(_ m: simd_float4x4?, at time: TimeInterval) -> simd_float4x4? {
+        guard let m else { pointerPos.reset(); pointerDir.reset(); return nil }
+        // render() runs once per drawable; filter once per frame.
+        if time == pointerTime, let done = pointerPose { return done }
+        let dt = Float(min(0.1, max(0, time - pointerTime)))
+        pointerTime = time
+        let p = pointerPos.filter(SIMD3(m.columns.3.x, m.columns.3.y, m.columns.3.z), dt: dt)
+        let z = simd_normalize(pointerDir.filter(simd_normalize(SIMD3(m.columns.2.x, m.columns.2.y, m.columns.2.z)), dt: dt))
+        // Rebuild an orthonormal frame around the filtered forward (only -Z and
+        // the origin are used for the ray).
+        var y = SIMD3<Float>(m.columns.1.x, m.columns.1.y, m.columns.1.z)
+        let x = simd_normalize(simd_cross(y, z)); y = simd_cross(z, x)
+        return simd_float4x4(SIMD4(x, 0), SIMD4(y, 0), SIMD4(z, 0), SIMD4(p, 1))
+    }
+    private var pointerPose: simd_float4x4?
+
     /// The panel pointer dot (and the stack held on it), placed where this
     /// frame's right-controller ray meets the open panel. Same ray and plane
     /// math as WorldSession.handleInventoryInput, in origin space; drawn over
@@ -666,7 +711,7 @@ actor Renderer {
     private var pointerV: [Float] = [], pointerIdx: [UInt32] = []
     private func buildPanelPointer() {
         pointerIndexCount = 0
-        guard let pp = appModel.player.panelPointer(), let m = handPose(left: false) else { return }
+        guard let pp = appModel.player.panelPointer(), let m = pointerPose else { return }
         let o = SIMD3<Float>(m.columns.3.x, m.columns.3.y, m.columns.3.z)
         let d = simd_normalize(-SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z))
         let denom = simd_dot(d, pp.toward)
@@ -1823,7 +1868,8 @@ actor Renderer {
             appModel.player.setOriginLift(appModel.player.eyeHeight)
         }
         appModel.player.setHeadXform(head)   // for head-locked overlays (Kogane menu, death text)
-        appModel.player.setRightHand(handPose(left: false))   // inventory pointer ray
+        pointerPose = smoothedPointerPose(handPose(left: false), at: time)
+        appModel.player.setRightHand(pointerPose)   // inventory pointer ray
         buildPanelPointer()                  // panel dot from this frame's controller pose
         buildHudBillboards(head: head)       // place the HUD against this frame's head (no lag/ghost)
         // View frame -> node frame: undo the Z mirror, then the yaw (see modelMatrix).
