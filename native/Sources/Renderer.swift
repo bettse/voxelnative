@@ -599,7 +599,7 @@ actor Renderer {
                 print("[hands] hand L=\(anchors.leftHand?.isTracked == true) R=\(anchors.rightHand?.isTracked == true) acc=\(accessoryXforms.count)"); fflush(stdout)
             }
             // The right hand draws as the skin arm when a skin is known.
-            for hand in [anchors.leftHand, rightArmSkinned ? nil : anchors.rightHand] {
+            for hand in [leftArmSkinned ? nil : anchors.leftHand, rightArmSkinned ? nil : anchors.rightHand] {
                 guard let h = hand, h.isTracked else { continue }
                 appendHandBox(h.originFromAnchorTransform, v: &v, idx: &idx)
             }
@@ -621,6 +621,7 @@ actor Renderer {
         accessoryLock.lock(); let xs = accessoryXforms; accessoryLock.unlock()
         for (k, m) in xs {
             if rightArmSkinned, k.lowercased().contains("right") { continue }   // drawn as the skin's arm
+            if leftArmSkinned, k.lowercased().contains("left") { continue }
             appendHandBox(m, v: &v, idx: &idx)
         }
     }
@@ -839,15 +840,21 @@ actor Renderer {
     /// Half the arm's square cross-section (the skin arm is 4x4x12 px, so
     /// 6 cm square by 18 cm long).
     static let armHalf: Float = 0.03
-    private var rightArmSkinned = false
-    /// The right hand as the skin's arm, like desktop's first-person hand: a
-    /// 4x4x12 px box running from the fist (hand-local -Z) back toward the
-    /// elbow, each face cut from the standard skin layout (right arm: top
-    /// 44,16  fist 48,16  outer 40,20  front 44,20  inner 48,20  back 52,20).
+    private var rightArmSkinned = false, leftArmSkinned = false
+    /// A hand as the skin's arm, like desktop's first-person hand: a 4x4x12 px
+    /// box running from the fist (hand-local -Z) back toward the elbow, each
+    /// face cut from the standard skin layout. Each limb's block is
+    /// [top][bottom] over [+X side][front][-X side][back]: the right arm's
+    /// starts at 40,16, the left arm's at 32,48. An old 64x32 skin has no left
+    /// arm, so (like Minecraft) the left mirrors the right.
     /// The arm points forward, so the skin's front faces up (+Y) and the
     /// sleeve (top of the texture) sits at the elbow end. Drawn in the model
     /// texture stream, where the skin lives.
-    private func emitSkinArm(_ m: simd_float4x4, hud: HandHudState, into v: inout [Float], idx: inout [UInt32]) {
+    private func emitSkinArm(_ m: simd_float4x4, hud: HandHudState, left: Bool, into v: inout [Float], idx: inout [UInt32]) {
+        let mirror = left && hud.skinSize.y < 64
+        let (bx, by): (Float, Float) = left && !mirror ? (32, 48) : (40, 16)
+        // Mirrored: the +X and -X side textures swap, and every face flips in u.
+        let plusX = mirror ? bx + 8 : bx, minusX = mirror ? bx : bx + 8
         let a = Renderer.armHalf, z0: Float = -0.06, z1: Float = 0.12
         let layer = Float(hud.skinLayer), light = hud.wieldLight
         func xf(_ p: SIMD3<Float>) -> SIMD3<Float> { let q = m * SIMD4<Float>(p, 1); return SIMD3(q.x, q.y, q.z) }
@@ -856,7 +863,9 @@ actor Renderer {
                   _ x: Float, _ y: Float, _ w: Float, _ h: Float, shade: Float) {
             let sx = hud.skinUV.x / hud.skinSize.x, sy = hud.skinUV.y / hud.skinSize.y
             let e: Float = 0.02   // keep nearest sampling inside the rect
-            let u0 = (x + e) * sx, u1 = (x + w - e) * sx, v0 = (y + e) * sy, v1 = (y + h - e) * sy
+            var u0 = (x + e) * sx, u1 = (x + w - e) * sx
+            if mirror { swap(&u0, &u1) }
+            let v0 = (y + e) * sy, v1 = (y + h - e) * sy
             let base = UInt32(v.count / 9)
             for (p, u, t) in [(p00, u0, v0), (p10, u1, v0), (p11, u1, v1), (p01, u0, v1)] {
                 let w = xf(p)
@@ -864,12 +873,12 @@ actor Renderer {
             }
             pushQuad(&idx, base)
         }
-        face(SIMD3(a, a, z1), SIMD3(-a, a, z1), SIMD3(-a, a, z0), SIMD3(a, a, z0), 44, 20, 4, 12, shade: 1.0)       // front, up
-        face(SIMD3(a, -a, z1), SIMD3(a, a, z1), SIMD3(a, a, z0), SIMD3(a, -a, z0), 40, 20, 4, 12, shade: 0.8)       // outer
-        face(SIMD3(-a, a, z1), SIMD3(-a, -a, z1), SIMD3(-a, -a, z0), SIMD3(-a, a, z0), 48, 20, 4, 12, shade: 0.8)   // inner
-        face(SIMD3(-a, -a, z1), SIMD3(a, -a, z1), SIMD3(a, -a, z0), SIMD3(-a, -a, z0), 52, 20, 4, 12, shade: 0.6)   // back, down
-        face(SIMD3(a, a, z0), SIMD3(-a, a, z0), SIMD3(-a, -a, z0), SIMD3(a, -a, z0), 48, 16, 4, 4, shade: 0.9)      // fist end
-        face(SIMD3(a, -a, z1), SIMD3(-a, -a, z1), SIMD3(-a, a, z1), SIMD3(a, a, z1), 44, 16, 4, 4, shade: 0.9)      // shoulder end
+        face(SIMD3(a, a, z1), SIMD3(-a, a, z1), SIMD3(-a, a, z0), SIMD3(a, a, z0), bx + 4, by + 4, 4, 12, shade: 1.0)       // front, up
+        face(SIMD3(a, -a, z1), SIMD3(a, a, z1), SIMD3(a, a, z0), SIMD3(a, -a, z0), plusX, by + 4, 4, 12, shade: 0.8)        // +X side
+        face(SIMD3(-a, a, z1), SIMD3(-a, -a, z1), SIMD3(-a, -a, z0), SIMD3(-a, a, z0), minusX, by + 4, 4, 12, shade: 0.8)   // -X side
+        face(SIMD3(-a, -a, z1), SIMD3(a, -a, z1), SIMD3(a, -a, z0), SIMD3(-a, -a, z0), bx + 12, by + 4, 4, 12, shade: 0.6)  // back, down
+        face(SIMD3(a, a, z0), SIMD3(-a, a, z0), SIMD3(-a, -a, z0), SIMD3(a, -a, z0), bx + 8, by, 4, 4, shade: 0.9)          // fist end
+        face(SIMD3(a, -a, z1), SIMD3(-a, -a, z1), SIMD3(-a, a, z1), SIMD3(a, a, z1), bx + 4, by, 4, 4, shade: 0.9)          // shoulder end
     }
     private var countTurn = 0   // which quarter turn the hand-tattoo count uses
     private func emitHandRect(_ m: simd_float4x4, center: SIMD3<Float>,
@@ -943,10 +952,14 @@ actor Renderer {
         // tilt; hand-local axes are +Y up, -Z forward (matching the wield offsets).
         // Numbers are a starting point to tune on device (the sim's fake hand is
         // not a real controller pose).
-        rightArmSkinned = false
+        rightArmSkinned = false; leftArmSkinned = false
         if hud.skinLayer >= 0, let hand = handPose(left: false) {
-            emitSkinArm(hand, hud: hud, into: &vt, idx: &idxt)
+            emitSkinArm(hand, hud: hud, left: false, into: &vt, idx: &idxt)
             rightArmSkinned = true
+        }
+        if hud.skinLayer >= 0, let hand = handPose(left: true) {
+            emitSkinArm(hand, hud: hud, left: true, into: &vt, idx: &idxt)
+            leftArmSkinned = true
         }
         if let w = hud.wield, let hand = handPose(left: false) {
             // Animate: a quick drop-and-pop when the wield changes, and a
