@@ -282,6 +282,9 @@ actor Renderer {
     private var accessoryTracking: AccessoryTrackingProvider?
     private let accessoryLock = NSLock()
     private nonisolated(unsafe) var accessoryXforms: [String: simd_float4x4] = [:]
+    // The provider the session is running, read per frame (under accessoryLock)
+    // to predict controller poses for the frame's display time.
+    private nonisolated(unsafe) var runningAccessoryProvider: AccessoryTrackingProvider?
     private var arSessionRef: ARKitSession?
     private var handAuthorized = false
     static let useHandTracking = false   // Sense controllers are the only input; hands stay off
@@ -505,6 +508,7 @@ actor Renderer {
 
     /// Stream controller poses into accessoryXforms (keyed by handedness).
     private func consumeAccessoryUpdates(_ provider: AccessoryTrackingProvider) {
+        accessoryLock.lock(); runningAccessoryProvider = provider; accessoryLock.unlock()
         Task { [weak self] in
             for await update in provider.anchorUpdates {
                 guard let self else { return }
@@ -626,10 +630,20 @@ actor Renderer {
     // accessory lock, copied the dict and lowercased every key (perf review #7).
     private var poseFrame: UInt64 = .max
     private var poseLeft: simd_float4x4?, poseRight: simd_float4x4?
-    private func resolveHandPoses(frameIndex: UInt64) {
+    private func resolveHandPoses(frameIndex: UInt64, at time: TimeInterval?) {
         guard poseFrame != frameIndex else { return }
         poseFrame = frameIndex
-        accessoryLock.lock(); let acc = accessoryXforms; accessoryLock.unlock()
+        accessoryLock.lock(); var acc = accessoryXforms; let provider = runningAccessoryProvider; accessoryLock.unlock()
+        // Predict each controller to when this frame is shown. The anchorUpdates
+        // stream only hands over the last reported pose, whenever its task gets
+        // to run, so the panel dot trailed the controller and stuttered when an
+        // update arrived late (Eric: the inventory dot "stutters and slows").
+        if let provider, let time {
+            for a in provider.latestAnchors where a.isTracked {
+                let m = (provider.predictAnchor(for: a, at: time) ?? a).originFromAnchorTransform
+                acc["\(a.accessory.inherentChirality)"] = m
+            }
+        }
         var l: simd_float4x4? = nil, r: simd_float4x4? = nil
         for (k, m) in acc {
             let lk = k.lowercased()
@@ -1697,7 +1711,8 @@ actor Renderer {
         // Perform frame independent work
 
         self.updateDynamicBufferState(frameIndex: frame.frameIndex)
-        self.resolveHandPoses(frameIndex: frame.frameIndex)   // once; buildHandHud + render read the memo
+        // Once; buildHandHud + render read the memo.
+        self.resolveHandPoses(frameIndex: frame.frameIndex, at: frame.predictTiming()?.presentationTime.timeInterval)
 
         self.updateGameState()
 
