@@ -5876,17 +5876,23 @@ final class WorldSession {
     private var mobMissLogged: Set<String> = []
     private var modelDropLogged: Set<String> = []   // mobs that fell back to a white billboard
 
-    /// Where the offhand item sits in the vitals band: on the XP level's row
-    /// (-0.22, above the XP bar at -0.28), just right of the digits at az 0,
-    /// and above any health-boost or absorption rows. Just above the hearts
-    /// put it on top of the XP bar (device shot-1790199793).
-    /// (az, elev) in radians, like the hearts.
-    private func offhandHudAngles() -> (az: Float, elev: Float) {
+    /// Elevation (radians) of the XP bar: one row above the topmost heart row,
+    /// counting health-boost and absorption rows. The hearts are 0.05 rad
+    /// tall, so the bar at their own -0.28 cut across the icons.
+    private func xpBarElev() -> Float {
         var top: Float = -0.30
         var rest = hp - 20
         while rest > 0 && top < -0.30 + 0.2 { top += 0.05; rest -= 20 }
         if client.absorption > 0 { top += 0.045 }
-        return (0.09, max(-0.22, top + 0.06))
+        return top + 0.045
+    }
+
+    /// Where the offhand item sits in the vitals band: on the XP level's row,
+    /// just right of the digits at az 0. Just above the hearts put it on top
+    /// of the XP bar (device shot-1790199793).
+    /// (az, elev) in radians, like the hearts.
+    private func offhandHudAngles() -> (az: Float, elev: Float) {
+        (0.09, xpBarElev() + 0.05)
     }
 
     /// The offhand item (mcl_offhand) as a head-locked icon from the node atlas,
@@ -5978,15 +5984,15 @@ final class WorldSession {
         guard level > 0 || fraction > 0 else { return }
         let frac = max(0, min(1, fraction))
         let hudDist: Float = 1.35          // focal plane, was 1.7 (HUD P1/P9)
-        // A flat row across the bottom of view at the same elevation as the
-        // hearts / hunger rows. It used to bow (+0.35 rad/rad^2, the ends 1.5
-        // degrees above the centre) and read as bent next to the level rows
-        // (Eric). Segments are camera-facing billboards along the row;
+        // A flat row across the bottom of view, just above the hearts / hunger
+        // rows. It used to bow (+0.35 rad/rad^2, the ends 1.5 degrees above
+        // the centre) and read as bent next to the level rows (Eric).
+        // Segments are camera-facing billboards along the row;
         // the green fill covers the left `fraction` of them, with the
         // straddling segment filled partway.
         let n = 12
         let azMin: Float = -0.28, azMax: Float = 0.28
-        let baseElev: Float = -0.28, bowXp: Float = 0
+        let baseElev = xpBarElev(), bowXp: Float = 0
         let segAz = (azMax - azMin) / Float(n)
         let segW = 2 * hudDist * tan(segAz * 0.5) * 1.08   // slight overlap kills gaps
         let height: Float = 0.02 * hudDist
@@ -6029,10 +6035,10 @@ final class WorldSession {
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
         let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
         let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
-        // Same 1.7 m depth as the arc, centred just above it (arc dips to elev
-        // -0.30 rad at az 0; digits ride at -0.22) so the bar and number never
-        // drift apart the way the old two-anchor layout did.
-        let dir = simd_normalize(hf + hu * tanf(-0.22))
+        // Centred just above the bar, on the same elevation the bar uses, so
+        // the bar and number never drift apart the way the old two-anchor
+        // layout did.
+        let dir = simd_normalize(hf + hu * tanf(xpBarElev() + 0.05))
         let center = headPos + dir * 1.7
         appendQuad(center: center, right: hr, up: hu, hw: 0.10, hh: 0.10,
                    layer: xpLevelLayer, tint: Self.packTint(128, 255, 32), v: &v, idx: &idx)
