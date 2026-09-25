@@ -88,4 +88,9 @@ final class InfoFormTests: XCTestCase {
         XCTAssertTrue(labels.contains { $0.text.contains("more") })   // "(+8 more)" for 20 rows capped at 12
         XCTAssertFalse(labels.contains { $0.text == "Row20" })
     }
+
+    func testTextlistRowColorPrefixIsStripped() {
+        let t = Formspec.parseTextlists("textlist[0,0;4,4;entries;#00FFFFHand,#00FFFFWooden Axe,##hash,plain;1]")
+        XCTAssertEqual(t.first?.rows, ["Hand", "Wooden Axe", "#hash", "plain"])
+    }
 }

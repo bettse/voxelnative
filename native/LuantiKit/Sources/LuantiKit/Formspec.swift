@@ -516,6 +516,16 @@ public enum Formspec {
 
     /// Parse `textlist[<X>,<Y>;<W>,<H>;<name>;<item1>,<item2>,...;<selected>;<transparent>]`.
     /// Items separate on unescaped commas (a `\,` stays literal).
+    /// A textlist row may start with its colour, "#RRGGBB" (guiTextList: "##"
+    /// is a literal '#'). The doc Help lists use it on every entry, which drew
+    /// as "#00FFFFWooden Axe".
+    static func stripTextlistColor(_ row: String) -> String {
+        if row.hasPrefix("##") { return String(row.dropFirst()) }
+        guard row.hasPrefix("#"), row.count >= 7,
+              row.dropFirst().prefix(6).allSatisfy({ $0.isHexDigit }) else { return row }
+        return String(row.dropFirst(7))
+    }
+
     public static func parseTextlists(_ spec: String) -> [TextList] {
         var out: [TextList] = []
         for chunk in spec.split(separator: "]") {
@@ -526,7 +536,7 @@ public enum Formspec {
             guard xy.count == 2, wh.count == 2,
                   let gx = Float(xy[0]), let gy = Float(xy[1]),
                   let w = Float(wh[0]), let h = Float(wh[1]) else { continue }
-            let rows = splitUnescapedCommas(f[3]).map { cleanColored($0, caller: "textlist").text }
+            let rows = splitUnescapedCommas(f[3]).map { stripTextlistColor(cleanColored($0, caller: "textlist").text) }
             let sel = f.count >= 5 ? (Int(f[4]) ?? 0) : 0
             out.append(TextList(gx: gx, gy: gy, w: w, h: h, name: f[2], rows: rows, selected: sel))
         }
