@@ -6,8 +6,9 @@ settings testflight.sh uses). Usage:
 
   tools/asc.py status                  # TestFlight builds + beta review state
   tools/asc.py get /v1/apps            # raw GET, prints JSON
+  tools/asc.py screenshots a.png b.png # replace version 1.0's Vision Pro screenshots, in order
 """
-import base64, json, os, subprocess, sys, time, urllib.request, urllib.error
+import base64, hashlib, json, os, subprocess, sys, time, urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUNDLE_ID = "dev.ericbetts.voxelnative"
@@ -93,10 +94,55 @@ def status():
               f"  betaReview={r.get('betaReviewState', 'not submitted')}")
 
 
+def upload_screenshots(paths, display_type="APP_APPLE_VISION_PRO"):
+    """Replace the editable version's screenshots for one display type with
+    `paths`, in order: reserve each file, PUT its bytes to the URLs Apple hands
+    back, commit it with an MD5, then set the set's order."""
+    aid = app_id()
+    versions = request("GET", f"/v1/apps/{aid}/appStoreVersions")["data"]
+    ver = next(v for v in versions if v["attributes"]["appStoreState"] in
+               ("PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED"))
+    loc = request("GET", f"/v1/appStoreVersions/{ver['id']}/appStoreVersionLocalizations")["data"][0]
+    sets = request("GET", f"/v1/appStoreVersionLocalizations/{loc['id']}/appScreenshotSets")["data"]
+    sset = next((x for x in sets if x["attributes"]["screenshotDisplayType"] == display_type), None)
+    if sset is None:
+        sset = request("POST", "/v1/appScreenshotSets", {"data": {"type": "appScreenshotSets",
+            "attributes": {"screenshotDisplayType": display_type},
+            "relationships": {"appStoreVersionLocalization": {"data": {"type": "appStoreVersionLocalizations", "id": loc["id"]}}}}})["data"]
+    for old in request("GET", f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]:
+        request("DELETE", f"/v1/appScreenshots/{old['id']}")
+    ids = []
+    for path in paths:
+        data = open(path, "rb").read()
+        shot = request("POST", "/v1/appScreenshots", {"data": {"type": "appScreenshots",
+            "attributes": {"fileName": os.path.basename(path), "fileSize": len(data)},
+            "relationships": {"appScreenshotSet": {"data": {"type": "appScreenshotSets", "id": sset["id"]}}}}})["data"]
+        for op in shot["attributes"]["uploadOperations"]:
+            chunk = data[op["offset"]:op["offset"] + op["length"]]
+            req = urllib.request.Request(op["url"], data=chunk, method=op["method"],
+                                         headers={h["name"]: h["value"] for h in op.get("requestHeaders", [])})
+            urllib.request.urlopen(req).read()
+        request("PATCH", f"/v1/appScreenshots/{shot['id']}", {"data": {"type": "appScreenshots", "id": shot["id"],
+            "attributes": {"uploaded": True, "sourceFileChecksum": hashlib.md5(data).hexdigest()}}})
+        ids.append(shot["id"])
+        print(f"uploaded {os.path.basename(path)}")
+    request("PATCH", f"/v1/appScreenshotSets/{sset['id']}/relationships/appScreenshots",
+            {"data": [{"type": "appScreenshots", "id": i} for i in ids]})
+    for _ in range(30):   # Apple processes the images asynchronously
+        states = [x["attributes"]["assetDeliveryState"]["state"] for x in
+                  request("GET", f"/v1/appScreenshotSets/{sset['id']}/appScreenshots")["data"]]
+        if all(st in ("COMPLETE", "FAILED") for st in states):
+            break
+        time.sleep(5)
+    print("states:", states)
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
     if cmd == "status":
         status()
+    elif cmd == "screenshots":
+        upload_screenshots(sys.argv[2:])
     elif cmd == "get":
         print(json.dumps(request("GET", sys.argv[2]), indent=2))
     else:
