@@ -803,6 +803,7 @@ actor Renderer {
 
     /// A tinted rectangle in a hand frame (explicit half-width/height), for the
     /// wield durability bar. `tint` is packed r + g*256 + b*65536.
+    private var countTurn = 0   // which quarter turn the hand-tattoo count uses
     private func emitHandRect(_ m: simd_float4x4, center: SIMD3<Float>,
                               wAxis: SIMD3<Float>, hAxis: SIMD3<Float>, halfW: Float, halfH: Float,
                               layer: Int32, tint: Float, into v: inout [Float], idx: inout [UInt32]) {
@@ -944,23 +945,37 @@ actor Renderer {
             let watchAcross = SIMD3<Float>(1, 0, 0)          // around the wrist (band width)
             let watchAlong  = SIMD3<Float>(0, 0, 1)          // toward the elbow (band length)
             let watchCenter = SIMD3<Float>(0, 0.040, 0.055)  // top of the wrist, just above the surface
-            // Stack count: a small camera-facing BILLBOARD at the wrist,
-            // not a label lying flat on the watch face. A flat label grazed the
-            // hand angle and read mirrored/upside-down; a billboard is
-            // always upright and legible at any hand pose (like a hotbar-cell
-            // count). Anchored at the wrist world point, oriented by the head's
-            // right/up so it faces you. The text pass is cull .none, so one quad
-            // shows from both sides.
+            // Stack count: inked on the back of the hand like a tattoo, lying
+            // on the skin (the hand box's top face) instead of floating. A flat
+            // label used to read mirrored or upside down at some hand angles,
+            // so the digits turn in quarter steps to whichever orientation is
+            // most upright from your eye; seen from the back of the hand the
+            // pair (right, up) always keeps right x up pointing at you, so it's
+            // never mirrored.
             if hud.wieldCountLayer >= 0 {
-                let th: Float = 0.018
+                let th: Float = 0.011
                 let tw = th * max(0.3, hud.wieldCountAspect)
-                let cw = hand * SIMD4<Float>(watchCenter, 1)
-                let center = SIMD3<Float>(cw.x, cw.y, cw.z)
+                let skin = SIMD3<Float>(0, 0.0285, 0.048)       // back of the hand by the wrist, clear of the held item
                 let head = appModel.player.headXform()
-                let hr = simd_normalize(SIMD3<Float>(head.columns.0.x, head.columns.0.y, head.columns.0.z))
                 let hu = simd_normalize(SIMD3<Float>(head.columns.1.x, head.columns.1.y, head.columns.1.z))
-                emitHandRect(matrix_identity_float4x4, center: center, wAxis: hr, hAxis: hu,
-                             halfW: tw, halfH: th, layer: hud.wieldCountLayer, tint: 16777215, into: &vt, idx: &idxt)
+                // Quarter turns of (right, up) = (+X, -Z) about the hand's +Y.
+                let turns: [(SIMD3<Float>, SIMD3<Float>)] = [
+                    (SIMD3(1, 0, 0), SIMD3(0, 0, -1)), (SIMD3(0, 0, -1), SIMD3(-1, 0, 0)),
+                    (SIMD3(-1, 0, 0), SIMD3(0, 0, 1)), (SIMD3(0, 0, 1), SIMD3(1, 0, 0))]
+                func upScore(_ i: Int) -> Float {
+                    let u = hand * SIMD4<Float>(turns[i].1, 0)
+                    return simd_dot(SIMD3(u.x, u.y, u.z), hu)
+                }
+                // Hysteresis: only switch when another turn is clearly more upright,
+                // so the digits don't flip back and forth near 45 degrees.
+                let best = (0..<4).max { upScore($0) < upScore($1) }!
+                if upScore(best) > upScore(countTurn) + 0.25 { countTurn = best }
+                let (r, u) = turns[countTurn]
+                // Grey tint: the entity shader multiplies grey (a coloured tint only
+                // blends 70% toward the colour, which left the digits pale), so
+                // this reads as dark ink.
+                emitHandRect(hand, center: skin, wAxis: r, hAxis: u, halfW: tw, halfH: th,
+                             layer: hud.wieldCountLayer, tint: Float(22 + 22 * 256 + 22 * 65536), into: &vt, idx: &idxt)
             }
             // Durability: a short band across the wrist, green->red by
             // remaining, filled from one end like a gauge.
