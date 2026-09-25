@@ -451,6 +451,31 @@ public enum Formspec {
 
     /// Parse `checkbox[x,y;name;label;selected]` (the clear-inventory "Do not ask
     /// again" box, tuning options). y is the checkbox's vertical CENTER.
+    /// A horizontal `scrollbar[x,y;w,h;orientation;name;value]`, used as a
+    /// slider (vl_tuning's "slider" settings: music volume). Values are the
+    /// engine default range 0..1000; vertical scrollbars (scroll_container
+    /// bars) are left out.
+    public struct Slider: Equatable {
+        public let gx: Float, gy: Float, w: Float, h: Float
+        public let name: String
+        public let value: Int
+    }
+    public static func parseSliders(_ spec: String) -> [Slider] {
+        var out: [Slider] = []
+        for chunk in spec.split(separator: "]") {
+            guard let r = chunk.range(of: "scrollbar["), !chunk[..<r.lowerBound].hasSuffix("_") else { continue }
+            let f = chunk[r.upperBound...].split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+            guard f.count >= 5 else { continue }
+            let xy = f[0].split(separator: ","), wh = f[1].split(separator: ",")
+            guard xy.count == 2, wh.count == 2, let gx = Float(xy[0]), let gy = Float(xy[1]),
+                  let w = Float(wh[0]), let h = Float(wh[1]) else { continue }
+            let orient = f[2].trimmingCharacters(in: .whitespaces)
+            guard orient.isEmpty || orient == "horizontal", !f[3].isEmpty else { continue }
+            out.append(Slider(gx: gx, gy: gy, w: w, h: h, name: f[3], value: max(0, min(1000, Int(f[4]) ?? 0))))
+        }
+        return out
+    }
+
     public static func parseCheckboxes(_ spec: String) -> [Checkbox] {
         var out: [Checkbox] = []
         for chunk in spec.split(separator: "]") {
@@ -591,9 +616,10 @@ public enum Formspec {
     public static func infoFormLabels(_ spec: String, legacy: Bool = false) -> [Label] {
         var out: [Label] = []
         if let t = parseTabHeader(spec) {
+            let xs = tabXs(t.captions)
             for (i, cap) in t.captions.enumerated() {
                 let mark = (i + 1 == t.current) ? "[ \(cap) ]" : cap
-                out.append(Label(gx: 0.4 + Float(i) * 2.7, gy: 0.3, text: mark, color: nil))
+                out.append(Label(gx: xs[i], gy: 0.3, text: mark, color: nil))
             }
         }
         let maxRows = 12
@@ -622,7 +648,11 @@ public enum Formspec {
         }
         let maxLines = 16
         for h in parseHypertexts(spec).map({ legacy ? Legacy.convert($0) : $0 }) {
-            for (i, line) in h.lines.prefix(maxLines).enumerated() where !line.isEmpty {
+            // Wrapped to the box like a textarea (hypertext wraps on desktop);
+            // Player Settings' help lines ran off and got cut short.
+            let cols = max(10, Int(h.w / charWidth))
+            let wrapped = h.lines.flatMap { $0.isEmpty ? [$0] : wrap($0, width: cols) }
+            for (i, line) in wrapped.prefix(maxLines).enumerated() where !line.isEmpty {
                 out.append(Label(gx: h.gx + 0.1, gy: h.gy + 0.3 + Float(i) * 0.4, text: line, color: nil))
             }
         }
@@ -668,6 +698,14 @@ public enum Formspec {
     /// True when a form has no item lists but does carry info widgets we render
     /// read-only (textlist/tabheader/hypertext) -- an achievements/announcements/
     /// Help dialog rather than a container or a text-editor form.
+    /// Left x of each tab caption: at least 2.7 units apart, more for a long
+    /// caption ("[ Player Settings ]" ran into "Game Rules" at a fixed step).
+    static func tabXs(_ captions: [String]) -> [Float] {
+        var xs: [Float] = [], x: Float = 0.4
+        for cap in captions { xs.append(x); x += max(2.7, Float(cap.count + 4) * 0.3) }
+        return xs
+    }
+
     public static func isInfoForm(_ spec: String) -> Bool {
         parseTabHeader(spec) != nil || !parseTextlists(spec).isEmpty || !parseHypertexts(spec).isEmpty
     }
@@ -689,8 +727,9 @@ public enum Formspec {
         // gy matches infoFormLabels exactly (it draws each line with gy as the
         // text's vertical CENTER), so the tap box lands on the visible text.
         if let t = parseTabHeader(spec) {
+            let xs = tabXs(t.captions)
             for (i, cap) in t.captions.enumerated() {
-                out.append(InfoTarget(gx: 0.4 + Float(i) * 2.7, gy: 0.3, w: max(1.2, Float(cap.count) * 0.28 + 0.6), h: 0.7,
+                out.append(InfoTarget(gx: xs[i], gy: 0.3, w: max(1.2, Float(cap.count) * 0.28 + 0.6), h: 0.7,
                                       field: t.name, value: "\(i + 1)"))
             }
         }

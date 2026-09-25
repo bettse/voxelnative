@@ -3652,7 +3652,10 @@ final class WorldSession {
     private var formspecTooltips: [String: (text: String, color: Float?)] = [:]  // element name -> hover text + color (enchant cost)
     private var formspecCheckboxes: [Formspec.Checkbox] = []             // checkbox[] toggles
     private var checkboxState: [String: Bool] = [:]                      // local checked state, flipped on tap
-    private var invCheckboxes: [(u: Float, v: Float, hw: Float, hh: Float, name: String, label: String, color: Float?)] = []   // laid-out checkbox boxes
+    private var invCheckboxes: [(u: Float, v: Float, hw: Float, hh: Float, name: String, label: String, color: Float?)] = []
+    private var formspecSliders: [Formspec.Slider] = []
+    private var invSliders: [(u: Float, v: Float, hw: Float, hh: Float, name: String)] = []   // laid-out slider tracks
+    private var sliderValue: [String: Int] = [:]   // local value, updated on tap   // laid-out checkbox boxes
     private var formspecLabelLayers: [String: (layer: Int, aspect: Float)] = [:]   // label text -> text layer
     private var invHover: Int? = nil                                     // index into invSlots
     private var invCursor: SIMD3<Float>? = nil                           // ray hit on the panel plane (node space)
@@ -3799,7 +3802,7 @@ final class WorldSession {
         formspecFields = []; formspecButtons = []; invWidgets = []
         formspecInfoTargets = []; infoTargets = []
         formspecImages = []; invImages = []; invBackgrounds = []; formspecModels = []; invModels = []; formspecTooltips = [:]; formspecBackgrounds = []
-        formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
+        formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []; formspecSliders = []; invSliders = []
         // Tell the server the form was closed. A named show_formspec form (chests
         // use "mcl_chests:chest_x_y_z") closes via INVENTORY_FIELDS with that
         // formname + quit -- that is what fires mcl_chests' on_player_receive_
@@ -3880,7 +3883,11 @@ final class WorldSession {
         // their labels/images/backgrounds and the textlist/hypertext rows alike.
         let vis = Formspec.parseVisuals(spec, legacy: legacy)
         formspecLabelsRaw = vis.labels + Formspec.infoFormLabels(spec, legacy: legacy)
-        formspecFields = []
+        // Visible fields too (Player Settings' music volume); a zero-size one is
+        // hidden state (old_tab) and parseFieldsPositioned skips nothing, so drop those.
+        // Unnamed ones (the awards description textarea) are read-only text the
+        // info labels already draw.
+        formspecFields = Formspec.parseFieldsPositioned(spec).filter { $0.w > 0 && !$0.name.isEmpty }
         // Info forms have real buttons too (the Help category list, page
         // arrows) and toggles (Player Settings checkboxes); keep them tappable.
         formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)
@@ -3891,10 +3898,13 @@ final class WorldSession {
         formspecTooltips = Formspec.parseTooltips(spec)
         formspecBackgrounds = vis.backgrounds
         formspecCheckboxes = Formspec.parseCheckboxes(spec); invCheckboxes = []
+        formspecSliders = Formspec.parseSliders(spec); invSliders = []
+        sliderValue = Dictionary(formspecSliders.map { ($0.name, $0.value) }, uniquingKeysWith: { a, _ in a })
         checkboxState = Dictionary(formspecCheckboxes.map { ($0.name, $0.selected) }, uniquingKeysWith: { a, _ in a })
         if legacy {
             formspecButtons = formspecButtons.map(Formspec.Legacy.convert)
             formspecCheckboxes = formspecCheckboxes.map(Formspec.Legacy.convert)
+            formspecFields = formspecFields.map(Formspec.Legacy.convert)
         }
         formspecName = name
         formspecOpen = true; inventoryOpen = true; formspecIsInventory = false
@@ -4183,6 +4193,10 @@ final class WorldSession {
                 return (u: $0.gx * p - cu + box, v: -$0.gy * p - cv,
                         hw: box, hh: box, name: $0.name, label: $0.label, color: $0.color)
             }
+            invSliders = formspecSliders.map {
+                (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
+                 hw: $0.w * 0.5 * p, hh: $0.h * 0.5 * p, name: $0.name)
+            }
             return
         }
         let main = client.inventory["main"]?.count ?? 36
@@ -4248,6 +4262,8 @@ final class WorldSession {
             for i in invImages { grow(i.u, i.v, i.hw, i.hh) }
             for w in invWidgets { grow(w.u, w.v, w.hw, w.hh) }
             for m in invModels { grow(m.u, m.v, m.hw, m.hh) }   // the skin editor's big preview
+            for c in invCheckboxes { grow(c.u, c.v, c.hw, c.hh) }
+            for s in invSliders { grow(s.u, s.v, s.hw, s.hh) }   // Player Settings toggles sit at the far right
             // Labels are left-anchored at u; reach right by a rough text width
             // (Formspec.charWidth) so a long textlist row stays on the panel.
             for l in invLabels {
@@ -4319,6 +4335,18 @@ final class WorldSession {
             let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
             if let w = invWidgets.first(where: { abs(u - $0.u) <= $0.hw && abs(v - $0.v) <= $0.hh }) {
                 tapWidget(w)
+                return
+            }
+        }
+        // Tap a slider: the value where you pointed along the track, sent the
+        // way the engine reports a scrollbar change ("CHG:<value>").
+        if primary, invHeld == nil, invHover == nil, let cur = invCursor, !invSliders.isEmpty {
+            let rel = cur - fr.center
+            let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
+            if let sl = invSliders.first(where: { abs(u - $0.u) <= $0.hw && abs(v - $0.v) <= $0.hh }) {
+                let val = Int(((u - (sl.u - sl.hw)) / (2 * sl.hw) * 1000).rounded())
+                sliderValue[sl.name] = max(0, min(1000, val))
+                submitFormFields([sl.name: "CHG:\(sliderValue[sl.name] ?? 0)"])
                 return
             }
         }
@@ -5277,7 +5305,7 @@ final class WorldSession {
                 formspecLabelLastUse[t] = nil
             }
         }
-        guard let r = Self.renderTextFilled(String(text.prefix(48)), canvas: ModelTextureHandoff.size) else { return nil }
+        guard let r = Self.renderTextLine(String(text.prefix(48)), canvas: ModelTextureHandoff.size) else { return nil }
         let l = registerRGBALayer("#fslabel:\(text)", r.px)
         formspecLabelLayers[text] = (l, r.aspect)
         formspecLabelLastUse[text] = formspecLabelUse
@@ -5477,16 +5505,27 @@ final class WorldSession {
         // Height under a third of a cell: 0.55 then 0.36 still read as oversized on
         // small station formspecs like the furnace (few slots, crisp filled text).
         for lab in invLabels {
-            guard let t = formspecLabelLayer(lab.text) else { continue }
             // A wide form is scaled down to fit (invScale); keep its text near the
             // normal size anyway, or Player Settings / Help read as specks.
-            let th = max(cell, 0.054 * 0.85) * 0.30, tw = th * max(0.4, t.aspect)
+            // 0.42 of a cell: the line renderer's quad spans the font's full
+            // ascent+descent plus margins, so this matches the old ink-fitted 0.30.
+            let th = max(cell, 0.054 * 0.85) * 0.42
+            // label[] doesn't wrap in Luanti, but one text layer is 256 px wide:
+            // a long line ("mcl_inventory:clear_inventory_confirmation (Default:
+            // true)") was cut at 48 chars. Draw it as consecutive <=40-char
+            // pieces, each crisp in its own layer.
             // Luanti labels are LEFT-anchored at their x. Centering them pushed a
             // long label (e.g. "Inventory") half its width off the panel's left
             // edge, so it read as "Inve". Anchor the left edge at lab.u.
-            let lc = fr.center + fr.right * (lab.u + tw * 0.5) + fr.up * lab.v - toward * 0.006
-            appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
-                       layer: t.layer, tint: lab.color ?? 16777215, v: &v, idx: &idx)
+            var x = lab.u
+            for piece in Self.labelPieces(lab.text) {
+                guard let t = formspecLabelLayer(piece) else { continue }
+                let tw = th * max(0.4, t.aspect)
+                let lc = fr.center + fr.right * (x + tw * 0.5) + fr.up * lab.v - toward * 0.006
+                appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
+                           layer: t.layer, tint: lab.color ?? 16777215, v: &v, idx: &idx)
+                x += tw
+            }
         }
         // Tappable field/button boxes: a framed plate, brighter when the
         // pointer is over it, with the field's current value or the button label.
@@ -5537,6 +5576,23 @@ final class WorldSession {
                 let tc = fr.center + fr.right * w.u + fr.up * w.v - toward * 0.007
                 appendQuad(center: toOrigin(tc), right: oRight, up: oUp, hw: min(tw, w.hw * 0.95) * 0.5, hh: th * 0.5,
                            layer: t.layer, tint: textColor ?? 16777215, v: &v, idx: &idx)
+            }
+        }
+        // Sliders: a dark track, the filled part in green, the value on top.
+        for sl in invSliders {
+            let val = Float(sliderValue[sl.name] ?? 0) / 1000
+            let tc = fr.center + fr.right * sl.u + fr.up * sl.v - toward * 0.006
+            appendQuad(center: toOrigin(tc), right: oRight, up: oUp, hw: sl.hw, hh: sl.hh * 0.35,
+                       layer: highlightLayer, tint: Self.packTint(50, 50, 60), v: &v, idx: &idx)
+            let fw = max(0.001, sl.hw * val)
+            let fc = fr.center + fr.right * (sl.u - sl.hw + fw) + fr.up * sl.v - toward * 0.007
+            appendQuad(center: toOrigin(fc), right: oRight, up: oUp, hw: fw, hh: sl.hh * 0.35,
+                       layer: highlightLayer, tint: Self.packTint(90, 200, 90), v: &v, idx: &idx)
+            if let t = formspecLabelLayer("\(sliderValue[sl.name] ?? 0)") {
+                let th = sl.hh * 0.9, tw = th * max(0.4, t.aspect)
+                let lc = fr.center + fr.right * sl.u + fr.up * sl.v - toward * 0.008
+                appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
+                           layer: t.layer, tint: 16777215, v: &v, idx: &idx)
             }
         }
         // Checkboxes: a box (bright fill when checked) + label to the right.
@@ -7438,6 +7494,64 @@ final class WorldSession {
     /// un-stretches it by drawing the quad at the returned aspect (width/height),
     /// so glyphs are the same size no matter the line length. Returns nil if the
     /// text is empty/unrenderable.
+    /// Split a long label into <=40-char pieces at spaces (keeping the space on
+    /// the earlier piece so the gap survives), or hard-cut a long unbroken run.
+    static func labelPieces(_ text: String, max: Int = 40) -> [String] {
+        guard text.count > max else { return [text] }
+        var out: [String] = [], cur = ""
+        for word in text.split(separator: " ", omittingEmptySubsequences: false).map({ String($0) + " " }) {
+            if cur.count + word.count > max, !cur.isEmpty { out.append(cur); cur = "" }
+            var w = word
+            while w.count > max { out.append(String(w.prefix(max))); w = String(w.dropFirst(max)) }
+            cur += w
+        }
+        if !cur.trimmingCharacters(in: .whitespaces).isEmpty { out.append(String(cur.dropLast())) }
+        return out
+    }
+
+    /// One line of panel text sized by the FONT's metrics, not the string's ink:
+    /// every label gets the same glyph height (renderTextFilled scaled each
+    /// string to its own ink box, so a piece without tall letters came out
+    /// bigger), and the full typographic width, trailing space included, maps
+    /// edge to edge across the canvas with no side margin, so consecutive
+    /// pieces of a long label join into one line. The returned aspect is the
+    /// canvas's (quad width / quad height).
+    static func renderTextLine(_ text: String, canvas: Int) -> (px: [UInt8], aspect: Float)? {
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
+                                  bytesPerRow: canvas * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
+        let ref: CGFloat = 64
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, ref, nil)
+        func line(_ c: CGColor) -> CTLine {
+            CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: c]))
+        }
+        let white = line(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        let w = CGFloat(CTLineGetTypographicBounds(white, nil, nil, nil))
+        let asc = CTFontGetAscent(font), desc = CTFontGetDescent(font), h = asc + desc
+        guard w > 1 else { return nil }
+        let mv = CGFloat(canvas) * 0.08                 // vertical margin only (outline room)
+        let sx = CGFloat(canvas) / w, sy = (CGFloat(canvas) - 2 * mv) / h
+        let black = line(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+        let o = max(1.0, ref * 0.05)
+        func draw(_ l: CTLine, _ dx: CGFloat, _ dy: CGFloat) {
+            ctx.saveGState()
+            ctx.scaleBy(x: sx, y: sy)
+            ctx.textPosition = CGPoint(x: dx, y: mv / sy + desc + dy)
+            CTLineDraw(l, ctx)
+            ctx.restoreGState()
+        }
+        for dx in [-o, 0, o] { for dy in [-o, 0, o] where !(dx == 0 && dy == 0) { draw(black, dx, dy) } }
+        draw(white, 0, 0)
+        guard let base = ctx.data else { return nil }
+        var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
+        px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
+        // Quad height covers the text height plus both margins.
+        return (px, Float(w / (h * CGFloat(canvas) / (CGFloat(canvas) - 2 * mv))))
+    }
+
     static func renderTextFilled(_ text: String, canvas: Int) -> (px: [UInt8], aspect: Float)? {
         guard !text.isEmpty else { return nil }
         let cs = CGColorSpaceCreateDeviceRGB()
