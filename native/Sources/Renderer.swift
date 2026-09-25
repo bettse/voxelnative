@@ -598,7 +598,8 @@ actor Renderer {
             if handLogTick % 180 == 0 {
                 print("[hands] hand L=\(anchors.leftHand?.isTracked == true) R=\(anchors.rightHand?.isTracked == true) acc=\(accessoryXforms.count)"); fflush(stdout)
             }
-            for hand in [anchors.leftHand, anchors.rightHand] {
+            // The right hand draws as the skin arm when a skin is known.
+            for hand in [anchors.leftHand, rightArmSkinned ? nil : anchors.rightHand] {
                 guard let h = hand, h.isTracked else { continue }
                 appendHandBox(h.originFromAnchorTransform, v: &v, idx: &idx)
             }

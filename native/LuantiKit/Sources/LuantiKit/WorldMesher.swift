@@ -800,7 +800,13 @@ public enum WorldMesher {
                     let h11 = flowing ? liquidCorner(g, 1, 1, family: fam) : 1
                     for f in faces {
                         let np = SIMD3(g.x + f.n.x, g.y + f.n.y, g.z + f.n.z)
-                        if occludesLiquid(cNodeId(np), ms) { continue }
+                        let nid = cNodeId(np)
+                        if occludesLiquid(nid, ms) { continue }
+                        // Against a partial node (slab, stair, glass, roots) the water
+                        // face and that node's face share a plane and z-fight: pull
+                        // the water face 2 mm into its own cell.
+                        let inset = nid != WorldMap.CONTENT_AIR && !nodes.isLiquid(nid)
+                            ? SIMD3<Float>(Float(f.n.x), Float(f.n.y), Float(f.n.z)) * -0.002 : .zero
                         let layer = Float(atlas.layer(id: id, face: f.tile))
                         let light = Float(cNodeLight(np))
                         // Drop each top corner (y==1) to its computed height; the
@@ -813,9 +819,12 @@ public enum WorldMesher {
                                 let c = f.c[k]
                                 if c.y > 0.5 {
                                     let hh = c.x < 0.5 ? (c.z < 0.5 ? h00 : h01) : (c.z < 0.5 ? h10 : h11)
-                                    fcorners[k] = SIMD3(c.x, hh, c.z)
-                                } else { fcorners[k] = c }
+                                    fcorners[k] = SIMD3(c.x, hh, c.z) + inset
+                                } else { fcorners[k] = c + inset }
                             }
+                            corners = fcorners
+                        } else if inset != .zero {
+                            for k in 0..<4 { fcorners[k] = f.c[k] + inset }
                             corners = fcorners
                         } else { corners = f.c }
                         // Turn the flowing top texture so its animation runs downhill,
@@ -1020,6 +1029,10 @@ public enum WorldMesher {
                         let nid = cNodeId(np)
                         if occludes(nid, ms) { continue }
                         if nid == id, glass || rk == .allfaces || ms.gl(id) { continue }   // same glass/leaf: cull shared face
+                        // Two DIFFERENT allfaces nodes (oak against birch leaves): both
+                        // faces of the shared wall land on one plane in the two-sided
+                        // cutout pass and z-fight. Keep just the positive-facing one.
+                        if rk == .allfaces, f.n.x + f.n.y + f.n.z < 0, ms.k(nid) == .allfaces { continue }
                         let srcTile = WorldMesher.cubeTile(fi, fd)
                         // Facedir also ROTATES the tile (not just picks it), so
                         // log grain / pillar caps line up (mapblock_mesh dir_to_tile).
@@ -1038,10 +1051,18 @@ public enum WorldMesher {
                         // the overlay instead (mapblock_mesh.cpp: tint only when
                         // !tile.has_color).
                         let faceTint = (ownColor?[srcTile] ?? false) ? 16777215 : tint
+                        // A glass face against a different, non-occluding node (a slab
+                        // behind a window, stained glass next to clear) shares that
+                        // node's face plane and z-fights along the frame: pull it 1 mm in.
+                        var fc = f.c
+                        if glass || ms.gl(id), nid != WorldMap.CONTENT_AIR, nid != id {
+                            let d = SIMD3<Float>(Float(f.n.x), Float(f.n.y), Float(f.n.z)) * -0.001
+                            fc = f.c.map { $0 + d }
+                        }
                         if glass {
-                            emitQuad(f.c, base: g, layer: layer, shade: faceShade + 2.0, lights: lights, liquid: true, tint: faceTint, uvRot: uvRot)
+                            emitQuad(fc, base: g, layer: layer, shade: faceShade + 2.0, lights: lights, liquid: true, tint: faceTint, uvRot: uvRot)
                         } else {
-                            emitQuad(f.c, base: g, layer: layer, shade: faceShade, lights: lights, liquid: false, tint: faceTint, uvRot: uvRot)
+                            emitQuad(fc, base: g, layer: layer, shade: faceShade, lights: lights, liquid: false, tint: faceTint, uvRot: uvRot)
                         }
                         // tiles_overlay: the engine's second layer on the same
                         // face (the grass fringe over dirt). Drawn as a cutout

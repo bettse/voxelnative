@@ -86,12 +86,15 @@ public final class Client {
     /// Every list from the last TOCLIENT_INVENTORY (main, craft, craftpreview,
     /// armor, ...), kept across KeepList lines. Drives the inventory panel.
     public private(set) var inventory: [String: [ItemStack?]] = [:]
+    private var serverInventory: [String: [ItemStack?]] = [:]   // last TOCLIENT_INVENTORY, no predictions
+    private var predictedSinceServer = false
+    private var serverInventoryAge: Double = 0
     /// Sim/test only: seed a player inventory list so the panel's own grids
     /// (not just a container's) exercise the icon path headless. The sim dev
     /// account is empty, so nothing else fills this. Mirrors
     /// WorldMap.setNodeInventoryForTest.
     public func setPlayerInventoryForTest(list: String, _ stacks: [ItemStack?]) {
-        inventory[list] = stacks
+        inventory[list] = stacks; serverInventory[list] = stacks
     }
     /// Detached inventories (creative list, ender chest, shared/mod containers)
     /// keyed by their server name, each name->lists. Referenced by a formspec's
@@ -158,6 +161,7 @@ public final class Client {
         conn.sendMessage(Op.toserverInventoryAction, Data(text.utf8))
         print("[inv] -> \(text)"); fflush(stdout)
         predictInventoryAction(text)   // apply locally so the panel updates instantly (server echo reconciles)
+        predictedSinceServer = true
     }
 
     /// One end of an inventory move: an inventory location (e.g. "current_player",
@@ -272,7 +276,7 @@ public final class Client {
 
     /// Test-only: seed the local inventory so prediction can be exercised without
     /// a live server echo.
-    func debugSetInventory(_ lists: [String: [ItemStack?]]) { inventory = lists }
+    func debugSetInventory(_ lists: [String: [ItemStack?]]) { inventory = lists; serverInventory = lists }
 
     /// Parse an InventoryAction string and predict its effect on the local player
     /// inventory (current_player only for v1; other locations rely on the echo).
@@ -666,6 +670,20 @@ public final class Client {
     public func disconnect(_ reason: String = "client disconnect") { conn.disconnect(reason) }
     public func poll(_ delta: Double) {
         conn.poll(delta)
+        // Every 10 s after the last TOCLIENT_INVENTORY, fall back to the server's
+        // copy (client.cpp): a move the server refused without resending would
+        // otherwise leave the prediction on screen for good.
+        if predictedSinceServer {
+            let before = (serverInventoryAge / 10).rounded(.down)
+            serverInventoryAge += delta
+            if (serverInventoryAge / 10).rounded(.down) != before {
+                inventory = serverInventory; predictedSinceServer = false
+                onInventoryLists?()
+                var slots: [String?] = (inventory["main"] ?? []).prefix(9).map { $0?.name }
+                while slots.count < 9 { slots.append(nil) }
+                hotbar = slots; onInventory?(slots)
+            }
+        }
         // TOSERVER_INIT is unreliable: resend it every 1.5 s until HELLO, like
         // client.cpp. Sent once, one lost datagram hung the join.
         if initSent, !helloReceived {
@@ -1520,8 +1538,12 @@ public final class Client {
     }
 
     func parseInventoryText(_ text: String) {
-        let (lists, sawMain) = Client.parseInventoryLists(text, previous: inventory)
+        // KeepList carries over the SERVER's last copy, not our prediction, like
+        // m_inventory_from_server: a mispredicted list must not stick.
+        let (lists, sawMain) = Client.parseInventoryLists(text, previous: serverInventory)
+        serverInventory = lists
         inventory = lists
+        predictedSinceServer = false; serverInventoryAge = 0
         onInventoryLists?()
         // A KeepList (or an inventory without "main") leaves the hotbar untouched.
         guard sawMain, let main = lists["main"] else { return }

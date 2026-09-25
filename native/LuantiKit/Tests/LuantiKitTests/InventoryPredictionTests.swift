@@ -117,4 +117,22 @@ final class InventoryPredictionTests: XCTestCase {
         c.predictInventoryAction("Move 0 current_player main 0 nodemeta:1,2,3 main 0")
         XCTAssertEqual(c.inventory["main"]![0]?.count, 10)   // untouched
     }
+
+    /// A prediction the server never answers is rolled back to the server's
+    /// copy 10 s later (client.cpp), and a KeepList carries the server's list,
+    /// not the prediction.
+    func testUnansweredPredictionRollsBack() {
+        let c = Client(name: "t", password: "")
+        c.parseInventoryText("List main 2\nItem dirt 10\nEmpty\nEndInventoryList\nEndInventory\n")
+        c.sendInventoryAction("Move 0 current_player main 0 current_player main 1")
+        XCTAssertNil(c.inventory["main"]?[0] ?? nil, "predicted move applied")
+        c.poll(5)
+        XCTAssertNil(c.inventory["main"]?[0] ?? nil, "still predicted before 10 s")
+        c.poll(6)
+        XCTAssertEqual((c.inventory["main"]?[0] ?? nil)?.count, 10, "rolled back to the server copy")
+        // KeepList after a fresh prediction: the server's list, not the guess.
+        c.sendInventoryAction("Move 0 current_player main 0 current_player main 1")
+        c.parseInventoryText("KeepList main\nEndInventory\n")
+        XCTAssertEqual((c.inventory["main"]?[0] ?? nil)?.count, 10)
+    }
 }
