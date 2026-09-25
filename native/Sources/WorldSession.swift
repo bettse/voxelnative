@@ -4358,10 +4358,12 @@ final class WorldSession {
                 // whole stacks, whatever count we send (inventorymanager.cpp
                 // allow_swap), and desktop keeps the swapped-in stack in hand
                 // (m_selected_swap).
-                var willSwap = false
+                var willSwap = false, mergesWhole = false
                 if let list = listFor(loc: held.loc, name: held.list), held.index < list.count,
                    let src = list[held.index], let dst = inventoryStack(h) {
                     willSwap = !(dst.name == src.name && dst.meta == src.meta && dst.count < client.items.stackMax(dst.name))
+                    // Same item and it all fits: nothing is left at the source.
+                    mergesWhole = !willSwap && src.count + dst.count <= client.items.stackMax(dst.name)
                 }
                 client.sendInventoryAction(Client.moveAction(count: count,
                     from: Client.InvRef(held.loc, held.list, held.index),
@@ -4397,10 +4399,16 @@ final class WorldSession {
                     // up the new stack (Eric: moved apples out, then couldn't pick
                     // up the wheat).
                     invHeld = nil
+                } else if mergesWhole {
+                    // Whole stack merged into a same-item stack with room for all
+                    // of it: the source is empty, so the hand is too. Waiting for
+                    // the empty-slot guard left a chest slot "held" (its list only
+                    // updates on the server's echo) and blocked the next pickup.
+                    invHeld = nil
                 } else {
-                    // Whole-stack left-click onto a filled slot: a swap or merge may
-                    // leave a remainder, so keep the hand on the source; the
-                    // empty-slot guard clears it once the source is actually empty.
+                    // Whole-stack left-click onto a filled slot: a merge that doesn't
+                    // all fit leaves a remainder, so keep the hand on the source;
+                    // the empty-slot guard clears it once the source is empty.
                     invHeld = (held.loc, held.list, held.index, 0)
                 }
             } else if primary {
@@ -6937,6 +6945,14 @@ final class WorldSession {
                 }
                 modelTextureHandoff.post(full: out)
                 modelTexPostedCount = modelTexCount
+                // The renderer grows its array in place and uploads only the NEW
+                // layers from a full, so an existing layer reused this tick (a
+                // freed icon slot now holding a different item) must still go
+                // as a patch. Dropping it left the old picture in that slot:
+                // wheat seeds drawn as iron boots.
+                if !modelTexDirty.isEmpty {
+                    modelTextureHandoff.post(patches: modelTexDirty.map { ModelTexPatch(index: $0, rgba: modelTexData[$0]) })
+                }
                 modelTexDirty.removeAll()
             } else if !modelTexDirty.isEmpty {
                 // Only existing layers' pixels changed: patch them in place.
