@@ -3548,6 +3548,11 @@ final class WorldSession {
     private var formspecInfoTargets: [Formspec.InfoTarget] = []   // info-form tab/row tap regions in grid coords
     private var infoTargets: [(u: Float, v: Float, hw: Float, hh: Float, field: String, value: String)] = []   // laid out in panel metres
     private var formspecImages: [Formspec.Image] = []                    // static image[] elements (furnace fire/arrow)
+    private var formspecModels: [Formspec.Model] = []                    // model[] elements (the player in the inventory)
+    private var invModels: [(u: Float, v: Float, hw: Float, hh: Float, model: Formspec.Model)] = []
+    // Posed model[] geometry, keyed by mesh + frame + rotation: the pose never
+    // changes while the panel is open, so skin and sort it once.
+    private var formModelCache: [String: (pos: [SIMD3<Float>], tris: [UInt32])] = [:]
     private var formspecBackgrounds: [Formspec.Background] = []          // background[]/background9[] panels
     private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool, count: Int)] = []   // laid-out image quads (isItem: draw as an item icon)
     private var invBackgrounds: [(u: Float, v: Float, hw: Float, hh: Float, texture: String)] = []   // laid-out background[] station art at its own coords
@@ -3690,7 +3695,7 @@ final class WorldSession {
         formspecElements = []; formspecRings = []; formspecLabelsRaw = []; invLabels = []
         formspecFields = []; formspecButtons = []; invWidgets = []
         formspecInfoTargets = []; infoTargets = []
-        formspecImages = []; invImages = []; invBackgrounds = []; formspecTooltips = [:]; formspecBackgrounds = []
+        formspecImages = []; invImages = []; invBackgrounds = []; formspecModels = []; invModels = []; formspecTooltips = [:]; formspecBackgrounds = []
         formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
         // Tell the server the form was closed. A named show_formspec form (chests
         // use "mcl_chests:chest_x_y_z") closes via INVENTORY_FIELDS with that
@@ -3727,6 +3732,7 @@ final class WorldSession {
         // so this path converts too (parseVisuals), same as openFormspec.
         let vis = Formspec.parseVisuals(spec, legacy: Formspec.Legacy.applies(to: fs))
         formspecImages = vis.images; formspecBackgrounds = vis.backgrounds; formspecLabelsRaw = vis.labels
+        formspecModels = vis.models
         layoutInventory()
     }
 
@@ -3753,6 +3759,7 @@ final class WorldSession {
         invWidgets = []
         formspecInfoTargets = Formspec.infoTargets(spec, legacy: legacy)
         formspecImages = vis.images
+        formspecModels = vis.models
         formspecTooltips = [:]
         formspecBackgrounds = vis.backgrounds
         formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
@@ -3834,6 +3841,7 @@ final class WorldSession {
         formspecFields = formspecContext != nil ? Formspec.parseFieldsPositioned(spec) : []
         formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)   // + stonecutter recipes
         formspecImages = vis.images
+        formspecModels = vis.models
         formspecTooltips = Formspec.parseTooltips(spec)   // hover text (enchant cost)
         formspecBackgrounds = vis.backgrounds
         formspecCheckboxes = Formspec.parseCheckboxes(spec)   // toggles
@@ -4016,6 +4024,10 @@ final class WorldSession {
             invImages = formspecImages.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
                  hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture, isItem: $0.isItem, count: $0.count)
+            }
+            invModels = formspecModels.map {
+                (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
+                 hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, model: $0)
             }
             // Non-fill background[] art (brewing/trading/book panels): each draws
             // at its own grid rect, unlike the prepend's stone panel that fills
@@ -5243,6 +5255,13 @@ final class WorldSession {
             guard let hi = hudImage(im.texture) else { continue }
             appendOverlayQuadUV(center: toOrigin(c), right: oRight, up: oUp, hw: im.hw, hh: im.hh,
                                 layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
+        }
+        // model[] elements: VoxeLibre's inventory shows the player's own
+        // character here. Drawn flat on the panel like the rest of the form.
+        for fm in invModels {
+            appendFormModel(fm.model, center: fr.center + fr.right * fm.u + fr.up * fm.v - toward * 0.006,
+                            hw: fm.hw, hh: fm.hh, right: fr.right, up: fr.up,
+                            toOrigin: toOrigin, v: &v, idx: &idx)
         }
         // Slots: all fixed panel-plane quads (no billboards), so cells, icons and
         // the backdrop share one orientation.
@@ -6583,6 +6602,70 @@ final class WorldSession {
         print("[realhud] simulated armor statbar + xp level"); fflush(stdout)
     }
     #endif
+
+    /// Draw a formspec model[] (the player in the inventory) into the panel:
+    /// posed at its frame, turned by its rotation, fitted to its rect, and
+    /// flattened onto the panel plane. The panel pass has no depth test, so the
+    /// triangles go out back to front and nearer faces cover farther ones.
+    private func appendFormModel(_ fm: Formspec.Model, center: SIMD3<Float>, hw: Float, hh: Float,
+                                 right: SIMD3<Float>, up: SIMD3<Float>,
+                                 toOrigin: (SIMD3<Float>) -> SIMD3<Float>, v: inout [Float], idx: inout [UInt32]) {
+        guard let mesh = model(for: fm.mesh) else {
+            if client.media.store[fm.mesh] == nil, client.media.announced.contains(fm.mesh) { client.media.request([fm.mesh]) }
+            return
+        }
+        let key = "\(fm.mesh)@\(fm.frame)@\(fm.rotY)@\(fm.rotX)"
+        let posed: (pos: [SIMD3<Float>], tris: [UInt32])
+        if let c = formModelCache[key] { posed = c } else {
+            var pos = mesh.isAnimated ? mesh.skinnedPositions(frame: fm.frame) : mesh.positions
+            let ry = fm.rotY * .pi / 180, rx = fm.rotX * .pi / 180
+            pos = pos.map { p in
+                let x = p.x * cos(ry) + p.z * sin(ry), z = -p.x * sin(ry) + p.z * cos(ry)
+                return SIMD3(x, p.y * cos(rx) - z * sin(rx), p.y * sin(rx) + z * cos(rx))
+            }
+            // Back to front: larger z is farther from the viewer (Irrlicht's
+            // camera looks down +Z at the model).
+            var order = Array(stride(from: 0, to: mesh.indices.count - 2, by: 3))
+            let depth = order.map { t in pos[Int(mesh.indices[t])].z + pos[Int(mesh.indices[t + 1])].z + pos[Int(mesh.indices[t + 2])].z }
+            order = order.indices.sorted { depth[$0] > depth[$1] }.map { order[$0] }
+            posed = (pos, order.map(UInt32.init))
+            formModelCache[key] = posed
+        }
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude), hi = -lo
+        for p in posed.pos { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+        let ext = hi - lo
+        guard ext.x > 1e-4, ext.y > 1e-4 else { return }
+        let scale = min(hw * 2 / ext.x, hh * 2 / ext.y) * 0.92
+        let mid = (lo + hi) * 0.5
+        // Which texture each triangle uses: textures[] is indexed by the mesh's
+        // material (brush), like an entity's textures; blank slots draw nothing.
+        var triLayer = [Int: (layer: Int, uv: SIMD2<Float>)]()
+        var brushOfIndex = [Int](repeating: -1, count: mesh.indices.count)
+        var start = 0
+        for surf in mesh.surfaces {
+            for i in 0..<surf.indices.count where start + i < brushOfIndex.count { brushOfIndex[start + i] = surf.brush }
+            start += surf.indices.count
+            let spec = surf.brush >= 0 && surf.brush < fm.textures.count ? fm.textures[surf.brush] : (fm.textures.first ?? "")
+            if !Self.isBlankSpec(spec), let h = hudImage(spec) { triLayer[surf.brush] = (h.layer, h.uv) }
+        }
+        for t in posed.tris {
+            let t = Int(t)
+            guard let tex = triLayer[brushOfIndex[t]] else { continue }
+            let vb = UInt32(v.count / 9)
+            let a = posed.pos[Int(mesh.indices[t])], b = posed.pos[Int(mesh.indices[t + 1])], c = posed.pos[Int(mesh.indices[t + 2])]
+            // Simple facing shade so the blocky limbs read as 3D.
+            let n = simd_normalize(simd_cross(b - a, c - a))
+            let shade = 0.6 + 0.4 * min(1, abs(n.z) + max(0, n.y) * 0.5)
+            for k in 0..<3 {
+                let vi = Int(mesh.indices[t + k])
+                let q = (posed.pos[vi] - mid) * scale
+                let w = toOrigin(center + right * q.x + up * q.y)
+                let uv = mesh.uvs[vi]
+                pushV(&v, w.x, w.y, w.z, uv.x * tex.uv.x, uv.y * tex.uv.y, Float(tex.layer), shade, 255, 16777215)
+            }
+            idx.append(contentsOf: [vb, vb + 1, vb + 2])
+        }
+    }
 
     private func model(for name: String) -> B3DLoader.Mesh? {
         if let m = modelCache[name] { return m }

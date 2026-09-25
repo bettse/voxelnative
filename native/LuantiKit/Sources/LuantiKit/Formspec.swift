@@ -43,14 +43,18 @@ public enum Formspec {
     /// The drawn-only parts every form path needs (labels, image[]/item_image[],
     /// background[]), already converted to real coordinates for a legacy form,
     /// so the open, refresh and info-form paths can't drift apart on it.
-    public struct Visuals { public var labels: [Label]; public var images: [Image]; public var backgrounds: [Background] }
+    public struct Visuals {
+        public var labels: [Label]; public var images: [Image]; public var backgrounds: [Background]
+        public var models: [Model] = []
+    }
     public static func parseVisuals(_ spec: String, legacy: Bool) -> Visuals {
         var v = Visuals(labels: parseLabels(spec), images: parseImages(spec) + parseItemImages(spec),
-                        backgrounds: parseBackgrounds(spec))
+                        backgrounds: parseBackgrounds(spec), models: parseModels(spec))
         if legacy {
             v.labels = v.labels.map(Legacy.convert)
             v.images = v.images.map(Legacy.convert)
             v.backgrounds = v.backgrounds.map(Legacy.convert)
+            v.models = v.models.map(Legacy.convert)
         }
         return v
     }
@@ -285,6 +289,50 @@ public enum Formspec {
                 im.count = count
                 out.append(im)
             }
+        }
+        return out
+    }
+
+    /// A 3D mesh drawn in the form, `model[x,y;w,h;name;mesh;textures;rotation;
+    /// continuous;mouse_control;frame_loop]`. VoxeLibre's inventory uses it for
+    /// the player's own character: the mesh, one texture per mesh material,
+    /// turned by `rotation` (x,y degrees) and posed at the start of frame_loop.
+    public struct Model: Equatable {
+        public let gx: Float, gy: Float, w: Float, h: Float
+        public let mesh: String
+        public let textures: [String]
+        public let rotX: Float, rotY: Float
+        public let frame: Float
+    }
+
+    /// Parse every `model[]` element. Texture lists are comma-separated; a
+    /// comma inside a texture modifier is escaped as `\,`.
+    public static func parseModels(_ spec: String) -> [Model] {
+        var out: [Model] = []
+        for chunk in spec.split(separator: "]") {
+            guard let r = chunk.range(of: "model[") else { continue }
+            if r.lowerBound != chunk.startIndex {
+                let before = chunk[chunk.index(before: r.lowerBound)]
+                if before.isLetter || before == "_" { continue }
+            }
+            let f = chunk[r.upperBound...].split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+            guard f.count >= 5 else { continue }
+            let xy = f[0].split(separator: ","), wh = f[1].split(separator: ",")
+            guard xy.count == 2, wh.count == 2, let gx = Float(xy[0]), let gy = Float(xy[1]),
+                  let w = Float(wh[0]), let h = Float(wh[1]), !f[3].isEmpty else { continue }
+            var textures: [String] = [], cur = "", esc = false
+            for ch in f[4] {
+                if esc { cur.append(ch); esc = false }
+                else if ch == "\\" { esc = true }
+                else if ch == "," { textures.append(cur); cur = "" }
+                else { cur.append(ch) }
+            }
+            textures.append(cur)
+            let rot = f.count > 5 ? f[5].split(separator: ",").compactMap { Float($0) } : []
+            let loop = f.count > 8 ? f[8].split(separator: ",").compactMap { Float($0) } : []
+            out.append(Model(gx: gx, gy: gy, w: w, h: h, mesh: f[3], textures: textures,
+                             rotX: rot.count > 0 ? rot[0] : 0, rotY: rot.count > 1 ? rot[1] : 0,
+                             frame: loop.first ?? 0))
         }
         return out
     }
@@ -763,6 +811,10 @@ public enum Formspec {
             var o = Image(gx: x(i.gx), gy: y(i.gy), w: i.w, h: i.h, texture: i.texture, isItem: i.isItem)
             o.count = i.count
             return o
+        }
+        public static func convert(_ m: Model) -> Model {
+            Model(gx: x(m.gx), gy: y(m.gy), w: m.w * spacing.x, h: m.h * spacing.y, mesh: m.mesh,
+                  textures: m.textures, rotX: m.rotX, rotY: m.rotY, frame: m.frame)
         }
         public static func convert(_ b: Background) -> Background {
             if b.fill { return b }

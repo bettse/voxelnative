@@ -327,3 +327,26 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(t["btn"]?.color, Self.dark313131)
     }
 }
+
+final class FormspecModelTests: XCTestCase {
+    // VoxeLibre's survival inventory (mcl_player.get_player_formspec_model).
+    func testParsesPlayerModel() {
+        let spec = "size[9,8.75]model[1.57,0.4;3.62,4.85;;mcl_armor_character.b3d;character.png,blank.png,blank.png;0,180;false;false;0,79]list[current_player;main;0,4.5;9,3;9]"
+        let m = Formspec.parseModels(spec)
+        XCTAssertEqual(m.count, 1)
+        XCTAssertEqual(m[0].mesh, "mcl_armor_character.b3d")
+        XCTAssertEqual(m[0].textures, ["character.png", "blank.png", "blank.png"])
+        XCTAssertEqual(m[0].rotY, 180)
+        XCTAssertEqual(m[0].frame, 0)
+        XCTAssertEqual(m[0].w, 3.62, accuracy: 1e-4)
+    }
+
+    func testEscapedCommaStaysInTexture() {
+        let m = Formspec.parseModels("model[0,0;1,1;;a.b3d;x.png^[colorize:#ff0000\\,128,y.png;0,0;false;false;0,0]")
+        XCTAssertEqual(m.first?.textures, ["x.png^[colorize:#ff0000,128", "y.png"])
+    }
+
+    func testImageTokenDoesNotMatchModel() {
+        XCTAssertTrue(Formspec.parseModels("image[0,0;1,1;model[x.png]").isEmpty)
+    }
+}
