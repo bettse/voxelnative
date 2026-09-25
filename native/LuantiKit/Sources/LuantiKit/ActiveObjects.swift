@@ -175,6 +175,9 @@ public final class ActiveObjects {
     }
 
     public private(set) var objects: [Int: Entity] = [:]
+    /// Drop every object (a reconnect: the new session re-sends what's around
+    /// you; old mobs would otherwise stand frozen, unhittable).
+    public func removeAll() { objects.removeAll() }
     public private(set) var tiles: Set<String> = []   // entity texture strings seen
     public private(set) var meshes: Set<String> = []  // entity model filenames seen
     public var localPlayerName = ""

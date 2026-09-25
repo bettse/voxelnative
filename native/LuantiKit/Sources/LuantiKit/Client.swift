@@ -411,6 +411,8 @@ public final class Client {
     /// (reason, code). code is AccessDeniedCode (8 = already-connected, etc); -1
     /// for client-side auth failures. The consumer decides retryable by code.
     public var onAccessDenied: ((String, Int) -> Void)?
+    /// The last ACCESS_DENIED's reconnect flag, set before onAccessDenied fires.
+    public private(set) var deniedReconnect = false
     public var onDisconnected: ((String) -> Void)?
     /// A map block was decoded; arg is its block position.
     public var onBlock: ((SIMD3<Int>) -> Void)?
@@ -648,11 +650,28 @@ public final class Client {
         requestedEntityTiles.removeAll()
         requestedEntityMeshes.removeAll()
         media.reset()   // clear in-flight requests so a mid-download drop doesn't hang the reconnect (F2)
+        // Desktop builds a fresh Client per connection, and the server forgets
+        // the old peer's sounds and HUD ids without telling us. Start this
+        // session's objects and HUD empty; the rain spawner pinned to the old
+        // player object and its looping sound go with them (onSessionReset).
+        objects.removeAll()
+        hudElements.removeAll(); hudGeneration += 1
+        statbars.removeAll(); hudTypes.removeAll()
+        xpBarId = nil; xpLevelId = nil
+        hungerStatbarId = nil; breathStatbarId = nil; armorStatbarId = nil
+        helloReceived = false; initResendTimer = 0
+        onSessionReset?()
         conn.connect(host: host, port: port)
     }
     public func disconnect(_ reason: String = "client disconnect") { conn.disconnect(reason) }
     public func poll(_ delta: Double) {
         conn.poll(delta)
+        // TOSERVER_INIT is unreliable: resend it every 1.5 s until HELLO, like
+        // client.cpp. Sent once, one lost datagram hung the join.
+        if initSent, !helloReceived {
+            initResendTimer += delta
+            if initResendTimer >= 1.5 { initResendTimer = 0; sendInit() }
+        }
         drainDecodedBlocks()   // splice blocks decoded off-thread since last poll
         // Advance the day locally between server updates (24000 units = a day).
         timeOfDay = (timeOfDay + timeSpeed * Float(delta) * (24000.0 / 86400.0)).truncatingRemainder(dividingBy: 24000)
@@ -710,7 +729,12 @@ public final class Client {
     }
     private var velocity = SIMD3<Float>.zero
 
+    private var initSent = false, helloReceived = false, initResendTimer: Double = 0
+    /// The client started a new connection: drop per-session state kept outside
+    /// Client (particle spawners, playing sounds).
+    public var onSessionReset: (() -> Void)?
     private func sendInit() {
+        initSent = true
         let w = PacketWriter()
         w.u8(Op.serializationVersion).u16(0)
         w.u16(Op.minProtocol).u16(Op.latestProtocol)
@@ -792,6 +816,7 @@ public final class Client {
     private var loggedDrops = Set<Int>()
 
     private func handleHello(_ payload: Data) {
+        helloReceived = true
         let r = PacketReader(payload)
         _ = r.u8(); _ = r.u16(); protoVer = r.u16()   // serialization, compression, protocol version
         print("[client] proto=\(protoVer)"); fflush(stdout)
@@ -838,7 +863,10 @@ public final class Client {
     private func handleDenied(_ payload: Data) {
         let r = PacketReader(payload)
         let code = r.u8()
-        var reason = r.has(2) ? r.string16() : ""
+        var reason = r.has(2) ? ItemRegistry.stripEscapes(r.string16()) : ""
+        // Trailing u8: the server's "should reconnect" (shutdown/kick with a
+        // restart coming). Too-many-users always may retry (clientpackethandler.cpp).
+        deniedReconnect = code == 6 || (r.has(1) && r.u8() & 1 != 0)
         let reasons = ["wrong password", "unexpected data", "singleplayer server",
                        "unsupported version", "bad characters in name", "name not allowed",
                        "server full", "empty passwords not allowed",

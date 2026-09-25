@@ -55,6 +55,12 @@ public final class Connection {
     public private(set) var isConnected = false
     private var connecting = false
     private var time = 0.0
+    // Smoothed round-trip time from ACKs of packets sent once (a resent one's
+    // ACK could answer either copy). The resend timeout is 2*RTT clamped to
+    // 0.1..2 s like mtp/impl.cpp: at a fixed 0.5 s, one lost dig or inventory
+    // packet held everything behind it on channel 0 for half a second.
+    private var rtt: Double?
+    private var resendBase: Double { rtt.map { min(2.0, max(0.1, 2 * $0)) } ?? Self.RESEND_TIMEOUT }
     private var lastReceived = 0.0
     private var lastSent = 0.0
     private var connectStarted = 0.0
@@ -251,7 +257,7 @@ public final class Connection {
             // never hit this; real WiFi with lagging acks does.)
             var toResend: [Int] = []
             for (seq, entry) in ch.outgoingUnacked {
-                let timeout = Self.RESEND_TIMEOUT * min(pow(1.5, Double(entry.tries - 1)), 8.0)
+                let timeout = resendBase * min(pow(1.5, Double(entry.tries - 1)), 8.0)
                 if time - entry.time >= timeout {
                     if entry.tries >= Self.MAX_RESENDS { finish("server stopped acknowledging"); return }
                     toResend.append(seq)
@@ -302,7 +308,10 @@ public final class Connection {
             guard data.count >= 2 else { return }
             switch Int(data[data.startIndex + 1]) {
             case Self.CTRL_ACK:
-                if data.count >= 4 { ch.outgoingUnacked.removeValue(forKey: readU16(data, 2)) }
+                if data.count >= 4, let e = ch.outgoingUnacked.removeValue(forKey: readU16(data, 2)), e.tries == 1 {
+                    let sample = time - e.time
+                    rtt = rtt.map { $0 * 0.9 + sample * 0.1 } ?? sample
+                }
             case Self.CTRL_SET_PEER_ID:
                 if data.count >= 4 {
                     peerId = readU16(data, 2)

@@ -470,6 +470,16 @@ final class AudioManager: NSObject {
         safeDetach(src.player, src.speed)
     }
 
+    /// Stop every tracked sound (a reconnect: the server won't stop the old
+    /// session's loops, like rain).
+    func stopAll() {
+        q.async { [weak self] in
+            guard let self else { return }
+            for src in self.sources.values { self.tearDown(src) }
+            self.sources.removeAll()
+        }
+    }
+
     /// Stop a sound by its server id (TOCLIENT_STOP_SOUND).
     func stop(id: Int) {
         q.async { [weak self] in

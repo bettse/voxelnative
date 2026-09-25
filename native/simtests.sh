@@ -38,6 +38,7 @@ SCENES=(
   torch   "torchTest:torchtest"
   fly     "flyTest:flytest"
   invpick "invPickTest:invpick"
+  reconnect "reconnectTest:reconnecttest"
   chord   "chordDropTest:chorddrop"
   weather "weatherTest:weathertest"
   bugnote "bugNoteTest:bugnotetest"

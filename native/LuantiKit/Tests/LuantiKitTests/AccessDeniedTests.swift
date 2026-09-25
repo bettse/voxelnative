@@ -30,4 +30,21 @@ final class AccessDeniedTests: XCTestCase {
         XCTAssertEqual(d.code, 8)
         XCTAssertEqual(d.reason, "come back in a sec")
     }
+
+    func testReconnectFlagAndEscapesInTheReason() {
+        let c = Client(name: "t", password: "")
+        var got = ""
+        c.onAccessDenied = { r, _ in got = r }
+        // Shutdown (11) with a translated reason and reconnect=1.
+        c.handleForTesting(Op.toclientAccessDenied,
+                           PacketWriter().u8(11).string16("\u{1b}(T@mcl)Server restarting\u{1b}E").u8(1).data)
+        XCTAssertTrue(c.deniedReconnect)
+        XCTAssertEqual(got, "Server restarting")
+        // A kick (10) without the flag must not retry.
+        c.handleForTesting(Op.toclientAccessDenied, PacketWriter().u8(10).string16("bye").u8(0).data)
+        XCTAssertFalse(c.deniedReconnect)
+        // Too many users always may retry.
+        c.handleForTesting(Op.toclientAccessDenied, PacketWriter().u8(6).data)
+        XCTAssertTrue(c.deniedReconnect)
+    }
 }

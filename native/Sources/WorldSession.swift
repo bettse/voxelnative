@@ -247,6 +247,7 @@ final class WorldSession {
     // Human-readable connection trouble for the in-world banner (mid-session
     // drops, after the launcher is gone). nil while all is well. Session-queue side.
     private(set) var connProblem: String? = nil
+    private var deniedReason: String? = nil   // server's shutdown/kick message, shown while we retry
     // A button-only dialog (the bed "Leave bed" sleep form) shown as a banner;
     // pressing the inventory button submits it so you can get up. Without this a
     // sleep freeze (physics_override speed=0/jump=0) had no escape.
@@ -258,7 +259,7 @@ final class WorldSession {
     /// short problem string for the in-world banner.
     private func setPhase(_ phase: AppModel.ConnPhase) {
         switch phase {
-        case .reconnecting(let n): connProblem = "Reconnecting\u{2026} (\(n))"
+        case .reconnecting(let n): connProblem = deniedReason.map { "\($0): reconnecting\u{2026} (\(n))" } ?? "Reconnecting\u{2026} (\(n))"
         case .failed(let r):       connProblem = "Disconnected: \(r)"
         case .connecting:          connProblem = "Connecting\u{2026}"
         default:                   connProblem = nil
@@ -503,6 +504,7 @@ final class WorldSession {
     /// everywhere by default; the device drives movement from the controller.
     private var simAutoWalk = false
     private var simAutoSneak = false
+    private var simReconnectPhase = 0, simReconnectTimer = 0.0   // -vrdev.reconnectTest
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
     private var simChurnTimer: Float = 0                // -vrdev.weatherTest: time since the last spawner swap
@@ -819,6 +821,11 @@ final class WorldSession {
             self.activeSpawners[sp.serverId] = ActiveSpawner(spec: sp, emitted: 0, age: 0, gone: 0)
         }
         client.onDeleteParticleSpawner = { [weak self] id in self?.activeSpawners.removeValue(forKey: id) }
+        client.onSessionReset = { [weak self] in
+            guard let self else { return }
+            self.activeSpawners.removeAll(); self.attachedSounds.removeAll()
+            self.audio.stopAll()
+        }
         client.onStopSound = { [weak self] id in self?.audio.stop(id: id); self?.attachedSounds.removeValue(forKey: id) }
         // Finished handles go back to the server in one TOSERVER_REMOVED_SOUNDS
         // per batch (the engine collects them and sends every ~1 s too).
@@ -828,16 +835,19 @@ final class WorldSession {
         // Retry from ONE place (below) to avoid double connect() calls racing.
         client.onAccessDenied = { [weak self] r, code in
             print("[session] ACCESS DENIED (\(code)): \(r)"); fflush(stdout)
-            // Transient codes clear on their own, so keep retrying: 6 too-many-
-            // users, 8 already-connected (old session still timing out -- the
-            // common fast-relaunch case), 9 server-fail, 11 shutdown, 12 crash.
-            // Everything else (wrong password, disallowed name, mod's custom
-            // denial) never will, so stop and surface it. Code-based, not string-
-            // based, so a custom/localized reason for those codes still retries.
-            let retryable: Set<Int> = [6, 8, 9, 11, 12]
-            if !retryable.contains(code) {
-                self?.fatalDenied = true
-                self?.setPhase(.failed(r.isEmpty ? "access denied" : r))
+            // Retry when the server says to (the reconnect flag: a shutdown or
+            // kick with a restart coming; always for 6 too-many-users), plus 8
+            // already-connected (the old session still timing out on a fast
+            // relaunch) and 9 server-fail. Everything else, including a shutdown
+            // or kick without the flag, stops and shows the reason, like
+            // desktop's "Access denied. Reason: ..." screen.
+            guard let self else { return }
+            let reason = r.isEmpty ? "access denied" : r
+            if self.client.deniedReconnect || code == 8 || code == 9 {
+                self.deniedReason = code == 8 ? nil : reason   // keep it on the banner while retrying
+            } else {
+                self.fatalDenied = true
+                self.setPhase(.failed(reason))
             }
         }
         client.onDisconnected = { [weak self] r in
@@ -1863,6 +1873,25 @@ final class WorldSession {
                     print("[weathertest] RESULT spawners=\(simScratchCount) flakes=\(flakes) pass=\(flakes >= 50)"); fflush(stdout)
                     simDigPhase = 9
                 }
+            }
+        }
+        // -vrdev.reconnectTest 1: drop the connection once the world is up, then
+        // pass when the new session has sent our player object again (the
+        // reconnect reset clears objects, so it only comes back on a real rejoin).
+        if UserDefaults.standard.bool(forKey: "vrdev.reconnectTest"), atlasBuilt, simReconnectPhase < 3 {
+            simReconnectTimer += Double(dt)
+            if simReconnectPhase == 0, client.objects.localPlayerId != 0, simReconnectTimer > 4 {
+                print("[reconnecttest] dropping with \(client.objects.count) objects"); fflush(stdout)
+                simReconnectPhase = 1; simReconnectTimer = 0
+                client.disconnect("sim reconnect test")
+            } else if simReconnectPhase == 1, client.objects.count == 0 {
+                simReconnectPhase = 2
+            } else if simReconnectPhase == 2, client.objects.localPlayerId != 0 {
+                print("[reconnecttest] RESULT rejoined after \(String(format: "%.1f", simReconnectTimer))s objects=\(client.objects.count) pass=true"); fflush(stdout)
+                simReconnectPhase = 3
+            } else if simReconnectPhase >= 1, simReconnectTimer > 60 {
+                print("[reconnecttest] RESULT phase=\(simReconnectPhase) pass=false"); fflush(stdout)
+                simReconnectPhase = 3
             }
         }
         if UserDefaults.standard.bool(forKey: "vrdev.chordDropTest"), client.objects.localPlayerId != 0, atlasBuilt {
@@ -9216,6 +9245,7 @@ final class WorldSession {
             let hasWorldGeom = changedRaw.values.contains { !$0.solid.isEmpty || !$0.cutout.isEmpty }
             if posted, hasWorldGeom {
                 if !self.worldReadyLogged { self.worldReadyLogged = true; print("[session] world ready (first geometry posted) \(PerfStats.uptime())"); fflush(stdout) }
+                self.queue.async { self.deniedReason = nil }   // back in: drop the old kick/shutdown message
                 DispatchQueue.main.async { [weak self] in
                     self?.appModel?.worldReady = true
                     self?.appModel?.connPhase = .playing
