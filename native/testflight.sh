@@ -4,9 +4,11 @@
 #   native/testflight.sh --no-upload  archive + export a local .ipa only
 #
 # Needs DEVELOPMENT_TEAM (native/.env, same as deploy.sh) and an app record for
-# dev.ericbetts.voxelnative in App Store Connect. Uploading uses the Apple ID
-# signed in to Xcode, or an App Store Connect API key when ASC_KEY_ID,
-# ASC_ISSUER_ID and ASC_KEY_PATH (the .p8 file) are set.
+# dev.ericbetts.voxelnative in App Store Connect. Signing and uploading use
+# the Apple ID signed in to Xcode. An App Store Connect API key only works
+# here if it may use Apple's cloud-managed distribution certificate (the
+# Admin role); set ASC_EXPORT_WITH_KEY=1 to use one. The App Manager key in
+# native/.env is for tools/asc.py and can't cloud-sign.
 #
 # The build number is the git commit count, so it only goes up. BUILD_NUMBER=...
 # overrides it (App Store Connect refuses a number it has already seen).
@@ -38,7 +40,7 @@ command -v xcodegen >/dev/null && xcodegen generate >/dev/null
 WD=$!; trap 'kill $WD 2>/dev/null' EXIT
 
 AUTH=()
-if [[ -n "${ASC_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" && -n "${ASC_KEY_PATH:-}" ]]; then
+if [[ -n "${ASC_EXPORT_WITH_KEY:-}" && -n "${ASC_KEY_ID:-}" && -n "${ASC_ISSUER_ID:-}" && -n "${ASC_KEY_PATH:-}" ]]; then
   AUTH=(-authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" -authenticationKeyPath "$ASC_KEY_PATH")
 fi
 
