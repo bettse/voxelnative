@@ -170,6 +170,12 @@ public final class ItemRegistry {
     /// lanterns). nil = derive from the placement as usual.
     public func placeParam2(for itemString: String) -> Int? { placeParam2s[Self.baseName(itemString)] }
     /// wield_scale from the ITEMDEF, (1,1,1) when unknown.
+    private var wieldImages: [String: String] = [:]
+    private var colors: [String: Float] = [:]
+    /// ItemDefinition wield_image, nil when unset.
+    public func wieldImage(for itemString: String) -> String? { wieldImages[Self.baseName(itemString)] }
+    /// ItemDefinition color as a packed tint, nil when white (no tint).
+    public func color(for itemString: String) -> Float? { colors[Self.baseName(itemString)] }
     public func wieldScale(for itemString: String) -> SIMD3<Float> { wieldScales[Self.baseName(itemString)] ?? SIMD3(1, 1, 1) }
     private var placeParam2s: [String: Int] = [:]
     private var wieldScales: [String: SIMD3<Float>] = [:]
@@ -230,7 +236,7 @@ public final class ItemRegistry {
             let desc = def.string16()    // description
             let inv = def.string16()     // inventory_image (ItemImageDef: name + animation)
             Self.skipTileAnimation(def)
-            _ = def.string16()           // wield_image
+            let wieldImg = def.string16()   // wield_image: replaces the icon in the hand (wieldmesh.cpp)
             Self.skipTileAnimation(def)
             let wieldScale = SIMD3<Float>(def.f32(), def.f32(), def.f32())   // wield_scale (VoxeLibre tools 1.8, shields 2)
             let stackMaxVal = Int(def.s16())   // stack_max (for client-side merge prediction)
@@ -266,7 +272,8 @@ public final class ItemRegistry {
             // sound_use_air, then place_param2 as has-value u8 + u8, and
             // wallmounted_rotate_vertical / touch_interaction. Older servers end
             // earlier, so every read past range is guarded by `has`.
-            _ = def.string16(); _ = def.u32()             // palette_image, color (unused by VoxeLibre)
+            _ = def.string16()                            // palette_image
+            let argb = def.u32()                          // color (writeARGB8): grass, leaves, vines, lily pad
             _ = def.string16(); Self.skipTileAnimation(def)   // inventory_overlay (ItemImageDef: name + animation)
             _ = def.string16(); Self.skipTileAnimation(def)   // wield_overlay
             _ = def.string16()                            // short_description
@@ -284,6 +291,12 @@ public final class ItemRegistry {
                 placeFailedSounds[name] = placeFailed
                 ranges[name] = range
                 wieldScales[name] = wieldScale
+                if !wieldImg.isEmpty { wieldImages[name] = wieldImg }
+                // Packed r + g*256 + b*65536 like every other tint; white = none.
+                let rgb = Int(argb & 0xFFFFFF)
+                if rgb != 0xFFFFFF, argb >> 24 != 0, !def.overrun {   // alpha 0: unset
+                    colors[name] = Float(((rgb >> 16) & 0xFF) + ((rgb >> 8) & 0xFF) * 256 + (rgb & 0xFF) * 65536)
+                }
                 if let p2 = placeP2 { placeParam2s[name] = p2 }
                 if usableFlag { usables.insert(name) }
                 if liquidsPointable { liquidsPointables.insert(name) }

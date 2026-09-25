@@ -648,6 +648,7 @@ final class WorldSession {
             self.hotbar = main
             var icons: [String?] = []
             var newTiles = Set<String>()
+            var extraWant = Set<String>()   // wield_image specs, fetched like the icons
             let stacks = self.client.inventory["main"] ?? []
             for (i, name) in main.enumerated() {
                 guard let name else { icons.append(nil); continue }
@@ -660,6 +661,7 @@ final class WorldSession {
                     tile = self.nodeIconTile(name)   // node-item with no explicit icon
                 }
                 if let tile { newTiles.insert(tile) }
+                if let w = self.client.items.wieldImage(for: name), !w.isEmpty { newTiles.insert(w); extraWant.insert(w) }
                 icons.append(tile)
             }
             self.hotbarIcons = icons
@@ -668,7 +670,9 @@ final class WorldSession {
             // intersects announced media and skips what's already fetched, so a
             // no-op when everything's present.
             var wantImgs = Set<String>()
-            for t in icons { if let t { for n in NodeRegistry.imageNames(t) where self.client.media.bytes(n) == nil { wantImgs.insert(n) } } }
+            for t in icons.compactMap({ $0 }) + Array(extraWant) {
+                for n in NodeRegistry.imageNames(t) where self.client.media.bytes(n) == nil { wantImgs.insert(n) }
+            }
             if !wantImgs.isEmpty { self.client.media.request(wantImgs) }
             let line = "[hud] hotbar: [\(main.map { $0 ?? "nil" }.joined(separator: ", "))] wield=\(self.client.wieldIndex)"
             if line != self.lastHotbarLog { self.lastHotbarLog = line; print(line); fflush(stdout) }
@@ -8973,7 +8977,8 @@ final class WorldSession {
             guard let tile, let l = atlas.tileLayer(tile) else { slots.append(nil); continue }
             var wear: Float = 1
             if let m = main, i < m.count, let st = m[i], st.wear > 0 { wear = Float(65535 - st.wear) / 65535 }
-            slots.append(.init(layer: l, uv: SIMD2(1, 1), wear: wear))
+            let tint = (i < hotbar.count ? hotbar[i] : nil).flatMap { client.items.color(for: $0) }.map { -max($0, 1) } ?? 16777215
+            slots.append(.init(layer: l, uv: SIMD2(1, 1), wear: wear, tint: tint))
         }
         let wi = client.wieldIndex
         // Wield visual like desktop: a real 3D block for node items, else the flat
@@ -8989,10 +8994,19 @@ final class WorldSession {
             wieldName = forced
         }
         #endif
-        if let name = wieldName, let id = client.nodes.id(for: name), id != WorldMap.CONTENT_AIR {
+        // wield_image replaces everything in the hand (wieldmesh.cpp): button
+        // sprites, sensors, the fishing rod drawn the right way round.
+        if let name = wieldName, let wimg = client.items.wieldImage(for: name), let l = atlas.tileLayer(wimg) {
+            wield = .item(layer: Int32(l), uv: SIMD2(1, 1))
+            wieldTile = wimg
+        } else if let name = wieldName, let id = client.nodes.id(for: name), id != WorldMap.CONTENT_AIR {
             switch client.nodes.kind(id) {
-            case .cube:
+            case .cube, .allfaces:
                 wield = .block(faceLayers: (0..<6).map { atlas.layer(id: id, face: $0) })
+            case .nodebox:
+                if let bx = client.nodes.boxes(id), !bx.isEmpty {
+                    wield = .boxes(boxes: bx.map { ($0.min, $0.max) }, faceLayers: (0..<6).map { atlas.layer(id: id, face: $0) })
+                }
             case .mesh:
                 // Draw the actual model (chest etc), not a cube, once its .b3d has
                 // downloaded; else fall through to the flat icon below.
@@ -9114,6 +9128,8 @@ final class WorldSession {
         }
         handHudHandoff.post(HandHudState(wield: hudF & 8 != 0 ? wield : nil, digging: digging, wieldLight: wieldLight,
                                          wieldSilhouette: hudF & 8 != 0 ? sil : nil, wieldWear: wieldWear,
+                                         wieldTint: wieldName.flatMap { client.items.color(for: $0) }.map { -max($0, 1) } ?? 16777215,
+                                         wieldTintAll: wieldName.flatMap { client.nodes.id(for: $0) }.map { client.nodes.kind($0) == .allfaces } ?? false,
                                          wieldScale: wieldName.map { max(0.5, min(2.5, client.items.wieldScale(for: $0).x)) } ?? 1,
                                          wieldCountLayer: wieldCountLayer, wieldCountAspect: wieldCountAspect,
                                          hotbar: hudF & 1 != 0 ? slots : [], wieldIndex: wi,

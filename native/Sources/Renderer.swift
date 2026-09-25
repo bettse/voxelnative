@@ -752,14 +752,14 @@ actor Renderer {
     /// in [-0.5,0.5]. Transformed by the wield anchor `m`, scaled by `size`; the
     /// mesh's 0..1 icon UVs are scaled onto the atlas layer's sub-rect (`uv`).
     private func emitHandSilhouette(_ m: simd_float4x4, mesh: B3DLoader.Mesh, size: Float,
-                                    layer: Int32, uv: SIMD2<Float>, light: Float = 255,
+                                    layer: Int32, uv: SIMD2<Float>, light: Float = 255, tint: Float = 16777215,
                                     into v: inout [Float], idx: inout [UInt32]) {
         let base = UInt32(v.count / 9)
         let l = Float(layer)
         for k in 0..<mesh.positions.count {
             let p = m * SIMD4<Float>(mesh.positions[k] * size, 1)
             let t = mesh.uvs[k]
-            pushV9(&v, p.x, p.y, p.z, t.x * uv.x, t.y * uv.y, l, 1.0, light, 16777215)
+            pushV9(&v, p.x, p.y, p.z, t.x * uv.x, t.y * uv.y, l, 1.0, light, tint)
         }
         for i in mesh.indices { idx.append(base + i) }
     }
@@ -767,7 +767,8 @@ actor Renderer {
     /// A textured cube (block wield item) at a hand pose, one face layer each
     /// (order +Y,-Y,+X,-X,+Z,-Z, matching NodeRegistry face tiles).
     private func emitHandCube(_ m: simd_float4x4, offset: SIMD3<Float>, size: Float,
-                              layers: [Int32], light: Float = 255, into v: inout [Float], idx: inout [UInt32]) {
+                              layers: [Int32], light: Float = 255, topTint: Float = 16777215, sideTint: Float = 16777215,
+                              into v: inout [Float], idx: inout [UInt32]) {
         guard layers.count == 6 else { return }
         let h = size * 0.5
         // (normal-index -> 4 corners) in a unit cube centred at offset.
@@ -783,8 +784,37 @@ actor Renderer {
         for f in faces {
             let base = UInt32(v.count / 9)
             pushQuadV9(&v, xf(f.c[0]), xf(f.c[1]), xf(f.c[2]), xf(f.c[3]),
-                       layer: Float(layers[f.l]), shade: 1.0, light: light, tint: 16777215)
+                       layer: Float(layers[f.l]), shade: 1.0, light: light, tint: f.l == 0 ? topTint : sideTint)
             pushQuad(&idx, base)
+        }
+    }
+
+    /// A held nodebox node: each box as a small cuboid, its faces textured with
+    /// the matching part of the node's tiles (world-aligned UVs, like the
+    /// mesher), so a slab shows half a texture and a stair its step. Boxes are
+    /// node-local -0.5..0.5, scaled to `size`.
+    private func emitHandBoxes(_ m: simd_float4x4, boxes: [(lo: SIMD3<Float>, hi: SIMD3<Float>)], size: Float,
+                               layers: [Int32], light: Float, topTint: Float, into v: inout [Float], idx: inout [UInt32]) {
+        guard layers.count == 6 else { return }
+        func xf(_ p: SIMD3<Float>) -> SIMD3<Float> { let q = m * SIMD4<Float>(p * size, 1); return SIMD3(q.x, q.y, q.z) }
+        // (face layer index, 4 corners as (x, y, z) picks from lo/hi, uv axes)
+        for b in boxes {
+            let lo = b.lo, hi = b.hi
+            // UV from the node-local position on that face: u right, v down.
+            func quad(_ l: Int, _ c: [SIMD3<Float>], _ uv: (SIMD3<Float>) -> SIMD2<Float>) {
+                let base = UInt32(v.count / 9)
+                for p in c {
+                    let w = xf(p), t = uv(p)
+                    pushV9(&v, w.x, w.y, w.z, t.x, t.y, Float(layers[l]), 1.0, light, l == 0 ? topTint : 16777215)
+                }
+                pushQuad(&idx, base)
+            }
+            quad(0, [SIMD3(lo.x, hi.y, lo.z), SIMD3(lo.x, hi.y, hi.z), SIMD3(hi.x, hi.y, hi.z), SIMD3(hi.x, hi.y, lo.z)]) { SIMD2($0.x + 0.5, $0.z + 0.5) }   // +Y
+            quad(1, [SIMD3(lo.x, lo.y, hi.z), SIMD3(lo.x, lo.y, lo.z), SIMD3(hi.x, lo.y, lo.z), SIMD3(hi.x, lo.y, hi.z)]) { SIMD2($0.x + 0.5, 0.5 - $0.z) }   // -Y
+            quad(2, [SIMD3(hi.x, lo.y, hi.z), SIMD3(hi.x, lo.y, lo.z), SIMD3(hi.x, hi.y, lo.z), SIMD3(hi.x, hi.y, hi.z)]) { SIMD2(0.5 - $0.z, 0.5 - $0.y) }   // +X
+            quad(3, [SIMD3(lo.x, lo.y, lo.z), SIMD3(lo.x, lo.y, hi.z), SIMD3(lo.x, hi.y, hi.z), SIMD3(lo.x, hi.y, lo.z)]) { SIMD2($0.z + 0.5, 0.5 - $0.y) }   // -X
+            quad(4, [SIMD3(lo.x, lo.y, hi.z), SIMD3(hi.x, lo.y, hi.z), SIMD3(hi.x, hi.y, hi.z), SIMD3(lo.x, hi.y, hi.z)]) { SIMD2($0.x + 0.5, 0.5 - $0.y) }   // +Z
+            quad(5, [SIMD3(hi.x, lo.y, lo.z), SIMD3(lo.x, lo.y, lo.z), SIMD3(lo.x, hi.y, lo.z), SIMD3(hi.x, hi.y, lo.z)]) { SIMD2(0.5 - $0.x, 0.5 - $0.y) }   // -Z
         }
     }
 
@@ -793,12 +823,13 @@ actor Renderer {
     /// and hAxis are unit directions scaled by `half`.
     private func emitHandQuadFrame(_ m: simd_float4x4, center: SIMD3<Float>,
                                    wAxis: SIMD3<Float>, hAxis: SIMD3<Float>, half: Float,
-                                   layer: Int32, uv: SIMD2<Float>, into v: inout [Float], idx: inout [UInt32]) {
+                                   layer: Int32, uv: SIMD2<Float>, tint: Float = 16777215,
+                                   into v: inout [Float], idx: inout [UInt32]) {
         let w = wAxis * half, h = hAxis * half
         func xf(_ l: SIMD3<Float>) -> SIMD3<Float> { let p = m * SIMD4<Float>(l, 1); return SIMD3(p.x, p.y, p.z) }
         let base = UInt32(v.count / 9)
         pushQuadV9(&v, xf(center - w - h), xf(center + w - h), xf(center + w + h), xf(center - w + h),
-                   uv: uv, layer: Float(layer), shade: 1.0, light: 255, tint: 16777215)
+                   uv: uv, layer: Float(layer), shade: 1.0, light: 255, tint: tint)
         pushQuad(&idx, base)
     }
 
@@ -855,7 +886,7 @@ actor Renderer {
     /// first-person "item in hand" look for tools/craftitems. Icon on the front
     /// and back; thin edges give it depth.
     private func emitHandSlab(_ m: simd_float4x4, offset: SIMD3<Float>, size: Float,
-                              layer: Int32, uv: SIMD2<Float>, light: Float = 255,
+                              layer: Int32, uv: SIMD2<Float>, light: Float = 255, tint: Float = 16777215,
                               into v: inout [Float], idx: inout [UInt32]) {
         let h = size * 0.5, d = size * 0.06        // half-size and half-depth
         let l = Float(layer)
@@ -872,7 +903,7 @@ actor Renderer {
             let base = UInt32(v.count / 9)
             for k in 0..<4 {
                 let p = m * SIMD4<Float>(offset + tilt(c[k]), 1)
-                pushV9(&v, p.x, p.y, p.z, t[k].0 * uv.x, t[k].1 * uv.y, l, 1.0, light, 16777215)
+                pushV9(&v, p.x, p.y, p.z, t[k].0 * uv.x, t[k].1 * uv.y, l, 1.0, light, tint)
             }
             pushQuad(&idx, base)
         }
@@ -926,6 +957,7 @@ actor Renderer {
                 case .block(let l): return (hud.wieldIndex, l.first ?? -1)
                 case .item(let l, _): return (hud.wieldIndex, l)
                 case .mesh(_, let l): return (hud.wieldIndex, l)
+                case .boxes(_, let l): return (hud.wieldIndex, l.first ?? -1)
                 }
             }()
             if key != lastWieldKey { lastWieldKey = key; wieldSwitchTime = now }
@@ -941,7 +973,13 @@ actor Renderer {
                 // Tilt to a 3D corner (top + front + side) like a held block.
                 let m = grip * matrix4x4_rotation(radians: -0.5, axis: SIMD3(0, 1, 0))
                              * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
-                emitHandCube(m, offset: .zero, size: 0.08, layers: layers, light: hud.wieldLight, into: &v, idx: &idx)
+                emitHandCube(m, offset: .zero, size: 0.08, layers: layers, light: hud.wieldLight, topTint: hud.wieldTint,
+                             sideTint: hud.wieldTintAll ? hud.wieldTint : 16777215, into: &v, idx: &idx)
+            case .boxes(let boxes, let layers):
+                // Same 3/4 presentation as a held block.
+                let m = grip * matrix4x4_rotation(radians: -0.5, axis: SIMD3(0, 1, 0))
+                             * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
+                emitHandBoxes(m, boxes: boxes, size: 0.08, layers: layers, light: hud.wieldLight, topTint: hud.wieldTint, into: &v, idx: &idx)
             case .mesh(let model, let layer):
                 // A mesh node (chest etc): draw the real model at the same 3/4
                 // presentation angle as a held block, textured with its one tile.
@@ -973,9 +1011,9 @@ actor Renderer {
                 let tilt = matrix4x4_rotation(radians: -0.55, axis: SIMD3(0, 0, 1))
                          * matrix4x4_rotation(radians: -0.85, axis: SIMD3(1, 0, 0))
                 if let sil = hud.wieldSilhouette {
-                    emitHandSilhouette(grip * tilt, mesh: sil, size: 0.16 * hud.wieldScale, layer: layer, uv: uv, light: hud.wieldLight, into: &v, idx: &idx)
+                    emitHandSilhouette(grip * tilt, mesh: sil, size: 0.16 * hud.wieldScale, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, into: &v, idx: &idx)
                 } else {
-                    emitHandSlab(grip, offset: .zero, size: 0.15 * hud.wieldScale, layer: layer, uv: uv, light: hud.wieldLight, into: &v, idx: &idx)
+                    emitHandSlab(grip, offset: .zero, size: 0.15 * hud.wieldScale, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, into: &v, idx: &idx)
                 }
             }
             // Count and wear both sit like a wristwatch: a small patch on top of
@@ -1060,7 +1098,7 @@ actor Renderer {
                     // +along it came out upside down. The slot/select frames are
                     // symmetric so they don't care.
                     emitHandQuadFrame(m, center: base + radial * 0.001, wAxis: tangent, hAxis: -along,
-                                      half: cell * 0.48, layer: ic.layer, uv: ic.uv, into: &v, idx: &idx)
+                                      half: cell * 0.48, layer: ic.layer, uv: ic.uv, tint: ic.tint, into: &v, idx: &idx)
                     // Per-slot wear bar along the bottom edge of the cell (green
                     // -> red by remaining), so a damaged tool reads on the ring
                     // itself, not only when wielded.

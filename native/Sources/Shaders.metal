@@ -201,9 +201,11 @@ vertex ColorInOut entityVertex(Vertex in [[stage_in]],
     out.position = viewProjectionArray.viewProjectionMatrix[amp_id] * float4(in.position, 1.0);
     out.uv = in.uv;
     out.layer = uint(in.params.x + 0.5);
-    out.shade = in.params.y;
+    // A negative tint asks for a plain multiply (item colour on a held grass
+    // block or leaf): carried to the fragment as a negative shade.
+    out.shade = in.params.w < 0 ? -in.params.y : in.params.y;
     out.lit = vertexLit(in.params.z, uniforms.daylight);
-    out.tint = unpackTint(in.params.w);
+    out.tint = unpackTint(abs(in.params.w));
     out.fogDist = length(in.position - uniforms.eyePos.xyz);
     return out;
 }
@@ -256,10 +258,11 @@ static float3 shadeEntity(half3 rgb, ColorInOut in, constant Uniforms & uniforms
     // A grey tint is a SHADE (the inventory cube icons darken their side faces
     // with 184/140 greys): multiply, or the sides wash out toward light grey.
     // A coloured tint (hit-flash red, creeper pink) blends toward the colour.
-    bool grey = abs(tintRGB.r - tintRGB.g) < 0.02h && abs(tintRGB.g - tintRGB.b) < 0.02h;
+    // A negative shade (see entityVertex) is an explicit multiply: item colour.
+    bool grey = in.shade < 0 || (abs(tintRGB.r - tintRGB.g) < 0.02h && abs(tintRGB.g - tintRGB.b) < 0.02h);
     half str = (grey || all(tintRGB > half3(0.99h))) ? 0.0h : 0.7h;
     rgb = grey ? rgb * tintRGB : mix(rgb, tintRGB, str);
-    float3 lit = float3(rgb) * in.shade * in.lit;
+    float3 lit = float3(rgb) * abs(in.shade) * in.lit;
     float luma = dot(lit, float3(0.213, 0.715, 0.072));
     lit = mix(float3(luma), lit, uniforms.saturation);
     return applyFog(lit, in.fogDist, uniforms);

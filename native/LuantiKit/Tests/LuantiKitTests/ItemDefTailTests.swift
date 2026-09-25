@@ -7,12 +7,13 @@ import XCTest
 final class ItemDefTailTests: XCTestCase {
 
     private func itemBlob(name: String, prediction: String, placeSound: String, range: Float, usable: Bool = false, description: String = "A block",
-                          wieldScale: Float = 1, placeParam2: Int? = nil, fullTail: Bool = false) -> Data {
+                          wieldScale: Float = 1, placeParam2: Int? = nil, fullTail: Bool = false,
+                          wieldImage: String = "", colorARGB: UInt32 = 0xFFFF_FFFF) -> Data {
         let w = PacketWriter()
         w.u8(6).u8(1)                                    // version, type (node)
         w.string16(name).string16(description)
         w.string16("dirt.png").u8(0)                     // inventory_image + no animation
-        w.string16("").u8(0)                             // wield_image + no animation
+        w.string16(wieldImage).u8(0)                     // wield_image + no animation
         w.f32(wieldScale).f32(wieldScale).f32(1).s16(64)  // wield_scale, stack_max
         w.u8(usable ? 1 : 0).u8(0)                       // usable, liquids_pointable
         w.bytes16(Data())                                // tool_capabilities: none
@@ -24,7 +25,7 @@ final class ItemDefTailTests: XCTestCase {
         if fullTail {
             // itemdef.cpp version 6, protocol > 43: palette_image, color, overlays,
             // short_description, sound_use, sound_use_air, place_param2 (has + value).
-            w.string16("").u32(0).string16("").u8(0).string16("").u8(0).string16("")   // overlays carry an animation block
+            w.string16("").u32(Int(colorARGB)).string16("").u8(0).string16("").u8(0).string16("")   // overlays carry an animation block
             w.string16("").f32(1).f32(1).f32(0); w.string16("").f32(1).f32(1).f32(0)
             if let p2 = placeParam2 { w.u8(1).u8(p2) } else { w.u8(0) }
             w.u8(0).u8(0)                                // wallmounted_rotate_vertical, touch_interaction
@@ -47,6 +48,22 @@ final class ItemDefTailTests: XCTestCase {
         XCTAssertEqual(reg.wieldScale(for: "mcl_tools:pick_iron 1").x, 1.8, accuracy: 1e-6)
         XCTAssertEqual(reg.wieldScale(for: "mcl_core:dirt").x, 1, accuracy: 1e-6)
         XCTAssertEqual(reg.prediction(for: "mcl_core:dirt"), "mcl_core:dirt", "the short blob still parses")
+    }
+
+    /// wield_image and the item colour (writeARGB8) come through; white or
+    /// alpha 0 means no tint.
+    func testWieldImageAndColor() {
+        let reg = ItemRegistry()
+        reg.parseItemDef(payload([
+            itemBlob(name: "mcl_core:dirt_with_grass", prediction: "", placeSound: "", range: 4, fullTail: true, colorARGB: 0xFF7C_BD6B),
+            itemBlob(name: "mesecons_button:button_stone_off", prediction: "", placeSound: "", range: 4, fullTail: true, wieldImage: "button.png"),
+            itemBlob(name: "mcl_core:stone", prediction: "", placeSound: "", range: 4, fullTail: true, colorARGB: 0),
+        ]))
+        XCTAssertEqual(reg.color(for: "mcl_core:dirt_with_grass"), Float(0x7C + 0xBD * 256 + 0x6B * 65536))
+        XCTAssertNil(reg.color(for: "mesecons_button:button_stone_off"), "white is no tint")
+        XCTAssertNil(reg.color(for: "mcl_core:stone"), "alpha 0 is unset")
+        XCTAssertEqual(reg.wieldImage(for: "mesecons_button:button_stone_off 3"), "button.png")
+        XCTAssertNil(reg.wieldImage(for: "mcl_core:stone"))
     }
 
     private func payload(_ blobs: [Data]) -> Data {

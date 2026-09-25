@@ -7,7 +7,9 @@ import LuantiKit
 /// wrist). Layers index the node texture atlas (same array the entity pass
 /// binds); uv scales the item icon's sub-rect within its 128px layer.
 struct HandHudState {
-    struct Icon { var layer: Int32; var uv: SIMD2<Float>; var wear: Float = 1 }   // wear 0..1 remaining (1 = no bar)
+    // wear 0..1 remaining (1 = no bar); tint: item colour, negative = multiply
+    // (see entityVertex), white = none.
+    struct Icon { var layer: Int32; var uv: SIMD2<Float>; var wear: Float = 1; var tint: Float = 16777215 }
     /// The wielded item, drawn in first person like desktop VoxeLibre: a real
     /// 3D block for node items, or the flat icon extruded into a slab for
     /// tools/craftitems.
@@ -18,6 +20,10 @@ struct HandHudState {
         // textured with the node's single tile layer, so it doesn't render as a
         // flat cube with the chest texture smeared on every face.
         case mesh(model: B3DLoader.Mesh, layer: Int32)
+        // A nodebox node (slab, stair, fence, carpet): its boxes in node-local
+        // -0.5..0.5 space with the 6 face layers, like wieldmesh.cpp drawing
+        // the real node instead of a flat card.
+        case boxes(boxes: [(lo: SIMD3<Float>, hi: SIMD3<Float>)], faceLayers: [Int32])
     }
     var wield: Wield?          // currently-wielded item, or nil (empty hand)
     var digging: Bool = false  // drives the wield dig-swing animation
@@ -30,6 +36,10 @@ struct HandHudState {
     // wieldmesh) so a tool has thickness/shape, not a flat card. nil = flat slab.
     var wieldSilhouette: B3DLoader.Mesh? = nil
     var wieldWear: Float = 1   // remaining durability 0..1 (1 = full / no bar)
+    // Item colour (grass, leaves, vines, lily pad) as a multiply tint (negative
+    // packed, see entityVertex); on a held full block only the top face takes it.
+    var wieldTint: Float = 16777215
+    var wieldTintAll = false   // allfaces (leaves): the colour goes on every face
     // ITEMDEF wield_scale.x, applied to item (non-block) wields like the
     // engine's wieldmesh scale: VoxeLibre tools are 1.8, shields 2, rods 1.5,
     // so they read at desktop proportions instead of toy-sized.
