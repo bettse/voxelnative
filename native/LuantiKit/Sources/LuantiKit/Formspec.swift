@@ -125,7 +125,9 @@ public enum Formspec {
             let name = String(part[ni..<br])
             let prefix = String(part[part.startIndex..<ni])
             let params = String(part[part.index(after: br)...])
-            if name == "container" {
+            // scroll_container[X,Y;W,H;...] offsets its children like container[]
+            // (we don't scroll: the settings form fits, the rest is clipped).
+            if name == "container" || name == "scroll_container" {
                 let xy = params.split(separator: ",")
                 if xy.count >= 2, let x = Float(xy[0]), let y = Float(xy[1]) {
                     stack.append((curX, curY)); curX += x; curY += y
@@ -133,7 +135,7 @@ public enum Formspec {
                 out += prefix   // drop the container[] marker itself
                 continue
             }
-            if name == "container_end" {
+            if name == "container_end" || name == "scroll_container_end" {
                 if let (px, py) = stack.popLast() { curX = px; curY = py }
                 out += prefix
                 continue
@@ -206,6 +208,9 @@ public enum Formspec {
         public let gx: Float, gy: Float, w: Float, h: Float
         public let texture: String
         public let fill: Bool
+        /// background9's middle: the border inset in texture pixels (0 = plain
+        /// stretch). The prepend's stone panel uses 7.
+        public var middle: Float = 0
     }
 
     /// Parse `background[x,y;w,h;tex{;auto_clip}]` and `background9[x,y;w,h;tex;auto_clip;middle]`.
@@ -229,7 +234,11 @@ public enum Formspec {
             // creative inventory's own background9[0,1.34;13,8.75;..;;7] is
             // positioned; treating every background9 as fill stretched it.
             let fill = f.count >= 4 && f[3] == "true"
-            if !tex.isEmpty { out.append(Background(gx: gx, gy: gy, w: w, h: h, texture: tex, fill: fill)) }
+            if !tex.isEmpty {
+                var b = Background(gx: gx, gy: gy, w: w, h: h, texture: tex, fill: fill)
+                if c.contains("background9["), f.count >= 5 { b.middle = Float(f[4].split(separator: ",").first ?? "") ?? 0 }
+                out.append(b)
+            }
         }
         return out
     }
@@ -794,6 +803,21 @@ public enum Formspec {
     /// !real_coordinates paths: a position is padding + pos * spacing, list
     /// slots step by spacing, images are geom * imgsize, and backgrounds are
     /// geom * spacing shifted back by half the gap.
+    /// The form's width in real-coordinate units from `size[w,h(,fixed)]`
+    /// (legacy units converted), or nil when there's no size[]. The first
+    /// size[] wins, like the engine.
+    public static func formWidth(_ spec: String, legacy: Bool) -> Float? {
+        guard let r = spec.range(of: "size[") else { return nil }
+        // Don't mistake "tooltip[size_inc;...]" or similar for size[].
+        if r.lowerBound > spec.startIndex {
+            let c = spec[spec.index(before: r.lowerBound)]
+            if c.isLetter || c == "_" { return nil }
+        }
+        let body = spec[r.upperBound...].prefix { $0 != "]" }
+        guard let w = body.split(separator: ",").first.flatMap({ Float($0.trimmingCharacters(in: .whitespaces)) }) else { return nil }
+        return legacy ? w * Legacy.spacing.x : w
+    }
+
     public enum Legacy {
         public static let spacing = SIMD2<Float>(1.25, 15.0 / 13.0)
         public static let padding: Float = 0.375
@@ -828,8 +852,10 @@ public enum Formspec {
         }
         public static func convert(_ b: Background) -> Background {
             if b.fill { return b }
-            return Background(gx: x(b.gx) - (spacing.x - 1) / 2, gy: y(b.gy) - (spacing.y - 1) / 2,
+            var o = Background(gx: x(b.gx) - (spacing.x - 1) / 2, gy: y(b.gy) - (spacing.y - 1) / 2,
                               w: b.w * spacing.x, h: b.h * spacing.y, texture: b.texture, fill: b.fill)
+            o.middle = b.middle
+            return o
         }
         /// Label y becomes the text's vertical center, like real-coordinate labels.
         public static func convert(_ l: Label) -> Label {

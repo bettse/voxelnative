@@ -504,7 +504,7 @@ final class WorldSession {
     private var simAutoWalk = false
     private var simAutoSneak = false
     private var simReconnectPhase = 0, simReconnectTimer = 0.0   // -vrdev.reconnectTest
-    private var simTapDone = false                                // -vrdev.tapField
+    private var simTapStep = 0, simTapTimer = 0.0, simTapLastForm = "\u{0}"   // -vrdev.tapField
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
     private var simChurnTimer: Float = 0                // -vrdev.weatherTest: time since the last spawner swap
@@ -1882,11 +1882,22 @@ final class WorldSession {
         // -vrdev.tapField <name>: tap the named button on the open panel once
         // (with -vrdev.openInventory 1: the recipe book is "__mcl_craftguide"),
         // to drive the player-form submit path headless.
-        if !simTapDone, let want = UserDefaults.standard.string(forKey: "vrdev.tapField"), !want.isEmpty,
-           formspecOpen, let w = invWidgets.first(where: { $0.button?.name == want }) {
-            simTapDone = true
-            print("[taptest] tapping \(want) on '\(formspecName)'"); fflush(stdout)
-            tapWidget(w)
+        // Comma-separated names tap in order, each once the previous tap's form
+        // has opened ("__mcl_craftguide,*" opens the guide then its first item;
+        // "*" = the first item_image_button).
+        if let spec = UserDefaults.standard.string(forKey: "vrdev.tapField"), !spec.isEmpty, formspecOpen {
+            let steps = spec.split(separator: ",").map(String.init)
+            simTapTimer += Double(dt)
+            if simTapStep < steps.count, simTapTimer > 1.5, formspecName != simTapLastForm || simTapStep == 0 {
+                let want = steps[simTapStep]
+                let w = want == "*" ? invWidgets.first(where: { !($0.button?.itemName ?? "").isEmpty })
+                                    : invWidgets.first(where: { $0.button?.name == want })
+                if let w {
+                    print("[taptest] tapping \(w.button?.name ?? want) on '\(formspecName)'"); fflush(stdout)
+                    simTapLastForm = formspecName; simTapStep += 1; simTapTimer = 0
+                    tapWidget(w)
+                }
+            }
         }
         // -vrdev.reconnectTest 1: drop the connection once the world is up, then
         // pass when the new session has sent our player object again (the
@@ -3654,7 +3665,16 @@ final class WorldSession {
         (gi.dig || gi.enterPrimary, gi.place || gi.enterSecondary)
     }
     private var prevHotbarSlot = -1, prevCancel = false, prevDropKey = false
-    private static let invCell: Float = 0.054, invPitch: Float = 0.062   // metres (1 node = 1 m); ~0.8 m wide panel
+    // Metres per formspec unit (1 node = 1 m): an 11.75-unit inventory is ~0.8 m
+    // wide. A wider form (Help 15, Player Settings 20 units) scales down to the
+    // same width instead of running off to the side (invScale, per form).
+    private var invScale: Float = 1
+    private var invCell: Float { 0.054 * invScale }
+    private var invPitch: Float { 0.062 * invScale }
+    private func setPanelScale(_ spec: String, legacy: Bool) {
+        let w = Formspec.formWidth(spec, legacy: legacy) ?? 11.75
+        invScale = min(1, 12.5 / max(1, w))
+    }
 
     private func inventoryStack(_ s: InvSlot) -> Client.ItemStack? {
         guard let list = listFor(loc: s.loc, name: s.list), s.index < list.count else { return nil }
@@ -3761,6 +3781,7 @@ final class WorldSession {
     }
 
     private func closeFormspec() {
+        invScale = 1   // the hand-built inventory grid uses the base size
         // A crafting-table form shows the player's `craft` grid. Return its input
         // items to the main inventory on close so nothing is stranded in the grid
         // (only when THIS form actually showed a craft grid: closing a chest must
@@ -3860,17 +3881,25 @@ final class WorldSession {
         let vis = Formspec.parseVisuals(spec, legacy: legacy)
         formspecLabelsRaw = vis.labels + Formspec.infoFormLabels(spec, legacy: legacy)
         formspecFields = []
-        formspecButtons = []
+        // Info forms have real buttons too (the Help category list, page
+        // arrows) and toggles (Player Settings checkboxes); keep them tappable.
+        formspecButtons = Formspec.parseButtonsPositioned(spec) + Formspec.parseItemImageButtons(spec)
         invWidgets = []
         formspecInfoTargets = Formspec.infoTargets(spec, legacy: legacy)
         formspecImages = vis.images
         formspecModels = vis.models
-        formspecTooltips = [:]
+        formspecTooltips = Formspec.parseTooltips(spec)
         formspecBackgrounds = vis.backgrounds
-        formspecCheckboxes = []; checkboxState = [:]; invCheckboxes = []
+        formspecCheckboxes = Formspec.parseCheckboxes(spec); invCheckboxes = []
+        checkboxState = Dictionary(formspecCheckboxes.map { ($0.name, $0.selected) }, uniquingKeysWith: { a, _ in a })
+        if legacy {
+            formspecButtons = formspecButtons.map(Formspec.Legacy.convert)
+            formspecCheckboxes = formspecCheckboxes.map(Formspec.Legacy.convert)
+        }
         formspecName = name
         formspecOpen = true; inventoryOpen = true; formspecIsInventory = false
         invHeld = nil; invHover = nil; invCursor = nil
+        setPanelScale(spec, legacy: legacy)
         if reuse { layoutInventory() } else { openInventoryPanel() }
         refreshInventoryTiles()
         print("[formspec] open info '\(name)' labels=\(formspecLabelsRaw.count) targets=\(formspecInfoTargets.count) reuse=\(reuse)"); fflush(stdout)
@@ -3906,7 +3935,7 @@ final class WorldSession {
         // real panel, not a bed-style dialog: that path showed "press O".
         let panelButtons = Formspec.parseButtonsPositioned(spec).count + Formspec.parseItemImageButtons(spec).count
         let buttonPanel = lists.isEmpty && panelButtons >= 3 && !Formspec.parseButtons(spec).contains { $0.name == "leave" }
-        guard !lists.isEmpty || buttonPanel else {
+        guard !lists.isEmpty || (buttonPanel && !Formspec.isInfoForm(spec)) else {
             // No item grids: a text dialog (sign, command block). If it's a pure
             // text editor and we know the node, edit it with the keyboard. A
             // form that also carries real buttons (the bed sleep form: chat
@@ -3969,6 +3998,7 @@ final class WorldSession {
         formspecName = name              // remembered so close sends the named-form quit
         formspecOpen = true; inventoryOpen = true
         invHeld = nil; invHover = nil; invCursor = nil
+        setPanelScale(spec, legacy: legacy)
         openInventoryPanel()   // anchors invFrame ahead of the player, then layoutInventory()
         refreshInventoryTiles()
         print("[formspec] open '\(name)' lists=\(lists.map { "\($0.loc)/\($0.list)" })"); fflush(stdout)
@@ -4065,7 +4095,7 @@ final class WorldSession {
     /// desktop layout: main rows on top, hotbar row below a gap, craft 2x2 +
     /// preview on the right, armor column on the left.
     private func layoutInventory() {
-        let p = Self.invPitch
+        let p = invPitch
         var slots: [InvSlot] = []
         if formspecOpen {
             // One grid per list[] element at its formspec (x,y); recenter the
@@ -4204,7 +4234,7 @@ final class WorldSession {
     /// UI, not just the slots. Shared by the backdrop draw and the release
     /// hit-test so "over the panel" means exactly what's painted.
     private func invPanelBounds() -> (uMin: Float, uMax: Float, vMin: Float, vMax: Float) {
-        let p = Self.invPitch
+        let p = invPitch
         var uMin: Float = -5 * p, uMax: Float = 5 * p, vMin: Float = -2.5 * p, vMax: Float = 2.2 * p
         for s in invSlots { uMin = min(uMin, s.u - p); uMax = max(uMax, s.u + p); vMin = min(vMin, s.v - p); vMax = max(vMax, s.v + p) }
         // A form's art, images and buttons can sit outside its slot grid (the
@@ -4217,6 +4247,7 @@ final class WorldSession {
             for b in invBackgrounds { grow(b.u, b.v, b.hw, b.hh) }
             for i in invImages { grow(i.u, i.v, i.hw, i.hh) }
             for w in invWidgets { grow(w.u, w.v, w.hw, w.hh) }
+            for m in invModels { grow(m.u, m.v, m.hw, m.hh) }   // the skin editor's big preview
             // Labels are left-anchored at u; reach right by a rough text width
             // (Formspec.charWidth) so a long textlist row stays on the panel.
             for l in invLabels {
@@ -4243,7 +4274,7 @@ final class WorldSession {
                 invCursor = hit
                 let rel = hit - fr.center
                 let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
-                let half = Self.invCell * 0.5
+                let half = invCell * 0.5
                 invHover = invSlots.firstIndex { abs($0.u - u) <= half && abs($0.v - v) <= half }
                 // The whole backdrop is a safe drop zone: releasing anywhere over
                 // it keeps the held item, so only a release truly off the panel
@@ -4296,7 +4327,7 @@ final class WorldSession {
             let rel = cur - fr.center
             let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
             // Hit target spans the box plus its label to the right (~3 cells).
-            if let cb = invCheckboxes.first(where: { u >= $0.u - $0.hw && u <= $0.u + Self.invCell * 3 && abs(v - $0.v) <= $0.hh }) {
+            if let cb = invCheckboxes.first(where: { u >= $0.u - $0.hw && u <= $0.u + invCell * 3 && abs(v - $0.v) <= $0.hh }) {
                 let now = !(checkboxState[cb.name] ?? false)
                 checkboxState[cb.name] = now
                 submitFormFields([cb.name: now ? "true" : "false"])
@@ -5286,7 +5317,7 @@ final class WorldSession {
         func toOriginDir(_ d: SIMD3<Float>) -> SIMD3<Float> {
             SIMD3(d.x * cosY - d.z * sinY, d.y, -(d.x * sinY + d.z * cosY))
         }
-        let cell = Self.invCell
+        let cell = invCell
         let toward = -fr.fwd                       // toward the viewer
         let oRight = toOriginDir(fr.right), oUp = toOriginDir(fr.up)
         // Backdrop: wide enough for armor + main + craft (+preview).
@@ -5316,9 +5347,30 @@ final class WorldSession {
                 continue
             }
             let bgc = fr.center + fr.right * ((uMin + uMax) * 0.5) + fr.up * ((vMin + vMax) * 0.5) - toward * 0.0038
-            appendOverlayQuadUV(center: toOrigin(bgc), right: oRight, up: oUp,
-                                hw: (uMax - uMin) * 0.5 + Self.invCell * 0.5, hh: (vMax - vMin) * 0.5 + Self.invCell * 0.5,
-                                layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
+            let bhw = (uMax - uMin) * 0.5 + invCell * 0.5, bhh = (vMax - vMin) * 0.5 + invCell * 0.5
+            if bg.middle > 0, hi.src.x > 2 * bg.middle, hi.src.y > 2 * bg.middle {
+                // True 9-slice: the corners and edges keep a fixed thin border and
+                // only the middle stretches. A plain stretch blew the stone
+                // panel's 7 px dark edge into a thick band that covered the craft
+                // guide's bottom row.
+                let border = min(bg.middle * 0.004, min(bhw, bhh) * 0.3)   // metres (7 px -> ~2.8 cm)
+                let mu = bg.middle / hi.src.x, mv = bg.middle / hi.src.y   // border as a UV fraction
+                let xs: [Float] = [-bhw, -bhw + border, bhw - border, bhw]
+                let ys: [Float] = [-bhh, -bhh + border, bhh - border, bhh]
+                let us: [Float] = [0, mu, 1 - mu, 1], vs: [Float] = [1, 1 - mv, mv, 0]   // v = 0 is the texture top
+                for yi in 0..<3 { for xi in 0..<3 {
+                    let base = UInt32(v.count / 9)
+                    let pts = [(xi, yi), (xi + 1, yi), (xi + 1, yi + 1), (xi, yi + 1)]
+                    for (px, py) in pts {
+                        let p = toOrigin(bgc + fr.right * xs[px] + fr.up * ys[py])
+                        pushV(&v, p.x, p.y, p.z, us[px] * hi.uv.x, vs[py] * hi.uv.y, Float(hi.layer), 1.0, 255, 16777215)
+                    }
+                    pushQuad(&idx, base)
+                }}
+            } else {
+                appendOverlayQuadUV(center: toOrigin(bgc), right: oRight, up: oUp, hw: bhw, hh: bhh,
+                                    layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
+            }
         }
         // Non-fill background[] art: each at its own rect (brewing bubbles, the
         // trade arrow panel, book/writing backdrops). Drawn in front of the stone
@@ -5426,7 +5478,9 @@ final class WorldSession {
         // small station formspecs like the furnace (few slots, crisp filled text).
         for lab in invLabels {
             guard let t = formspecLabelLayer(lab.text) else { continue }
-            let th = cell * 0.30, tw = th * max(0.4, t.aspect)
+            // A wide form is scaled down to fit (invScale); keep its text near the
+            // normal size anyway, or Player Settings / Help read as specks.
+            let th = max(cell, 0.054 * 0.85) * 0.30, tw = th * max(0.4, t.aspect)
             // Luanti labels are LEFT-anchored at their x. Centering them pushed a
             // long label (e.g. "Inventory") half its width off the panel's left
             // edge, so it read as "Inve". Anchor the left edge at lab.u.
@@ -5512,7 +5566,7 @@ final class WorldSession {
         // multi-line tooltip shows its first, most useful line.
         if let tip = tipText, let cur = invCursor, let t = formspecLabelLayer(tip.text.split(separator: "\n").first.map(String.init) ?? tip.text) {
             let th: Float = 0.045, tw = th * max(0.4, t.aspect)
-            let lc = cur + fr.up * (Self.invCell * 0.7) + toward * 0.02
+            let lc = cur + fr.up * (invCell * 0.7) + toward * 0.02
             appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5 + 0.006, hh: th * 0.5 + 0.006,
                        layer: highlightLayer, tint: Self.packTint(20, 20, 25), v: &v, idx: &idx)
             appendQuad(center: toOrigin(lc + toward * 0.002), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
