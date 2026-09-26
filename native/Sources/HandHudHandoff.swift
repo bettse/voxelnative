@@ -66,6 +66,12 @@ struct HandHudState {
     // The local player's skin in the MODEL texture array, so the right hand
     // draws as the skin's arm like desktop's first-person hand. -1 = no skin
     // yet (plain box). uv scales 0..1 onto the layer; size is the skin in px.
+    // The offhand item (mcl_offhand: torch, shield, map), held in the LEFT hand
+    // the same way the wield is in the right.
+    var offhand: Wield? = nil
+    var offhandSilhouette: B3DLoader.Mesh? = nil
+    var offhandTint: Float = 16777215
+    var offhandTintAll = false
     var skinLayer: Int32 = -1
     var skinUV = SIMD2<Float>(1, 1)
     var skinSize = SIMD2<Float>(64, 64)

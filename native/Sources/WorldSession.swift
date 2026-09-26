@@ -3875,7 +3875,10 @@ final class WorldSession {
         // A re-send of the SAME form (tab switch, row select echo) should keep
         // the panel where it is instead of re-anchoring in front of the player
         // on every tap.
-        let reuse = formspecOpen && formspecName == name && invFrame != nil
+        // Any panel already open stays where it is: the recipe book opened from
+        // the inventory, or a page change, re-anchored to the current gaze and
+        // drifted right each time (and you can't turn with a panel open).
+        let reuse = formspecOpen && invFrame != nil
         formspecContext = nil            // player form (show_formspec), not a node's meta form
         formspecElements = []
         formspecRings = []
@@ -3925,6 +3928,7 @@ final class WorldSession {
             if name.isEmpty || name == formspecName { closeFormspec() }
             return
         }
+        let panelWasOpen = formspecOpen && invFrame != nil
         formspecIsInventory = inventory
         // The server's per-player formspec prepend carries the global stone
         // background9 panel + styles; Luanti prepends it to every formspec
@@ -4009,7 +4013,10 @@ final class WorldSession {
         formspecOpen = true; inventoryOpen = true
         invHeld = nil; invHover = nil; invCursor = nil
         setPanelScale(spec, legacy: legacy)
-        openInventoryPanel()   // anchors invFrame ahead of the player, then layoutInventory()
+        // Keep the panel where it is when this form replaces or re-sends one
+        // that's already open (see openInfoFormspec); only a fresh open anchors
+        // ahead of the player.
+        if panelWasOpen { layoutInventory() } else { openInventoryPanel() }
         refreshInventoryTiles()
         print("[formspec] open '\(name)' lists=\(lists.map { "\($0.loc)/\($0.list)" })"); fflush(stdout)
         logInventoryContents(lists)
@@ -5612,8 +5619,16 @@ final class WorldSession {
         // from each frame's controller pose (PanelPointer); drawing them here
         // put a tick plus a handoff of lag between the controller and the dot.
         var heldIcon = -1
-        if let held = invHeld, let list = listFor(loc: held.loc, name: held.list), held.index < list.count, let st = list[held.index],
-           let icon = invIconModelLayer(iconKey(st)) { heldIcon = icon }
+        if let held = invHeld, let list = listFor(loc: held.loc, name: held.list), held.index < list.count, let st = list[held.index] {
+            // A block or mesh node (chest) is held as its 3D icon, like its slot:
+            // the renderer's held quad only takes a flat texture, and a chest's
+            // flat tile read as a stray plank. Drawn here at the cursor (tick
+            // rate); flat items keep the per-frame renderer quad.
+            if let cur = invCursor,
+               nodeIcon3D(st.name, center: toOrigin(cur - toward * 0.02), oRight: oRight, oUp: oUp, oToward: toOriginDir(toward),
+                          size: cell * 0.62, v: &v, idx: &idx) {
+            } else if let icon = invIconModelLayer(iconKey(st)) { heldIcon = icon }
+        }
         player.setPanelPointer(PlayerState.PanelPointer(
             center: toOrigin(fr.center), right: oRight, up: oUp, toward: toOriginDir(toward),
             dotLayer: highlightLayer, dotHalf: 0.006 * scale, heldLayer: heldIcon, heldHalf: cell * 0.35 * scale))
@@ -5972,7 +5987,8 @@ final class WorldSession {
         // Armor moved to a left-wrist gauntlet (postHandHud/buildHandHud),
         // so it no longer draws as a peripheral column here.
         appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud)
-        appendOffhandHUD(origin: .zero, gaze: hudGaze, into: &hud)
+        // The offhand item is held in the left hand now (postHandHud), not
+        // drawn as a HUD icon above the hunger row.
         // Hotbar is now wrist-anchored (postHandHud / buildHandHud), not head-locked.
         for i in hud.indices { hud[i].headLocal = true }
         billboards.append(contentsOf: hud)
@@ -6034,7 +6050,6 @@ final class WorldSession {
         appendChat(v: &ov, idx: &oi)
         appendStatusBanner(v: &ov, idx: &oi)
         appendXpLevel(v: &ov, idx: &oi)
-        appendOffhandExtras(v: &ov, idx: &oi)
         appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         // Entity nametags: overlay (no depth, like the engine's
         // screen-space nametags), camera-facing, in origin space with the same
@@ -6289,9 +6304,11 @@ final class WorldSession {
         }
         let hx = frameHeadXform
         let headPos = SIMD3<Float>(hx.columns.3.x, hx.columns.3.y, hx.columns.3.z)
-        let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
-        let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
-        let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
+        let rawFwd = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
+        // The same roll-free frame the bar and hearts use (stableFrame): the raw
+        // head right/up tilted the digits whenever the head rolled, while the
+        // bar under them stayed level.
+        let (hf, hr, hu) = stableFrame(rawFwd, horizFwd: player.bodyForward())
         // Centred just above the bar, on the same elevation the bar uses, so
         // the bar and number never drift apart the way the old two-anchor
         // layout did.
@@ -9336,6 +9353,32 @@ final class WorldSession {
         // HUD_SET_FLAGS: bit 8 wielditem (mcl_shields hides the hand while
         // blocking, the spyglass while zoomed), bit 1 hotbar.
         let hudF = client.hudFlags
+        // The offhand item, resolved like the wield: its wield_image, its 3D
+        // node shape, else its flat icon extruded.
+        var offhand: HandHudState.Wield? = nil, offSil: B3DLoader.Mesh? = nil, offTile: String? = nil
+        var offTint: Float = 16777215, offTintAll = false
+        if let st = client.inventory["offhand"]?.first ?? nil, !st.name.isEmpty {
+            if let wimg = client.items.wieldImage(for: st.name), let l = atlas.tileLayer(wimg) {
+                offhand = .item(layer: Int32(l), uv: SIMD2(1, 1)); offTile = wimg
+            } else if let id = client.nodes.id(for: st.name), id != WorldMap.CONTENT_AIR {
+                switch client.nodes.kind(id) {
+                case .cube, .allfaces: offhand = .block(faceLayers: (0..<6).map { atlas.layer(id: id, face: $0) })
+                case .nodebox:
+                    if let bx = client.nodes.boxes(id), !bx.isEmpty {
+                        offhand = .boxes(boxes: bx.map { ($0.min, $0.max) }, faceLayers: (0..<6).map { atlas.layer(id: id, face: $0) })
+                    }
+                case .mesh:
+                    if let model = nodeMeshModel(for: id) { offhand = .mesh(model: model, layer: Int32(atlas.layer(id: id, face: 0))) }
+                default: break
+                }
+            }
+            if offhand == nil, let tile = invTileCache[iconKey(st)] ?? nil, let l = atlas.tileLayer(tile) {
+                offhand = .item(layer: Int32(l), uv: SIMD2(1, 1)); offTile = tile
+            }
+            if case .item = offhand, let t = offTile { offSil = wieldSilhouette(for: t) }
+            offTint = client.items.color(for: st.name).map { -max($0, 1) } ?? 16777215
+            offTintAll = client.nodes.id(for: st.name).map { client.nodes.kind($0) == .allfaces } ?? false
+        }
         var skin: (layer: Int, uv: SIMD2<Float>, src: SIMD2<Float>)? = nil
         if let me = client.objects.entity(client.objects.localPlayerId), let tex = me.textures.first, !tex.isEmpty {
             skin = hudImage(tex)
@@ -9354,6 +9397,8 @@ final class WorldSession {
                                          armorFullLayer: atlas.armorFullLayer,
                                          armorHalfLayer: atlas.armorHalfLayer,
                                          armorEmptyLayer: atlas.armorEmptyLayer,
+                                         offhand: offhand, offhandSilhouette: offSil,
+                                         offhandTint: offTint, offhandTintAll: offTintAll,
                                          skinLayer: Int32(skin?.layer ?? -1),
                                          skinUV: skin?.uv ?? SIMD2(1, 1),
                                          skinSize: skin?.src ?? SIMD2(64, 64)))

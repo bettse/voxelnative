@@ -880,6 +880,62 @@ actor Renderer {
         face(SIMD3(a, a, z0), SIMD3(-a, a, z0), SIMD3(-a, -a, z0), SIMD3(a, -a, z0), bx + 8, by, 4, 4, shade: 0.9)          // fist end
         face(SIMD3(a, -a, z1), SIMD3(-a, -a, z1), SIMD3(-a, a, z1), SIMD3(a, a, z1), bx + 4, by, 4, 4, shade: 0.9)          // shoulder end
     }
+    /// Draw a held item at `grip` (a hand pose already moved forward-up of the
+    /// fist). side = 1 for the right hand, -1 for the left: the left hand's
+    /// tilts mirror the right's, so an offhand torch or shield reads the same.
+    private func emitWield(_ w: HandHudState.Wield, grip: simd_float4x4, side: Float, silhouette: B3DLoader.Mesh?,
+                           scale: Float, tint: Float, tintAll: Bool, light: Float,
+                           into v: inout [Float], idx: inout [UInt32]) {
+        switch w {
+        case .block(let layers):
+            // Tilt to a 3D corner (top + front + side) like a held block.
+            let m = grip * matrix4x4_rotation(radians: -0.5 * side, axis: SIMD3(0, 1, 0))
+                         * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
+            emitHandCube(m, offset: .zero, size: 0.08, layers: layers, light: light, topTint: tint,
+                         sideTint: tintAll ? tint : 16777215, into: &v, idx: &idx)
+        case .boxes(let boxes, let layers):
+            // Same 3/4 presentation as a held block.
+            let m = grip * matrix4x4_rotation(radians: -0.5 * side, axis: SIMD3(0, 1, 0))
+                         * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
+            emitHandBoxes(m, boxes: boxes, size: 0.08, layers: layers, light: light, topTint: tint, into: &v, idx: &idx)
+        case .mesh(let model, let layer):
+            // A mesh node (chest etc): draw the real model at the same 3/4
+            // presentation angle as a held block, textured with its one tile.
+            // Model coords are NOT node-local: a chest b3d spans ~+-4.4 units
+            // (the node applies visual_scale ~0.1 in-world). Normalize by the
+            // model's largest extent so any authored scale fits the block-size
+            // wield, instead of assuming [-0.5,0.5] (which made the chest ~10x
+            // too big). Empty/degenerate model -> fall back to the old size.
+            // Cached: the extent scan is the same every frame for the same
+            // held model. Mesh is a value type, so key on the array's
+            // storage identity (its buffer pointer + count), which only
+            // changes when a different model is handed off.
+            let key = model.positions.withUnsafeBufferPointer { Int(bitPattern: $0.baseAddress) ^ ($0.count << 40) }
+            let extent: Float
+            if let e = wieldMeshExtent[key] { extent = e }
+            else {
+                var lo = model.positions.first ?? .zero, hi = lo
+                for p in model.positions { lo = simd_min(lo, p); hi = simd_max(hi, p) }
+                extent = max(hi.x - lo.x, max(hi.y - lo.y, hi.z - lo.z))
+                if wieldMeshExtent.count > 64 { wieldMeshExtent.removeAll() }
+                wieldMeshExtent[key] = extent
+            }
+            let s: Float = extent > 1e-4 ? 0.12 / extent : 0.12
+            let m = grip * matrix4x4_rotation(radians: -0.5 * side, axis: SIMD3(0, 1, 0))
+                         * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
+            emitHandSilhouette(m, mesh: model, size: s, layer: layer, uv: SIMD2(1, 1), light: light, into: &v, idx: &idx)
+        case .item(let layer, let uv):
+            // Angle the tool up-forward out of the fist (diagonal like desktop).
+            let tilt = matrix4x4_rotation(radians: -0.55 * side, axis: SIMD3(0, 0, 1))
+                     * matrix4x4_rotation(radians: -0.85, axis: SIMD3(1, 0, 0))
+            if let sil = silhouette {
+                emitHandSilhouette(grip * tilt, mesh: sil, size: 0.16 * scale, layer: layer, uv: uv, light: light, tint: tint, into: &v, idx: &idx)
+            } else {
+                emitHandSlab(grip, offset: .zero, size: 0.15 * scale, layer: layer, uv: uv, light: light, tint: tint, into: &v, idx: &idx)
+            }
+        }
+    }
+
     private var countTurn = 0   // which quarter turn the hand-tattoo count uses
     private func emitHandRect(_ m: simd_float4x4, center: SIMD3<Float>,
                               wAxis: SIMD3<Float>, hAxis: SIMD3<Float>, halfW: Float, halfH: Float,
@@ -961,6 +1017,12 @@ actor Renderer {
             emitSkinArm(hand, hud: hud, left: true, into: &vt, idx: &idxt)
             leftArmSkinned = true
         }
+        // Offhand item held in the left hand, mirroring the right hand's wield.
+        if let ow = hud.offhand, let hand = handPose(left: true) {
+            let grip = hand * matrix4x4_translation(0.0, 0.035, -0.10)
+            emitWield(ow, grip: grip, side: -1, silhouette: hud.offhandSilhouette, scale: 1,
+                      tint: hud.offhandTint, tintAll: hud.offhandTintAll, light: hud.wieldLight, into: &v, idx: &idx)
+        }
         if let w = hud.wield, let hand = handPose(left: false) {
             // Animate: a quick drop-and-pop when the wield changes, and a
             // continuous swing while digging. Both ride on top of the grip so the
@@ -982,54 +1044,8 @@ actor Renderer {
             if hud.digging { swing = 0.5 * Float(sin(now * 2 * 2 * .pi)) }                  // ~2 Hz pitch swing
             let grip = hand * matrix4x4_translation(0.0, 0.035 + dipY, -0.10)               // forward-up of the fist
                             * matrix4x4_rotation(radians: swing, axis: SIMD3(1, 0, 0))
-            switch w {
-            case .block(let layers):
-                // Tilt to a 3D corner (top + front + side) like a held block.
-                let m = grip * matrix4x4_rotation(radians: -0.5, axis: SIMD3(0, 1, 0))
-                             * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
-                emitHandCube(m, offset: .zero, size: 0.08, layers: layers, light: hud.wieldLight, topTint: hud.wieldTint,
-                             sideTint: hud.wieldTintAll ? hud.wieldTint : 16777215, into: &v, idx: &idx)
-            case .boxes(let boxes, let layers):
-                // Same 3/4 presentation as a held block.
-                let m = grip * matrix4x4_rotation(radians: -0.5, axis: SIMD3(0, 1, 0))
-                             * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
-                emitHandBoxes(m, boxes: boxes, size: 0.08, layers: layers, light: hud.wieldLight, topTint: hud.wieldTint, into: &v, idx: &idx)
-            case .mesh(let model, let layer):
-                // A mesh node (chest etc): draw the real model at the same 3/4
-                // presentation angle as a held block, textured with its one tile.
-                // Model coords are NOT node-local: a chest b3d spans ~+-4.4 units
-                // (the node applies visual_scale ~0.1 in-world). Normalize by the
-                // model's largest extent so any authored scale fits the block-size
-                // wield, instead of assuming [-0.5,0.5] (which made the chest ~10x
-                // too big). Empty/degenerate model -> fall back to the old size.
-                // Cached: the extent scan is the same every frame for the same
-                // held model. Mesh is a value type, so key on the array's
-                // storage identity (its buffer pointer + count), which only
-                // changes when a different model is handed off.
-                let key = model.positions.withUnsafeBufferPointer { Int(bitPattern: $0.baseAddress) ^ ($0.count << 40) }
-                let extent: Float
-                if let e = wieldMeshExtent[key] { extent = e }
-                else {
-                    var lo = model.positions.first ?? .zero, hi = lo
-                    for p in model.positions { lo = simd_min(lo, p); hi = simd_max(hi, p) }
-                    extent = max(hi.x - lo.x, max(hi.y - lo.y, hi.z - lo.z))
-                    if wieldMeshExtent.count > 64 { wieldMeshExtent.removeAll() }
-                    wieldMeshExtent[key] = extent
-                }
-                let s: Float = extent > 1e-4 ? 0.12 / extent : 0.12
-                let m = grip * matrix4x4_rotation(radians: -0.5, axis: SIMD3(0, 1, 0))
-                             * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
-                emitHandSilhouette(m, mesh: model, size: s, layer: layer, uv: SIMD2(1, 1), light: hud.wieldLight, into: &v, idx: &idx)
-            case .item(let layer, let uv):
-                // Angle the tool up-forward out of the fist (diagonal like desktop).
-                let tilt = matrix4x4_rotation(radians: -0.55, axis: SIMD3(0, 0, 1))
-                         * matrix4x4_rotation(radians: -0.85, axis: SIMD3(1, 0, 0))
-                if let sil = hud.wieldSilhouette {
-                    emitHandSilhouette(grip * tilt, mesh: sil, size: 0.16 * hud.wieldScale, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, into: &v, idx: &idx)
-                } else {
-                    emitHandSlab(grip, offset: .zero, size: 0.15 * hud.wieldScale, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, into: &v, idx: &idx)
-                }
-            }
+            emitWield(w, grip: grip, side: 1, silhouette: hud.wieldSilhouette, scale: hud.wieldScale,
+                      tint: hud.wieldTint, tintAll: hud.wieldTintAll, light: hud.wieldLight, into: &v, idx: &idx)
             // Count and wear both sit like a wristwatch: a small patch on top of
             // the wrist (hand-local +Y), just toward the elbow, raised off the
             // surface so it doesn't sink in. Anchored to `hand`, not `grip`, so
