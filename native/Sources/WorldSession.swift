@@ -3135,20 +3135,25 @@ final class WorldSession {
         return false
     }
 
-    // Wrist-twist hotbar: rest the left thumb on Square or Triangle (touching,
-    // not pressing) and roll the left wrist; every twistStep of roll moves the
-    // selection one slot, with a tick on the left controller. Clockwise (as you
-    // look down the controller) is next. Lift the thumb to stop.
-    private static let twistStep: Float = 25 * .pi / 180
-    private static let twistArmDelay: Float = 0.2   // thumb must rest this long first, so passing over a button doesn't count
+    // Wrist-twist hotbar, a shuttle ring: rest the left thumb across both
+    // Square and Triangle (touching, not pressing) and twist the left wrist.
+    // Where the wrist was when the thumb landed is the rest position; past a
+    // dead zone the selection starts moving that way, faster the further you
+    // twist, with a tick on the left controller per slot. Clockwise (as you
+    // look down the controller) is next. Twist back or lift the thumb to stop.
+    private static let twistDead: Float = 15 * .pi / 180      // wobble inside this does nothing
+    private static let twistFull: Float = 45 * .pi / 180      // top speed from here on
+    private static let twistRateMin: Float = 2, twistRateMax: Float = 10   // slots per second
+    private static let twistArmDelay: Float = 0.2   // thumb must rest this long first, so passing over the buttons doesn't count
     private var twistRest: Float = 0                 // seconds the thumb has rested
     private var twistPrevUp: SIMD3<Float>? = nil
-    private var twistAccum: Float = 0
+    private var twistAngle: Float = 0                // roll from the rest position, radians
+    private var twistTimer: Float = 0                // fraction of the next step, 1 = step now
     private func stepWristTwist(_ gi: GameInput.State, dt: Float, hotbarSize hb: Int) {
         let t = gi.touchL
-        let resting = (t.a || t.b) && !t.stick && !gi.hotbarPrev && !gi.hotbarNext
+        let resting = t.a && t.b && !t.stick && !gi.hotbarPrev && !gi.hotbarNext
         guard resting, !inventoryOpen, !koganeMenuOpen, !keyboardOpen, !dead, let m = player.leftHand() else {
-            twistRest = 0; twistPrevUp = nil; twistAccum = 0; return
+            twistRest = 0; twistPrevUp = nil; twistAngle = 0; return
         }
         twistRest += dt
         guard twistRest >= Self.twistArmDelay else { return }
@@ -3156,15 +3161,19 @@ final class WorldSession {
         func flat(_ v: SIMD3<Float>) -> SIMD3<Float> { simd_normalize(v - fwd * simd_dot(v, fwd)) }
         let up = flat(SIMD3<Float>(m.columns.1.x, m.columns.1.y, m.columns.1.z))
         defer { twistPrevUp = up }
-        guard let prev = twistPrevUp else { return }
+        guard let prev = twistPrevUp else { twistAngle = 0; twistTimer = 1; return }
         let p = flat(prev)
         // Signed roll since last tick about the controller's forward axis:
-        // positive = clockwise as you look along it.
-        let roll = atan2(simd_dot(simd_cross(p, up), fwd), simd_dot(p, up))
-        twistAccum += roll
-        while abs(twistAccum) >= Self.twistStep {
-            let dir = twistAccum > 0 ? 1 : -1
-            twistAccum -= Float(dir) * Self.twistStep
+        // positive = clockwise as you look along it. Summed, so it's the angle
+        // from where the thumb landed.
+        twistAngle += atan2(simd_dot(simd_cross(p, up), fwd), simd_dot(p, up))
+        let over = abs(twistAngle) - Self.twistDead
+        guard over > 0 else { twistTimer = 1; return }   // back in the dead zone: the next push steps at once
+        let k = min(1, over / (Self.twistFull - Self.twistDead))
+        twistTimer += dt * (Self.twistRateMin + (Self.twistRateMax - Self.twistRateMin) * k)
+        while twistTimer >= 1 {
+            twistTimer -= 1
+            let dir = twistAngle > 0 ? 1 : -1
             client.setWieldIndex((client.wieldIndex + dir + hb) % hb)
             input.rumble(intensity: 0.45, sharpness: 0.9, leftOnly: true)
             print("[hotbar] twist wield=\(client.wieldIndex)"); fflush(stdout)
