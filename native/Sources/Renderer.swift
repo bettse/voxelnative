@@ -6,6 +6,7 @@ import LuantiKit
 import QuartzCore
 import ImageIO
 import Metal
+import Photos
 import MetalKit
 import ModelIO
 import simd
@@ -1711,6 +1712,170 @@ actor Renderer {
         captureTexture = device.makeTexture(descriptor: d)
     }
 
+    // MARK: Photo mode
+    // A drawable is foveated (non-uniform resolution) and eye-shaped, so a copy
+    // of it made a poor picture. Photo mode renders the scene a second time into
+    // its own 16:9 target from a virtual camera at the head, looking where the
+    // head looks but with the roll removed, so every shot is level.
+    static let photoW = 3840, photoH = 2160
+    private var photoColor: MTLTexture?, photoDepth: MTLTexture?
+    private var photoMSAAColor: MTLTexture?, photoMSAADepth: MTLTexture?
+    private var photoVP: MTLBuffer?
+
+    /// The head pose with its roll taken out: same position and look direction,
+    /// right vector kept horizontal.
+    nonisolated static func levelCamera(_ head: float4x4) -> float4x4 {
+        let fwd = -simd_normalize(SIMD3<Float>(head.columns.2.x, head.columns.2.y, head.columns.2.z))
+        var right = simd_cross(fwd, SIMD3<Float>(0, 1, 0))
+        if simd_length(right) < 1e-3 { right = simd_normalize(SIMD3<Float>(head.columns.0.x, 0, head.columns.0.z)) }
+        right = simd_normalize(right)
+        let up = simd_cross(right, fwd)
+        return float4x4(SIMD4(right, 0), SIMD4(up, 0), SIMD4(-fwd, 0), head.columns.3)
+    }
+
+    private func ensurePhotoTargets() {
+        guard photoColor == nil else { return }
+        let w = Self.photoW, h = Self.photoH
+        let colorFmt = layerRenderer.configuration.colorFormat, depthFmt = layerRenderer.configuration.depthFormat
+        // Array textures of length 1: the pipelines write render_target_array_index.
+        let c = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: colorFmt, width: w, height: h, mipmapped: false)
+        c.textureType = .type2DArray; c.arrayLength = 1
+        c.usage = [.renderTarget, .shaderRead]; c.storageMode = .shared   // read back on the CPU
+        photoColor = device.makeTexture(descriptor: c)
+        if device.supportsMSAA {
+            // Memoryless: the multisampled targets live in tile memory only, so a
+            // 4K MSAA pass costs no RAM; only the resolved image is stored.
+            let mc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: colorFmt, width: w, height: h, mipmapped: false)
+            mc.textureType = .type2DMultisampleArray; mc.arrayLength = 1; mc.sampleCount = device.rasterSampleCount
+            mc.usage = .renderTarget; mc.storageMode = .memoryless
+            photoMSAAColor = device.makeTexture(descriptor: mc)
+            let md = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthFmt, width: w, height: h, mipmapped: false)
+            md.textureType = .type2DMultisampleArray; md.arrayLength = 1; md.sampleCount = device.rasterSampleCount
+            md.usage = .renderTarget; md.storageMode = .memoryless
+            photoMSAADepth = device.makeTexture(descriptor: md)
+        } else {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthFmt, width: w, height: h, mipmapped: false)
+            d.textureType = .type2DArray; d.arrayLength = 1
+            d.usage = .renderTarget; d.storageMode = .private
+            photoDepth = device.makeTexture(descriptor: d)
+        }
+        photoVP = device.makeBuffer(length: alignedViewProjectionArraySize, options: [.storageModeShared])
+    }
+
+    private func encodePhoto(_ commandBuffer: MTLCommandBuffer, head: float4x4) {
+        ensurePhotoTargets()
+        guard let color = photoColor, let vpBuf = photoVP else { return }
+        let w = Self.photoW, h = Self.photoH
+        // Reverse-Z infinite projection (Metal clip z 0..1, near -> 1), matching
+        // the eye pass's depth compare and clear. 60 degree vertical FOV.
+        let fovY: Float = 60 * .pi / 180, near: Float = 0.05
+        let f = 1 / tanf(fovY / 2), aspect = Float(w) / Float(h)
+        let proj = float4x4(SIMD4(f / aspect, 0, 0, 0), SIMD4(0, f, 0, 0), SIMD4(0, 0, 0, -1), SIMD4(0, 0, near, 0))
+        let vp = proj * Self.levelCamera(head).inverse
+        let arr = vpBuf.contents().bindMemory(to: ViewProjectionArray.self, capacity: 1)
+        arr[0].viewProjectionMatrix.0 = vp; arr[0].inverseViewProjectionMatrix.0 = vp.inverse
+        arr[0].viewProjectionMatrix.1 = vp; arr[0].inverseViewProjectionMatrix.1 = vp.inverse
+        let pass = MTLRenderPassDescriptor()
+        if let mc = photoMSAAColor, let md = photoMSAADepth {
+            pass.colorAttachments[0].texture = mc
+            pass.colorAttachments[0].resolveTexture = color
+            pass.colorAttachments[0].storeAction = .multisampleResolve
+            pass.depthAttachment.texture = md
+            pass.depthAttachment.storeAction = .dontCare
+        } else {
+            pass.colorAttachments[0].texture = color
+            pass.colorAttachments[0].storeAction = .store
+            pass.depthAttachment.texture = photoDepth
+            pass.depthAttachment.storeAction = .dontCare
+        }
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.28, green: 0.55, blue: 0.92, alpha: 1.0)
+        pass.depthAttachment.loadAction = .clear
+        pass.depthAttachment.clearDepth = 1e-5
+        pass.renderTargetArrayLength = 1
+        guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        enc.label = "Photo Encoder"
+        let viewport = MTLViewport(originX: 0, originY: 0, width: Double(w), height: Double(h), znear: 0, zfar: 1)
+        encodeScene(enc, viewportsIn: [viewport], vpBuffer: vpBuf, vpOffset: 0, cullVP: vp, cullAll: true)
+        enc.endEncoding()
+        commandBuffer.addCompletedHandler { [weak self] _ in self?.savePhoto(color, w, h) }
+    }
+
+    /// Read the photo back, convert to 8-bit sRGB PNG and add it to Photos
+    /// (add-only permission). Runs on a GPU completion thread.
+    private func savePhoto(_ tex: MTLTexture, _ w: Int, _ h: Int) {
+        guard let img = Self.srgbImage(tex, w, h) else { return }
+        let data = NSMutableData()
+        guard let dst = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return }
+        CGImageDestinationAddImage(dst, img, nil)
+        guard CGImageDestinationFinalize(dst) else { return }
+        #if targetEnvironment(simulator)
+        // The sim can't answer the Photos prompt headless; keep a copy to inspect.
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("photo-\(Int(Date().timeIntervalSince1970)).png")
+        try? (data as Data).write(to: url)
+        print("[photo] wrote \(url.lastPathComponent)"); fflush(stdout)
+        #endif
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                print("[photo] no Photos permission (\(status.rawValue))"); fflush(stdout)
+                Task { @MainActor in self.appModel.session.photoSaved(ok: false, denied: true) }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data as Data, options: nil)
+            }) { ok, err in
+                print("[photo] saved to Photos ok=\(ok) \(err.map { "\($0)" } ?? "") (\(w)x\(h))"); fflush(stdout)
+                Task { @MainActor in self.appModel.session.photoSaved(ok: ok, denied: false) }
+            }
+        }
+    }
+
+    /// The photo target (the layer's color format) -> 8-bit sRGB CGImage. The
+    /// layer is 8-bit BGRA/RGBA on some configurations and rgba16Float (linear)
+    /// on others; reading one as the other scrambled the colours and filled
+    /// only half the width.
+    nonisolated static func srgbImage(_ tex: MTLTexture, _ w: Int, _ h: Int) -> CGImage? {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        switch tex.pixelFormat {
+        case .bgra8Unorm_srgb, .bgra8Unorm, .rgba8Unorm_srgb, .rgba8Unorm:
+            // 8-bit: _srgb textures store encoded values, which is what a PNG
+            // wants; plain unorm is treated the same (the swapchain is sRGB).
+            var px = [UInt8](repeating: 0, count: w * h * 4)
+            tex.getBytes(&px, bytesPerRow: w * 4, bytesPerImage: w * h * 4, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, slice: 0)
+            let bgra = tex.pixelFormat == .bgra8Unorm_srgb || tex.pixelFormat == .bgra8Unorm
+            let info = bgra ? (CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue)
+                            : CGImageAlphaInfo.noneSkipLast.rawValue
+            return px.withUnsafeMutableBytes { raw -> CGImage? in
+                CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                          space: cs, bitmapInfo: info)?.makeImage()
+            }
+        case .rgba16Float: break
+        default:
+            print("[photo] unsupported color format \(tex.pixelFormat.rawValue)"); fflush(stdout)
+            return nil
+        }
+        let count = w * h * 4
+        var half = [UInt16](repeating: 0, count: count)
+        tex.getBytes(&half, bytesPerRow: w * 8, bytesPerImage: w * h * 8, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, slice: 0)
+        var rgba = [UInt8](repeating: 0, count: count)
+        func enc(_ v: Float) -> UInt8 {
+            let c = max(0, min(1, v))
+            let e = c <= 0.0031308 ? 12.92 * c : 1.055 * powf(c, 1 / 2.4) - 0.055
+            return UInt8(max(0, min(255, e * 255 + 0.5)))
+        }
+        for i in 0..<(w * h) {
+            rgba[i*4+0] = enc(Float(Float16(bitPattern: half[i*4+0])))
+            rgba[i*4+1] = enc(Float(Float16(bitPattern: half[i*4+1])))
+            rgba[i*4+2] = enc(Float(Float16(bitPattern: half[i*4+2])))
+            rgba[i*4+3] = 255
+        }
+        return rgba.withUnsafeMutableBytes { raw -> CGImage? in
+            guard let ctx = CGContext(data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+            return ctx.makeImage()
+        }
+    }
+
     /// Convert a captured rgba16Float frame to sRGB and write a PNG into the
     /// app's Documents dir. Runs on a GPU completion thread.
     private func writeScreenshot(_ tex: MTLTexture, _ w: Int, _ h: Int) {
@@ -1975,145 +2140,13 @@ actor Renderer {
         inside(f.p0, lo, hi) && inside(f.p1, lo, hi) && inside(f.p2, lo, hi) && inside(f.p3, lo, hi) && inside(f.p4, lo, hi)
     }
 
-    func render(drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer, frameIndex: UInt64,
-                capture: Bool = false) {
-        let time = drawable.frameTiming.presentationTime.timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
-
-        drawable.deviceAnchor = deviceAnchor
-
-        // Feed the player's look direction (node space) back for raycasting.
-        let head = (deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4) * Renderer.simHeadOffset()
-        // Pin the in-game eye to a fixed standing height no matter the real head
-        // height: originLift + realHeadY = eyeHeight, so sitting and standing both
-        // render at desktop eye level (you're not "short" when you sit). Only Y is
-        // pinned; horizontal head lean still comes through. Sim: untracked anchor
-        // -> nominal eye.
-        if deviceAnchor?.isTracked == true {
-            appModel.player.setOriginLift(appModel.player.eyeHeight - head.columns.3.y)
-        } else {
-            appModel.player.setOriginLift(appModel.player.eyeHeight)
-        }
-        appModel.player.setHeadXform(head)   // for head-locked overlays (Kogane menu, death text)
-        pointerPose = smoothedPointerPose(handPose(left: false), at: time)
-        appModel.player.setRightHand(pointerPose)   // inventory pointer ray
-        buildPanelPointer()                  // panel dot from this frame's controller pose
-        buildHudBillboards(head: head)       // place the HUD against this frame's head (no lag/ghost)
-        // View frame -> node frame: undo the Z mirror, then the yaw (see modelMatrix).
-        let fwdOrigin = simd_normalize(SIMD3<Float>(-head.columns.2.x, -head.columns.2.y, head.columns.2.z))
-        let yaw = appModel.player.snapshot().yaw
-        let ry = matrix4x4_rotation(radians: yaw, axis: SIMD3<Float>(0, 1, 0))
-        let fwd4 = ry * SIMD4<Float>(fwdOrigin, 0)
-        appModel.player.setAim(simd_normalize(SIMD3<Float>(fwd4.x, fwd4.y, fwd4.z)))
-        // Real head position in node space (origin is the nominal eye), so
-        // dig/place/crosshair rays start from where you actually look. Identity
-        // anchor in the sim -> falls back to the nominal eye.
-        let headOff = ry * SIMD4<Float>(head.columns.3.x, head.columns.3.y, -head.columns.3.z, 0)
-        let eyeN = appModel.player.origin()
-        appModel.player.setHeadPos(SIMD3<Float>(eyeN.x + headOff.x / PlayerState.scale,
-                                                eyeN.y + headOff.y / PlayerState.scale,
-                                                eyeN.z + headOff.z / PlayerState.scale))
-
-        if perDrawableTarget[drawable.target] == nil {
-            perDrawableTarget[drawable.target] = .init(drawable: drawable)
-        }
-        let drawableTarget = perDrawableTarget[drawable.target]!
-
-        drawableTarget.updateBufferState(uniformBufferIndex: uniformBufferIndex, frameIndex: frameIndex)
-
-        drawableTarget.updateViewProjectionArray(drawable: drawable)
-
-
-        let renderPassDescriptor = MTLRenderPassDescriptor()
-
-        if device.supportsMSAA {
-            let renderTargets = drawableTarget.memorylessTargets[uniformBufferIndex]
-
-            renderPassDescriptor.colorAttachments[0].resolveTexture = drawable.colorTextures[0]
-            renderPassDescriptor.colorAttachments[0].texture = renderTargets.color
-            renderPassDescriptor.depthAttachment.resolveTexture = drawable.depthTextures[0]
-            renderPassDescriptor.depthAttachment.texture = renderTargets.depth
-
-            renderPassDescriptor.colorAttachments[0].storeAction = .multisampleResolve
-            renderPassDescriptor.depthAttachment.storeAction = .multisampleResolve
-        } else {
-            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
-            renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
-
-            renderPassDescriptor.colorAttachments[0].storeAction = .store
-            renderPassDescriptor.depthAttachment.storeAction = .store
-        }
-
-        renderPassDescriptor.colorAttachments[0].loadAction = .clear
-        // Sky colour fills everywhere there is no geometry (full immersion, so
-        // opaque alpha = no passthrough).
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.28, green: 0.55, blue: 0.92, alpha: 1.0)
-        renderPassDescriptor.depthAttachment.loadAction = .clear
-        renderPassDescriptor.depthAttachment.clearDepth = 1e-5   // non-zero: visionOS reprojection drops depth==0
-        renderPassDescriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
-        if layerRenderer.configuration.layout == .layered {
-            renderPassDescriptor.renderTargetArrayLength = drawable.views.count
-        }
-
-        #if !targetEnvironment(simulator)
-        let residencySet = self.residencySets[uniformBufferIndex]
-        var perFrame: [any MTLAllocation] = [
-            drawable.colorTextures[0],
-            drawable.depthTextures[0],
-            drawableTarget.viewProjectionBuffer,
-            entityVertexBuffer,
-            handVertexBuffer,
-            handIndexBuffer,
-            entityIndexBuffer,
-            modelVertexBuffer,
-            modelIndexBuffer,
-            // These are all bound and drawn below and get REALLOCATED when they
-            // grow (upload()/consumeHandoff swap in a fresh MTLBuffer), so a
-            // grown one belongs to no residency set unless listed here. Missing
-            // them risks a GPU fault reading an unresident buffer on device.
-            hudVertexBuffer, hudIndexBuffer,
-            hudGlassVertexBuffer, hudGlassIndexBuffer,
-            handHudVertexBuffer, handHudIndexBuffer,
-            handHudTextVertexBuffer, handHudTextIndexBuffer,
-            overlayVertexBuffer, overlayIndexBuffer,
-            modelBlendVertexBuffer, modelBlendIndexBuffer,
-            pointerVertexBuffer, pointerIndexBuffer,
-        ]
-        if #available(visionOS 26.0, *) { perFrame.append(contentsOf: drawable.trackingAreasTextures as [any MTLAllocation]) }
-        if let tex = textureArray { perFrame.append(tex) }
-        if let mtex = modelTextureArray { perFrame.append(mtex) }
-        if capture { ensureCaptureTexture(like: drawable.colorTextures[0]); if let ct = captureTexture { perFrame.append(ct) } }
-        residencySet.removeAllAllocations()   // clear the prior frame's set (slot's GPU work is done)
-        residencySet.addAllocations(perFrame)
-        residencySet.commit()                 // one commit per frame, not two
-        // World block buffers live in a dedicated set, rebuilt only when the
-        // block set changed. Refresh this slot's set if armed; each
-        // slot's prior frame has completed (endFrameEvent wait) so it's safe.
-        let worldRes = self.worldResidencySets[uniformBufferIndex]
-        if worldResidencyRefresh > 0 {
-            worldResidencyRefresh -= 1
-            worldRes.removeAllAllocations()
-            var world: [any MTLAllocation] = []
-            world.reserveCapacity(worldBlocks.count * 4)
-            for (_, b) in worldBlocks {
-                if let v = b.opaqueVerts { world.append(v) }
-                if let s = b.solid { world.append(s.buffer) }
-                if let c = b.cutout { world.append(c.buffer) }
-                if let l = b.liquid { world.append(l.vertices); world.append(l.indices) }
-            }
-            worldRes.addAllocations(world)
-            worldRes.commit()
-        }
-        commandBuffer.useResidencySet(worldRes)
-        #endif
-
-        /// Final pass rendering code here
-        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-            fatalError("Failed to create render encoder")
-        }
-
-        renderEncoder.label = "Primary Render Encoder"
-
+    /// Encode the whole scene (world, sky, liquids, entities, hands, HUD,
+    /// overlay, pointer) into `renderEncoder`. Shared by the eye pass and the
+    /// photo-mode pass; `viewportsIn` / the view-projection buffer / the cull
+    /// matrix are what differ. cullAll draws every block (the photo camera's
+    /// field of view isn't the eye's).
+    private func encodeScene(_ renderEncoder: MTLRenderCommandEncoder, viewportsIn: [MTLViewport],
+                             vpBuffer: MTLBuffer, vpOffset: Int, cullVP: float4x4, cullAll: Bool) {
         renderEncoder.pushDebugGroup("Draw World")
 
         // Winding: the mesher winds faces counter-clockwise with outward
@@ -2130,13 +2163,13 @@ actor Renderer {
 
         renderEncoder.setDepthStencilState(depthState)
 
-        let viewports = drawable.views.map { $0.textureMap.viewport }
+        let viewports = viewportsIn
 
 
         renderEncoder.setViewports(viewports)
 
-        if drawable.views.count > 1 {
-            var viewMappings = (0..<drawable.views.count).map {
+        if viewports.count > 1 {
+            var viewMappings = (0..<viewports.count).map {
                 MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
                                                   renderTargetArrayIndexOffset: UInt32($0))
             }
@@ -2153,7 +2186,7 @@ actor Renderer {
         // Uniforms/vp/atlas are shared across all blocks.
         renderEncoder.setDepthStencilState(depthState)
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
-        renderEncoder.setVertexBuffer(drawableTarget.viewProjectionBuffer, offset: drawableTarget.viewProjectionBufferOffset, index: BufferIndex.viewProjection.rawValue)
+        renderEncoder.setVertexBuffer(vpBuffer, offset: vpOffset, index: BufferIndex.viewProjection.rawValue)
         if let tex = textureArray { renderEncoder.setFragmentTexture(tex, index: TextureIndex.color.rawValue) }
 
         // Frustum cull (perf #1): draw only the blocks in view. Test each block's
@@ -2172,10 +2205,10 @@ actor Renderer {
         visibleBlocks.removeAll(keepingCapacity: true)
         if !blockList.isEmpty {
             let e = worldEye
-            if noCull {
+            if noCull || cullAll {
                 for i in blockList.indices { visibleBlocks.append((0, i)) }
             } else {
-                let m = drawableTarget.viewProjectionArray[0].viewProjectionMatrix.0 * uniforms[0].modelMatrix
+                let m = cullVP * uniforms[0].modelMatrix
                 let planes = Self.frustumPlanes(m)
                 let mref = worldMeshRef, sc = PlayerState.scale
                 let sixteen = SIMD3<Float>(16, 16, 16), mvec = SIMD3<Float>(repeating: 16 * PlayerState.scale)
@@ -2235,7 +2268,7 @@ actor Renderer {
         renderEncoder.setDepthStencilState(skyDepthState)
         renderEncoder.setFragmentTexture(skyboxTexture ?? skyboxPlaceholder, index: 1)
         renderEncoder.setFragmentTexture(cloudNoiseTexture, index: 2)
-        renderEncoder.setVertexBuffer(drawableTarget.viewProjectionBuffer, offset: drawableTarget.viewProjectionBufferOffset, index: BufferIndex.viewProjection.rawValue)
+        renderEncoder.setVertexBuffer(vpBuffer, offset: vpOffset, index: BufferIndex.viewProjection.rawValue)
         renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 
         // Liquids: a blended second pass over the opaque world (depth-test on,
@@ -2400,25 +2433,162 @@ actor Renderer {
         }
 
         renderEncoder.popDebugGroup()
+    }
+
+    func render(drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer, frameIndex: UInt64,
+                capture: Bool = false) {
+        let time = drawable.frameTiming.presentationTime.timeInterval
+        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+
+        drawable.deviceAnchor = deviceAnchor
+
+        // Feed the player's look direction (node space) back for raycasting.
+        let head = (deviceAnchor?.originFromAnchorTransform ?? matrix_identity_float4x4) * Renderer.simHeadOffset()
+        // Pin the in-game eye to a fixed standing height no matter the real head
+        // height: originLift + realHeadY = eyeHeight, so sitting and standing both
+        // render at desktop eye level (you're not "short" when you sit). Only Y is
+        // pinned; horizontal head lean still comes through. Sim: untracked anchor
+        // -> nominal eye.
+        if deviceAnchor?.isTracked == true {
+            appModel.player.setOriginLift(appModel.player.eyeHeight - head.columns.3.y)
+        } else {
+            appModel.player.setOriginLift(appModel.player.eyeHeight)
+        }
+        appModel.player.setHeadXform(head)   // for head-locked overlays (Kogane menu, death text)
+        pointerPose = smoothedPointerPose(handPose(left: false), at: time)
+        appModel.player.setRightHand(pointerPose)   // inventory pointer ray
+        buildPanelPointer()                  // panel dot from this frame's controller pose
+        // Photo frame: the HUD is built against the level camera so it sits level
+        // in the picture (the eyes see it level for that one frame too).
+        buildHudBillboards(head: capture ? Self.levelCamera(head) : head)   // place the HUD against this frame's head (no lag/ghost)
+        // View frame -> node frame: undo the Z mirror, then the yaw (see modelMatrix).
+        let fwdOrigin = simd_normalize(SIMD3<Float>(-head.columns.2.x, -head.columns.2.y, head.columns.2.z))
+        let yaw = appModel.player.snapshot().yaw
+        let ry = matrix4x4_rotation(radians: yaw, axis: SIMD3<Float>(0, 1, 0))
+        let fwd4 = ry * SIMD4<Float>(fwdOrigin, 0)
+        appModel.player.setAim(simd_normalize(SIMD3<Float>(fwd4.x, fwd4.y, fwd4.z)))
+        // Real head position in node space (origin is the nominal eye), so
+        // dig/place/crosshair rays start from where you actually look. Identity
+        // anchor in the sim -> falls back to the nominal eye.
+        let headOff = ry * SIMD4<Float>(head.columns.3.x, head.columns.3.y, -head.columns.3.z, 0)
+        let eyeN = appModel.player.origin()
+        appModel.player.setHeadPos(SIMD3<Float>(eyeN.x + headOff.x / PlayerState.scale,
+                                                eyeN.y + headOff.y / PlayerState.scale,
+                                                eyeN.z + headOff.z / PlayerState.scale))
+
+        if perDrawableTarget[drawable.target] == nil {
+            perDrawableTarget[drawable.target] = .init(drawable: drawable)
+        }
+        let drawableTarget = perDrawableTarget[drawable.target]!
+
+        drawableTarget.updateBufferState(uniformBufferIndex: uniformBufferIndex, frameIndex: frameIndex)
+
+        drawableTarget.updateViewProjectionArray(drawable: drawable)
+
+
+        let renderPassDescriptor = MTLRenderPassDescriptor()
+
+        if device.supportsMSAA {
+            let renderTargets = drawableTarget.memorylessTargets[uniformBufferIndex]
+
+            renderPassDescriptor.colorAttachments[0].resolveTexture = drawable.colorTextures[0]
+            renderPassDescriptor.colorAttachments[0].texture = renderTargets.color
+            renderPassDescriptor.depthAttachment.resolveTexture = drawable.depthTextures[0]
+            renderPassDescriptor.depthAttachment.texture = renderTargets.depth
+
+            renderPassDescriptor.colorAttachments[0].storeAction = .multisampleResolve
+            renderPassDescriptor.depthAttachment.storeAction = .multisampleResolve
+        } else {
+            renderPassDescriptor.colorAttachments[0].texture = drawable.colorTextures[0]
+            renderPassDescriptor.depthAttachment.texture = drawable.depthTextures[0]
+
+            renderPassDescriptor.colorAttachments[0].storeAction = .store
+            renderPassDescriptor.depthAttachment.storeAction = .store
+        }
+
+        renderPassDescriptor.colorAttachments[0].loadAction = .clear
+        // Sky colour fills everywhere there is no geometry (full immersion, so
+        // opaque alpha = no passthrough).
+        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0.28, green: 0.55, blue: 0.92, alpha: 1.0)
+        renderPassDescriptor.depthAttachment.loadAction = .clear
+        renderPassDescriptor.depthAttachment.clearDepth = 1e-5   // non-zero: visionOS reprojection drops depth==0
+        renderPassDescriptor.rasterizationRateMap = drawable.rasterizationRateMaps.first
+        if layerRenderer.configuration.layout == .layered {
+            renderPassDescriptor.renderTargetArrayLength = drawable.views.count
+        }
+
+        #if !targetEnvironment(simulator)
+        let residencySet = self.residencySets[uniformBufferIndex]
+        var perFrame: [any MTLAllocation] = [
+            drawable.colorTextures[0],
+            drawable.depthTextures[0],
+            drawableTarget.viewProjectionBuffer,
+            entityVertexBuffer,
+            handVertexBuffer,
+            handIndexBuffer,
+            entityIndexBuffer,
+            modelVertexBuffer,
+            modelIndexBuffer,
+            // These are all bound and drawn below and get REALLOCATED when they
+            // grow (upload()/consumeHandoff swap in a fresh MTLBuffer), so a
+            // grown one belongs to no residency set unless listed here. Missing
+            // them risks a GPU fault reading an unresident buffer on device.
+            hudVertexBuffer, hudIndexBuffer,
+            hudGlassVertexBuffer, hudGlassIndexBuffer,
+            handHudVertexBuffer, handHudIndexBuffer,
+            handHudTextVertexBuffer, handHudTextIndexBuffer,
+            overlayVertexBuffer, overlayIndexBuffer,
+            modelBlendVertexBuffer, modelBlendIndexBuffer,
+            pointerVertexBuffer, pointerIndexBuffer,
+        ]
+        if #available(visionOS 26.0, *) { perFrame.append(contentsOf: drawable.trackingAreasTextures as [any MTLAllocation]) }
+        if let tex = textureArray { perFrame.append(tex) }
+        if let mtex = modelTextureArray { perFrame.append(mtex) }
+        if capture {
+            ensurePhotoTargets()
+            let res: [(any MTLAllocation)?] = [photoColor, photoDepth, photoMSAAColor, photoMSAADepth, photoVP]
+            perFrame.append(contentsOf: res.compactMap { $0 })
+        }
+        residencySet.removeAllAllocations()   // clear the prior frame's set (slot's GPU work is done)
+        residencySet.addAllocations(perFrame)
+        residencySet.commit()                 // one commit per frame, not two
+        // World block buffers live in a dedicated set, rebuilt only when the
+        // block set changed. Refresh this slot's set if armed; each
+        // slot's prior frame has completed (endFrameEvent wait) so it's safe.
+        let worldRes = self.worldResidencySets[uniformBufferIndex]
+        if worldResidencyRefresh > 0 {
+            worldResidencyRefresh -= 1
+            worldRes.removeAllAllocations()
+            var world: [any MTLAllocation] = []
+            world.reserveCapacity(worldBlocks.count * 4)
+            for (_, b) in worldBlocks {
+                if let v = b.opaqueVerts { world.append(v) }
+                if let s = b.solid { world.append(s.buffer) }
+                if let c = b.cutout { world.append(c.buffer) }
+                if let l = b.liquid { world.append(l.vertices); world.append(l.indices) }
+            }
+            worldRes.addAllocations(world)
+            worldRes.commit()
+        }
+        commandBuffer.useResidencySet(worldRes)
+        #endif
+
+        /// Final pass rendering code here
+        guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
+            fatalError("Failed to create render encoder")
+        }
+
+        renderEncoder.label = "Primary Render Encoder"
+
+        encodeScene(renderEncoder, viewportsIn: drawable.views.map { $0.textureMap.viewport },
+                    vpBuffer: drawableTarget.viewProjectionBuffer, vpOffset: drawableTarget.viewProjectionBufferOffset,
+                    cullVP: drawableTarget.viewProjectionArray[0].viewProjectionMatrix.0, cullAll: false)
 
         renderEncoder.endEncoding()
 
-        // Screenshot: copy the resolved frame into a CPU-readable texture and
-        // write a PNG once the GPU finishes.
-        if capture {
-            ensureCaptureTexture(like: drawable.colorTextures[0])
-            if let ct = captureTexture, let blit = commandBuffer.makeBlitCommandEncoder() {
-                let src = drawable.colorTextures[0]
-                blit.copy(from: src, sourceSlice: 0, sourceLevel: 0,
-                          sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
-                          sourceSize: MTLSize(width: src.width, height: src.height, depth: 1),
-                          to: ct, destinationSlice: 0, destinationLevel: 0,
-                          destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
-                blit.endEncoding()
-                let w = ct.width, h = ct.height
-                commandBuffer.addCompletedHandler { [weak self] _ in self?.writeScreenshot(ct, w, h) }
-            }
-        }
+        // Photo mode: render the same scene again into a 3840x2160 target from a
+        // level camera at the head, then save it to Photos.
+        if capture { encodePhoto(commandBuffer, head: head) }
 
         encodeTrackingArea(drawable, commandBuffer: commandBuffer)
         drawable.encodePresent(commandBuffer: commandBuffer)

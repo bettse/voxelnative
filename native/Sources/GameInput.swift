@@ -29,6 +29,7 @@ final class GameInput {
         var dig = false
         var place = false
         var cancel = false      // controller Menu button or Esc: back out of a panel, keyboard or menu
+        var photo = false       // LEFT Menu (Create) button, or P / F12: take a photo (only during play)
         var escape = false      // keyboard Esc (also sets cancel + koganeMenu)
         var jump = false
         var fast = false        // sprint (aux1); in a panel also the quick-move modifier (left grip / E / Ctrl)
@@ -326,6 +327,7 @@ final class GameInput {
                 // names X/Y too so hotbar prev/next survive a future relabel.
                 if p.buttons["Button A"]?.isPressed == true || p.buttons["Button X"]?.isPressed == true { s.hotbarPrev = true }   // left square
                 if p.buttons["Button B"]?.isPressed == true || p.buttons["Button Y"]?.isPressed == true { s.hotbarNext = true }   // left triangle
+                if p.buttons["Button Menu"]?.isPressed == true { s.photo = true }   // left Create: photo (still backs out of panels too)
             } else {
                 if sx != 0 { s.turn = sx }
                 if trigger { s.dig = true }
@@ -373,6 +375,7 @@ final class GameInput {
             if k(.keyE) || k(.leftControl) { s.fast = true }
             if k(.keyF)         { s.dig = true }         // attack / mine (gaze-aimed)
             if k(.keyR)         { s.place = true }       // place / use
+            if k(.keyP) || k(.F12) { s.photo = true }    // photo (F12 is desktop Luanti's screenshot key)
             if k(.keyI)         { s.inventory = true }   // toggle inventory
             if k(.keyQ)         { s.drop = true }
             // Esc opens/closes the Kogane menu (the keyboard has no right X) and

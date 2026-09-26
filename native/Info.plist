@@ -16,6 +16,8 @@
     <key>CFBundleSupportedPlatforms</key><array><string>XROS</string></array>
     <key>MinimumOSVersion</key><string>26.0</string>
     <key>UIDeviceFamily</key><array><integer>7</integer></array>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Saves the photos you take in the game.</string>
     <key>NSWorldSensingUsageDescription</key>
     <string>Tracks your head pose to render the world from your viewpoint.</string>
     <key>NSHandsTrackingUsageDescription</key>

@@ -151,7 +151,7 @@ final class WorldSession {
     // confused more than helped). Stored, not computed: it was read per
     // option per tick while the menu was open, rebuilding the array each time.
     private let koganeOptions: [String] = {
-        var o = ["Resume", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
+        var o = ["Resume", "Take photo", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
         if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 2) }
         return o
     }()
@@ -504,6 +504,7 @@ final class WorldSession {
     private var simAutoWalk = false
     private var simAutoSneak = false
     private var simReconnectPhase = 0, simReconnectTimer = 0.0   // -vrdev.reconnectTest
+    private var simPhotoDone = false, simPhotoTimer = 0.0   // -vrdev.photoTest
     private var simTapStep = 0, simTapTimer = 0.0, simTapLastForm = "\u{0}"   // -vrdev.tapField
     private var simChordHold = false                    // -vrdev.chordDropTest: hold right trigger + grip
     private var simTapPlace = false                     // -vrdev.chordDropTest: one-frame grip tap
@@ -1879,6 +1880,12 @@ final class WorldSession {
                 }
             }
         }
+        // -vrdev.photoTest 1: take one photo-mode shot 6 s after the world is up
+        // (grant Photos first: xcrun simctl privacy <sim> grant photos-add <bundle>).
+        if !simPhotoDone, UserDefaults.standard.bool(forKey: "vrdev.photoTest"), atlasBuilt {
+            simPhotoTimer += Double(dt)
+            if simPhotoTimer > 6 { simPhotoDone = true; startPhotoCountdown(1); print("[phototest] countdown started"); fflush(stdout) }
+        }
         // -vrdev.tapField <name>: tap the named button on the open panel once
         // (with -vrdev.openInventory 1: the recipe book is "__mcl_craftguide"),
         // to drive the player-form submit path headless.
@@ -2863,6 +2870,13 @@ final class WorldSession {
         let a = (Self.wickedTimeOfDay(client.timeFraction) - 0.25) * 2 * .pi
         player.setSunDir(simd_normalize(SIMD3<Float>(cos(a), sin(a), 0)))
 
+        // Photo mode: the left Create button (or P / F12) during play, or the
+        // menu's "Take photo". Only while nothing is open, so Create still backs
+        // out of a panel.
+        let photoEdge = gi.photo && !prevPhotoBtn
+        prevPhotoBtn = gi.photo
+        if photoEdge, !inventoryOpen, !koganeMenuOpen, !keyboardOpen, !dead, photoStage == 0 { startPhotoCountdown(1) }
+        stepPhoto(dt: dt)
         var act = gi
         #if targetEnvironment(simulator)
         if simChordHold { act.dig = true; act.place = true }
@@ -2977,6 +2991,41 @@ final class WorldSession {
         return false
     }
 
+    // Photo mode countdown: 0 idle, 1 counting down, 2 notice cleared (capture
+    // next tick, so the countdown text is gone from the frame we save).
+    private var photoStage = 0, photoLeft: Float = 0, prevPhotoBtn = false
+    private func startPhotoCountdown(_ seconds: Int) {
+        photoStage = 1; photoLeft = Float(seconds)
+        noticeText = seconds > 1 ? "\(seconds)" : "Hold still"; noticeExpiry = 0
+        input.rumble(intensity: 0.3, sharpness: 0.8)
+    }
+    private func stepPhoto(dt: Float) {
+        guard photoStage != 0 else { return }
+        // A panel, the menu or death cancels a pending photo.
+        if inventoryOpen || koganeMenuOpen || dead { photoStage = 0; noticeText = nil; return }
+        if photoStage == 2 {
+            photoStage = 0
+            screenshotFlag.request()
+            input.rumble(intensity: 0.8, sharpness: 1.0)   // shutter
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in self?.input.rumble(intensity: 0.8, sharpness: 1.0) }
+            print("[photo] shutter"); fflush(stdout)
+            return
+        }
+        let before = Int(photoLeft.rounded(.up))
+        photoLeft -= dt
+        let now = Int(photoLeft.rounded(.up))
+        if photoLeft <= 0 { photoStage = 2; noticeText = nil; return }
+        if now != before { noticeText = "\(now)"; noticeExpiry = 0; input.rumble(intensity: 0.3, sharpness: 0.8) }
+    }
+    /// Called by the renderer once Photos has the picture (or refused it).
+    func photoSaved(ok: Bool, denied: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.noticeText = ok ? "Photo saved" : (denied ? "Photos access denied" : "Couldn't save photo")
+            self.noticeExpiry = AppClock.seconds + 2.5
+        }
+    }
+
     private func activateKoganeOption() {
         // Switch on the option label so reordering the list can't misfire an
         // action. Audio toggles keep the menu open (adjust both, then Resume);
@@ -2988,6 +3037,9 @@ final class WorldSession {
             screenshotFlag.request()               // capture the bug as seen, before the keyboard covers it
             let ctx = bugNoteContext()               // pos/look/wield/shot, gathered now
             openKeyboard(prefill: "", saveOnDismiss: true, simple: true) { [weak self] t in self?.appendBugNote(t, context: ctx) }
+        case "Take photo":
+            koganeMenuOpen = false
+            startPhotoCountdown(3)
         case "Exit to menu":
             koganeMenuOpen = false
             DispatchQueue.main.async { [weak self] in self?.appModel?.requestExit(.toMenu) }
