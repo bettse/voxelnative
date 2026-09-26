@@ -600,6 +600,16 @@ final class WorldSession {
                 if let it = simStackDesc(inventoryStack(sl)) { d["item"] = it }
                 return d
             })
+        case "entities":
+            let me = player.physics().feet
+            let near = client.objects.objects.values.filter { !$0.isPlayer && simd_distance($0.pos, me) < 24 }
+            return simJSON(near.sorted { $0.id < $1.id }.map { e -> [String: Any] in
+                ["id": e.id, "name": e.name, "physical": e.physical,
+                 "pos": [r2(e.pos.x), r2(e.pos.y), r2(e.pos.z)],
+                 "target": [r2(e.target.x), r2(e.target.y), r2(e.target.z)],
+                 "vel": [r2(e.vel.x), r2(e.vel.y), r2(e.vel.z)],
+                 "acc": [r2(e.acc.x), r2(e.acc.y), r2(e.acc.z)]]
+            })
         case "widgets":
             var out: [[String: Any]] = []
             for w in invWidgets {
@@ -825,6 +835,7 @@ final class WorldSession {
             print("[chat] \(sender.isEmpty ? "" : sender + ": ")\(text)"); fflush(stdout)
             #endif
         }
+        client.objects.floorTop = { [weak self] lo, hi in self?.entityFloorTop(lo: lo, hi: hi) }
         client.onSky = { [weak self] s in
             #if targetEnvironment(simulator)
             // -vrdev.fakeSkybox: mcl_weather re-sends the overworld sky every
@@ -9225,6 +9236,27 @@ final class WorldSession {
             return
         }
         out.append(AABB(lo: base, hi: base + 1))
+    }
+
+    /// For ActiveObjects.floorTop: the highest walkable box top that a mob's
+    /// footprint (feet at lo.y) has sunk into, from the node its feet are in.
+    /// Same shapes the player collides with (chests, slabs, stairs, fences).
+    private var floorScratch: [AABB] = []
+    private func entityFloorTop(lo: SIMD3<Float>, hi: SIMD3<Float>) -> Float? {
+        // `phys` is refreshed at the top of each tick, and client.poll (which
+        // steps entities) runs right after it on this same queue.
+        floorScratch.removeAll(keepingCapacity: true)
+        let y = Int(floor(lo.y))
+        var cur = WorldMap.BlockCursor()
+        for x in Int(floor(lo.x))...Int(floor(hi.x)) { for z in Int(floor(lo.z))...Int(floor(hi.z)) {
+            appendNodeSolidBoxes(SIMD3(x, y, z), into: &floorScratch, cur: &cur)
+        } }
+        var top: Float? = nil
+        for b in floorScratch where b.lo.x < hi.x && b.hi.x > lo.x && b.lo.z < hi.z && b.hi.z > lo.z
+                                   && b.lo.y <= lo.y && b.hi.y > lo.y {
+            top = max(top ?? b.hi.y, b.hi.y)
+        }
+        return top
     }
 
     /// True if any node the box touches contributes a solid collision box.

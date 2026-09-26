@@ -88,7 +88,7 @@ final class SimControl: @unchecked Sendable {
         aim slot <n> | aim <list> <index> | aim widget <name> | aim uv <u> <v> | aim key <id> | aim off
         type <text> | chat <text>
         touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
-        state | slots | widgets  (JSON, answered on the next game tick)
+        state | slots | widgets | entities  (JSON, answered on the next game tick; entities = mobs within 24 nodes)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
                  rt lt rgrip lgrip square triangle circle options create l3 r3
         """
@@ -99,7 +99,7 @@ final class SimControl: @unchecked Sendable {
         let cmd = a.isEmpty ? "" : a.removeFirst()
         let rest = line.drop(while: { $0 == " " }).dropFirst(cmd.count).drop(while: { $0 == " " })
         switch cmd {
-        case "state", "slots", "widgets":
+        case "state", "slots", "widgets", "entities":
             return query(cmd)
         case "help":
             return Self.help.replacingOccurrences(of: "\n", with: " / ")

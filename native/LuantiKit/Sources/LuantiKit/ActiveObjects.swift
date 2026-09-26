@@ -195,6 +195,11 @@ public final class ActiveObjects {
     /// Is this node a full solid cube? Set by the client so step() can keep
     /// physical entities on the floor (see step). nil = no floor check.
     public var isSolidNode: ((SIMD3<Int>) -> Bool)?
+    /// Top of the walkable collision boxes the footprint box (lo...hi, feet
+    /// height in both .y) has sunk into, or nil. Set by the app from the same
+    /// node shapes the player collides with, so mobs rest on chests, slabs and
+    /// stairs too; isSolidNode (full cubes only) is the fallback.
+    public var floorTop: ((_ lo: SIMD3<Float>, _ hi: SIMD3<Float>) -> Float?)?
 
     private func v3f(_ r: PacketReader) -> SIMD3<Float> { SIMD3(r.f32(), r.f32(), r.f32()) }
 
@@ -504,7 +509,16 @@ public final class ActiveObjects {
                 o.vel += o.acc * dt
                 // Floor clamp: if the collisionbox bottom has entered a solid
                 // node while moving down, sit on that node's top and stop.
-                if o.physical, o.vel.y <= 0, let solid = isSolidNode {
+                if o.physical, o.vel.y <= 0, let floor = floorTop {
+                    let feet = o.target.y + o.cbMin.y
+                    let inset: Float = 0.02   // don't catch the neighbour a mob is only brushing
+                    let lo = SIMD3(o.target.x + o.cbMin.x + inset, feet, o.target.z + o.cbMin.z + inset)
+                    let hi = SIMD3(o.target.x + o.cbMax.x - inset, feet, o.target.z + o.cbMax.z - inset)
+                    if let top = floor(lo, hi), feet < top {
+                        o.target.y = top - o.cbMin.y
+                        o.vel.y = 0
+                    }
+                } else if o.physical, o.vel.y <= 0, let solid = isSolidNode {
                     let feetY = o.target.y + o.cbMin.y
                     let n = SIMD3(Int(o.target.x.rounded(.down)), Int(feetY.rounded(.down)), Int(o.target.z.rounded(.down)))
                     if solid(n) {
