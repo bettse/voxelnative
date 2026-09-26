@@ -91,6 +91,7 @@ final class GameInput {
     // exposes no haptics on visionOS -- rumble() then no-ops, so callers never
     // have to check.
     private var hapticEngines: [ObjectIdentifier: CHHapticEngine] = [:]
+    private var leftHapticKeys: Set<ObjectIdentifier> = []   // engines on the left Sense
 
     // Mouse movement is delivered ONLY through a callback (no pollable delta), so
     // accumulate deltas off whatever queue fires them and drain once per poll.
@@ -208,6 +209,8 @@ final class GameInput {
             print("[haptics] engine start failed: \(error)"); fflush(stdout); return
         }
         hapticEngines[key] = engine
+        let v = (c.vendorName ?? "").lowercased()
+        if v.contains("(l)") || v.contains("left") { leftHapticKeys.insert(key) }
         print("[haptics] engine ready for \(c.vendorName ?? "?") localities=\(localities)"); fflush(stdout)
     }
 
@@ -215,7 +218,9 @@ final class GameInput {
     /// game loop: it no-ops when no engine exists (unsupported Sense / sim).
     /// intensity/sharpness 0..1; a transient tap by default, a short continuous
     /// buzz when duration is given.
-    func rumble(intensity: Float = 0.7, sharpness: Float = 0.5, duration: TimeInterval = 0) {
+    /// leftOnly: just the left Sense (a detent under the left thumb), falling
+    /// back to every controller when the left one can't be told apart.
+    func rumble(intensity: Float = 0.7, sharpness: Float = 0.5, duration: TimeInterval = 0, leftOnly: Bool = false) {
         // Game events fire on the session queue; the engines are made/mutated on
         // main (connect/disconnect), so hop to main to touch them safely.
         DispatchQueue.main.async { [weak self] in
@@ -226,7 +231,10 @@ final class GameInput {
                 ? CHHapticEvent(eventType: .hapticContinuous, parameters: params, relativeTime: 0, duration: duration)
                 : CHHapticEvent(eventType: .hapticTransient, parameters: params, relativeTime: 0)
             guard let pattern = try? CHHapticPattern(events: [event], parameters: []) else { return }
-            for engine in self.hapticEngines.values {
+            let engines = leftOnly && !self.leftHapticKeys.isEmpty
+                ? self.hapticEngines.filter { self.leftHapticKeys.contains($0.key) }.map(\.value)
+                : Array(self.hapticEngines.values)
+            for engine in engines {
                 do {
                     let player = try engine.makePlayer(with: pattern)
                     try player.start(atTime: CHHapticTimeImmediate)

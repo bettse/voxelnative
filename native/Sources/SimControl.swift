@@ -32,11 +32,14 @@ final class SimControl: @unchecked Sendable {
     private var chats: [String] = []
     private var touches: [String: Bool] = [:]   // "l.trigger" -> finger on (sensors never set stay unknown)
     private var _pitchDeg: Float = 0
+    private var _leftRollDeg: Float = 0
     private var _aim: Aim? = nil
     private var queries: [(String, (String) -> Void)] = []
     private var listener: NWListener?
 
     var pitchDeg: Float { lock.lock(); defer { lock.unlock() }; return _pitchDeg }
+    /// Roll of the fake left hand about its forward axis (wrist twist).
+    var leftRollDeg: Float { lock.lock(); defer { lock.unlock() }; return _leftRollDeg }
     var aim: Aim? { lock.lock(); defer { lock.unlock() }; return _aim }
 
     func start() {
@@ -81,6 +84,7 @@ final class SimControl: @unchecked Sendable {
         down <btn> | up <btn> | tap <btn> [polls] | release
         stick l|r <x> <y>        (held until changed; stick l 0 0 to centre)
         turn <deg> | pitch <deg> (turn is relative body yaw; pitch is absolute head pitch)
+        roll l <deg>             (twist the fake left hand; + is clockwise looking down it)
         aim slot <n> | aim <list> <index> | aim widget <name> | aim uv <u> <v> | aim key <id> | aim off
         type <text> | chat <text>
         touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
@@ -111,6 +115,7 @@ final class SimControl: @unchecked Sendable {
             sticks[a[0]] = SIMD2(Float(a[1]) ?? 0, Float(a[2]) ?? 0)
         case "turn" where a.count == 1:  yawDelta += (Float(a[0]) ?? 0) * .pi / 180
         case "pitch" where a.count == 1: _pitchDeg = Float(a[0]) ?? 0
+        case "roll" where a.count == 2 && a[0] == "l": _leftRollDeg = Float(a[1]) ?? 0
         case "aim" where a.first == "off": _aim = nil
         case "aim" where a.count == 2 && a[0] == "slot": _aim = Int(a[1]).map { .slot($0) }
         case "aim" where a.count >= 2 && a[0] == "widget": _aim = .widget(a.dropFirst().joined(separator: " "))

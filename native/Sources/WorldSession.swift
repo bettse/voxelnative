@@ -2271,6 +2271,7 @@ final class WorldSession {
         if gi.hotbarNext && !prevHotbarNext { client.setWieldIndex((client.wieldIndex + 1) % hb); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout) }
         if gi.hotbarPrev && !prevHotbarPrev { client.setWieldIndex((client.wieldIndex + hb - 1) % hb); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout) }
         prevHotbarNext = gi.hotbarNext; prevHotbarPrev = gi.hotbarPrev
+        stepWristTwist(gi, dt: dt, hotbarSize: hb)
         // Keyboard 1-9 picks a hotbar slot directly, like desktop.
         if gi.hotbarSlot >= 0, gi.hotbarSlot != prevHotbarSlot, gi.hotbarSlot < hb {
             client.setWieldIndex(gi.hotbarSlot); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout)
@@ -3132,6 +3133,42 @@ final class WorldSession {
             print("[kogane] menu opened"); fflush(stdout)
         }
         return false
+    }
+
+    // Wrist-twist hotbar: rest the left thumb on Square or Triangle (touching,
+    // not pressing) and roll the left wrist; every twistStep of roll moves the
+    // selection one slot, with a tick on the left controller. Clockwise (as you
+    // look down the controller) is next. Lift the thumb to stop.
+    private static let twistStep: Float = 25 * .pi / 180
+    private static let twistArmDelay: Float = 0.2   // thumb must rest this long first, so passing over a button doesn't count
+    private var twistRest: Float = 0                 // seconds the thumb has rested
+    private var twistPrevUp: SIMD3<Float>? = nil
+    private var twistAccum: Float = 0
+    private func stepWristTwist(_ gi: GameInput.State, dt: Float, hotbarSize hb: Int) {
+        let t = gi.touchL
+        let resting = (t.a || t.b) && !t.stick && !gi.hotbarPrev && !gi.hotbarNext
+        guard resting, !inventoryOpen, !koganeMenuOpen, !keyboardOpen, !dead, let m = player.leftHand() else {
+            twistRest = 0; twistPrevUp = nil; twistAccum = 0; return
+        }
+        twistRest += dt
+        guard twistRest >= Self.twistArmDelay else { return }
+        let fwd = simd_normalize(-SIMD3<Float>(m.columns.2.x, m.columns.2.y, m.columns.2.z))
+        func flat(_ v: SIMD3<Float>) -> SIMD3<Float> { simd_normalize(v - fwd * simd_dot(v, fwd)) }
+        let up = flat(SIMD3<Float>(m.columns.1.x, m.columns.1.y, m.columns.1.z))
+        defer { twistPrevUp = up }
+        guard let prev = twistPrevUp else { return }
+        let p = flat(prev)
+        // Signed roll since last tick about the controller's forward axis:
+        // positive = clockwise as you look along it.
+        let roll = atan2(simd_dot(simd_cross(p, up), fwd), simd_dot(p, up))
+        twistAccum += roll
+        while abs(twistAccum) >= Self.twistStep {
+            let dir = twistAccum > 0 ? 1 : -1
+            twistAccum -= Float(dir) * Self.twistStep
+            client.setWieldIndex((client.wieldIndex + dir + hb) % hb)
+            input.rumble(intensity: 0.45, sharpness: 0.9, leftOnly: true)
+            print("[hotbar] twist wield=\(client.wieldIndex)"); fflush(stdout)
+        }
     }
 
     // Photo mode countdown: 0 idle, 1 counting down, 2 notice cleared (capture

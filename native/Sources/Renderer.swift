@@ -564,7 +564,9 @@ actor Renderer {
             return head * local
         }
         accessoryLock.lock()
-        accessoryXforms["simLeft"]  = hand(-0.16)
+        // vrctl "roll l <deg>": twist the left wrist. Positive is clockwise
+        // looking down the hand's -Z forward, which is a negative turn about +Z.
+        accessoryXforms["simLeft"]  = hand(-0.16) * matrix4x4_rotation(radians: -SimControl.shared.leftRollDeg * .pi / 180, axis: SIMD3(0, 0, 1))
         accessoryXforms["simRight"] = hand(0.16)
         accessoryLock.unlock()
     }
@@ -2513,6 +2515,7 @@ actor Renderer {
         appModel.player.setHeadXform(head)   // for head-locked overlays (Kogane menu, death text)
         pointerPose = smoothedPointerPose(handPose(left: false), at: time)
         appModel.player.setRightHand(pointerPose)   // inventory pointer ray
+        appModel.player.setLeftHand(handPose(left: true))   // wrist-twist hotbar
         buildPanelPointer()                  // panel dot from this frame's controller pose
         // Photo frame: the HUD is built against the level camera so it sits level
         // in the picture (the eyes see it level for that one frame too).

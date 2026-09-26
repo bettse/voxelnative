@@ -257,6 +257,9 @@ final class PlayerState {
     private var _rightHand: simd_float4x4? = nil
     func setRightHand(_ m: simd_float4x4?) { lock.lock(); _rightHand = m; lock.unlock() }
     func rightHand() -> simd_float4x4? { lock.lock(); defer { lock.unlock() }; return _rightHand }
+    private var _leftHand: simd_float4x4? = nil      // raw left controller pose (wrist-twist hotbar)
+    func setLeftHand(_ m: simd_float4x4?) { lock.lock(); _leftHand = m; lock.unlock() }
+    func leftHand() -> simd_float4x4? { lock.lock(); defer { lock.unlock() }; return _leftHand }
 
     /// The open inventory/formspec panel's plane in origin space, so the
     /// renderer can draw the pointer dot from each frame's controller pose
