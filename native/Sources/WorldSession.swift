@@ -3571,7 +3571,7 @@ final class WorldSession {
             placeRepeatArmed = false
         }
         prevPlace = gi.place
-        updateEat(dt: dt, gripHeld: simGripOverride ?? gi.place)   // hold grip on food to eat; also mirrors RMB bit
+        updateEat(dt: dt, gripHeld: simGripOverride ?? (gi.place || foodAtMouth(gi)))   // hold grip, or food to the mouth, to eat; also mirrors RMB bit
         client.digHeld = gi.dig                  // LMB control bit: mcl_playerplus reads control.LMB
         client.jumpHeld = gi.jump                // jump bit: horse jump, boat dismount
         // Sim aid: periodically dig straight down on the local dev world to
@@ -3729,6 +3729,27 @@ final class WorldSession {
         print("[fall] impact \(impactSpeed) node/s on \(client.nodes.name(client.world.nodeId(below))) (\(addPercent)%) -> \(damage) hp"); fflush(stdout)
         recentFallDamage = 1.0
         client.sendDamage(damage)
+    }
+
+    /// Raise-to-mouth eating: the right hand holding food, brought up to the
+    /// mouth, counts as holding the grip (VoxeLibre's eat is a hold). Needs the
+    /// middle finger on the grip when touch reports it, so a hand passing the
+    /// face to scratch your nose or lift the headset doesn't eat. Enters at
+    /// 13 cm from the mouth, leaves at 18 cm, so it doesn't flicker at the edge.
+    private var atMouth = false
+    private func foodAtMouth(_ gi: GameInput.State) -> Bool {
+        let wi = client.wieldIndex
+        guard !inventoryOpen, !koganeMenuOpen, !keyboardOpen, !dead,
+              wi >= 0, wi < hotbar.count, let name = hotbar[wi], client.items.isEatable(name),
+              let hand = player.rightHand(), !gi.touchR.gripKnown || gi.touchR.grip else {
+            atMouth = false; return false
+        }
+        let mouth = player.headXform() * SIMD4<Float>(0, -0.09, -0.06, 1)   // below and in front of the eyes
+        let d = simd_distance(SIMD3(hand.columns.3.x, hand.columns.3.y, hand.columns.3.z), SIMD3(mouth.x, mouth.y, mouth.z))
+        let was = atMouth
+        atMouth = d < (was ? 0.18 : 0.13)
+        if atMouth && !was { input.rumble(intensity: 0.3, sharpness: 0.3); print("[eat] food at mouth (\(name))"); fflush(stdout) }
+        return atMouth
     }
 
     private func updateEat(dt: Float, gripHeld: Bool) {

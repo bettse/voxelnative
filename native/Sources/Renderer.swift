@@ -567,7 +567,13 @@ actor Renderer {
         // vrctl "roll l <deg>": twist the left wrist. Positive is clockwise
         // looking down the hand's -Z forward, which is a negative turn about +Z.
         accessoryXforms["simLeft"]  = hand(-0.16) * matrix4x4_rotation(radians: -SimControl.shared.leftRollDeg * .pi / 180, axis: SIMD3(0, 0, 1))
-        accessoryXforms["simRight"] = hand(0.16)
+        if SimControl.shared.handAtMouth {
+            var m = matrix_identity_float4x4
+            m.columns.3 = SIMD4<Float>(0.02, -0.09, -0.08, 1)   // just in front of the mouth
+            accessoryXforms["simRight"] = head * m
+        } else {
+            accessoryXforms["simRight"] = hand(0.16)
+        }
         accessoryLock.unlock()
     }
     #endif

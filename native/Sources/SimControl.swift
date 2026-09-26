@@ -33,6 +33,7 @@ final class SimControl: @unchecked Sendable {
     private var touches: [String: Bool] = [:]   // "l.trigger" -> finger on (sensors never set stay unknown)
     private var _pitchDeg: Float = 0
     private var _leftRollDeg: Float = 0
+    private var _handAtMouth = false
     private var _aim: Aim? = nil
     private var queries: [(String, (String) -> Void)] = []
     private var listener: NWListener?
@@ -40,6 +41,8 @@ final class SimControl: @unchecked Sendable {
     var pitchDeg: Float { lock.lock(); defer { lock.unlock() }; return _pitchDeg }
     /// Roll of the fake left hand about its forward axis (wrist twist).
     var leftRollDeg: Float { lock.lock(); defer { lock.unlock() }; return _leftRollDeg }
+    /// Fake right hand raised to the mouth (raise-to-mouth eating).
+    var handAtMouth: Bool { lock.lock(); defer { lock.unlock() }; return _handAtMouth }
     var aim: Aim? { lock.lock(); defer { lock.unlock() }; return _aim }
 
     func start() {
@@ -85,6 +88,7 @@ final class SimControl: @unchecked Sendable {
         stick l|r <x> <y>        (held until changed; stick l 0 0 to centre)
         turn <deg> | pitch <deg> (turn is relative body yaw; pitch is absolute head pitch)
         roll l <deg>             (twist the fake left hand; + is clockwise looking down it)
+        hand r mouth | hand r rest  (raise the fake right hand to the mouth, or put it back)
         aim slot <n> | aim <list> <index> | aim widget <name> | aim uv <u> <v> | aim key <id> | aim off
         type <text> | chat <text>
         touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
@@ -116,6 +120,7 @@ final class SimControl: @unchecked Sendable {
         case "turn" where a.count == 1:  yawDelta += (Float(a[0]) ?? 0) * .pi / 180
         case "pitch" where a.count == 1: _pitchDeg = Float(a[0]) ?? 0
         case "roll" where a.count == 2 && a[0] == "l": _leftRollDeg = Float(a[1]) ?? 0
+        case "hand" where a.count == 2 && a[0] == "r": _handAtMouth = a[1] == "mouth"
         case "aim" where a.first == "off": _aim = nil
         case "aim" where a.count == 2 && a[0] == "slot": _aim = Int(a[1]).map { .slot($0) }
         case "aim" where a.count >= 2 && a[0] == "widget": _aim = .widget(a.dropFirst().joined(separator: " "))
