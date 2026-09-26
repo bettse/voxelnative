@@ -264,6 +264,14 @@ final class GameInput {
 
     /// Deadzoned, combined state across all connected controllers.
     func poll() -> State {
+        var s = pollDevices()
+        #if targetEnvironment(simulator)
+        SimControl.shared.apply(&s, textEntry: textEntry)
+        #endif
+        return s
+    }
+
+    private func pollDevices() -> State {
         var s = State()
         func dz(_ v: Float) -> Float { abs(v) < 0.15 ? 0 : v }
         let cs = GCController.controllers()

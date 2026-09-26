@@ -42,5 +42,6 @@ sleep 14   # long enough for the world to stream in; 8 s often caught the buried
 xcrun simctl io "$SIM" screenshot "$SHOT" && echo "screenshot: $SHOT"
 # Terminate the app so it stops playing game audio through the Mac speakers once
 # we have the shot (Eric: the sim was making noise on the desktop). Leaving
-# SIM_KEEP=1 in the env keeps it running for interactive poking.
+# SIM_KEEP=1 in the env keeps it running for interactive poking, e.g. with
+# ./vrctl (buttons, sticks, aiming at panel slots, JSON state).
 [[ -n "${SIM_KEEP:-}" ]] || xcrun simctl terminate "$SIM" "$BUNDLE" >/dev/null 2>&1 || true

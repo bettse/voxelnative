@@ -525,6 +525,118 @@ final class WorldSession {
     private func simTeleportToPad() {
         client.sendChat("/teleport 0 140 0"); client.sendChat("/teleport 0 121 0")
     }
+
+    /// SimControl's aim as a point on the open panel (or spatial keyboard), in
+    /// node space, so inventoryRay can point the real ray at it.
+    private func simAimPoint() -> SIMD3<Float>? {
+        guard let aim = SimControl.shared.aim else { return nil }
+        func onFrame(_ fr: InvFrame?, _ u: Float, _ v: Float) -> SIMD3<Float>? {
+            fr.map { $0.center + $0.right * u + $0.up * v }
+        }
+        if keyboardOpen {
+            switch aim {
+            case .key(let id):
+                guard let k = keyboardKeys.first(where: { $0.id.lowercased() == id.lowercased() }) else { return nil }
+                return onFrame(keyboardFrame, k.u, k.v)
+            case .uv(let u, let v): return onFrame(keyboardFrame, u, v)
+            default: return nil
+            }
+        }
+        switch aim {
+        case .slot(let n):
+            guard n >= 0 && n < invSlots.count else { return nil }
+            return onFrame(invFrame, invSlots[n].u, invSlots[n].v)
+        case .listSlot(let list, let i):
+            guard let sl = invSlots.first(where: { $0.list == list && $0.index == i }) else { return nil }
+            return onFrame(invFrame, sl.u, sl.v)
+        case .uv(let u, let v):
+            return onFrame(invFrame, u, v)
+        case .widget(let name):
+            guard let (u, v) = simWidgetUV(name) else { return nil }
+            return onFrame(invFrame, u, v)
+        case .key:
+            return nil
+        }
+    }
+
+    /// A tappable thing on the open form by name or caption: exact match first,
+    /// then a case-insensitive substring.
+    private func simWidgetUV(_ name: String) -> (Float, Float)? {
+        var cands: [(names: [String], u: Float, v: Float)] = []
+        for w in invWidgets {
+            if let b = w.button { cands.append(([b.name, b.label], w.u, w.v)) }
+            if let f = w.field { cands.append(([f.name], w.u, w.v)) }
+        }
+        for c in invCheckboxes { cands.append(([c.name, c.label], c.u, c.v)) }
+        for sl in invSliders { cands.append(([sl.name], sl.u, sl.v)) }
+        for t in infoTargets { cands.append(([t.value, t.field], t.u, t.v)) }
+        let n = name.lowercased()
+        if let c = cands.first(where: { $0.names.contains { $0.lowercased() == n } }) { return (c.u, c.v) }
+        if let c = cands.first(where: { $0.names.contains { $0.lowercased().contains(n) } }) { return (c.u, c.v) }
+        return nil
+    }
+
+    private func simJSON(_ o: Any) -> String {
+        guard let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) else { return "{}" }
+        return String(decoding: d, as: UTF8.self)
+    }
+
+    private func simStackDesc(_ st: Client.ItemStack?) -> String? {
+        guard let st, !st.name.isEmpty, st.count > 0 else { return nil }
+        return st.count > 1 ? "\(st.name) \(st.count)" : st.name
+    }
+
+    /// Answers SimControl's state / slots / widgets queries from the game tick.
+    private func simAnswer(_ what: String) -> String {
+        // Decimal so the JSON says 0.08, not 0.080000000000000002.
+        func r2(_ f: Float) -> NSDecimalNumber { NSDecimalNumber(string: String(format: "%.2f", f)) }
+        switch what {
+        case "slots":
+            return simJSON(invSlots.enumerated().map { i, sl -> [String: Any] in
+                var d: [String: Any] = ["i": i, "list": sl.list, "index": sl.index, "u": r2(sl.u), "v": r2(sl.v)]
+                if sl.loc != "current_player" { d["loc"] = sl.loc }
+                if let it = simStackDesc(inventoryStack(sl)) { d["item"] = it }
+                return d
+            })
+        case "widgets":
+            var out: [[String: Any]] = []
+            for w in invWidgets {
+                if let b = w.button { out.append(["kind": "button", "name": b.name, "label": b.label, "u": r2(w.u), "v": r2(w.v)]) }
+                if let f = w.field { out.append(["kind": "field", "name": f.name, "value": f.value, "u": r2(w.u), "v": r2(w.v)]) }
+            }
+            for c in invCheckboxes { out.append(["kind": "checkbox", "name": c.name, "label": c.label, "checked": checkboxState[c.name] ?? false, "u": r2(c.u), "v": r2(c.v)]) }
+            for sl in invSliders { out.append(["kind": "slider", "name": sl.name, "value": sliderValue[sl.name] ?? 0, "u": r2(sl.u), "v": r2(sl.v)]) }
+            for t in infoTargets { out.append(["kind": "target", "field": t.field, "value": t.value, "u": r2(t.u), "v": r2(t.v)]) }
+            if keyboardOpen { for k in keyboardKeys { out.append(["kind": "key", "id": k.id, "u": r2(k.u), "v": r2(k.v)]) } }
+            return simJSON(out)
+        default:
+            let f = player.physics().feet
+            let wi = client.wieldIndex
+            var d: [String: Any] = [
+                "pos": [r2(f.x), r2(f.y), r2(f.z)],
+                "yaw": r2(player.snapshot().yaw * 180 / .pi),
+                "pitch": r2(SimControl.shared.pitchDeg),
+                "hp": hp, "dead": dead, "flying": flying,
+                "grounded": player.physics().grounded,
+                "wield": wi,
+                "inventoryOpen": inventoryOpen, "formspecOpen": formspecOpen,
+                "formspecName": formspecName,
+                "menuOpen": koganeMenuOpen, "menuSel": koganeMenuOpen ? koganeOptions[koganeSel] : "",
+                "keyboardOpen": keyboardOpen,
+            ]
+            if let it = simStackDesc(inventoryStack(InvSlot(loc: "current_player", list: "main", index: wi, u: 0, v: 0))) { d["wieldItem"] = it }
+            if keyboardOpen { d["keyboardText"] = keyboardBuffer; d["keyHover"] = kbHover.map { keyboardKeys[$0].id } ?? "" }
+            if let h = invHover { d["hover"] = ["i": h, "list": invSlots[h].list, "index": invSlots[h].index, "item": simStackDesc(inventoryStack(invSlots[h])) ?? ""] as [String: Any] }
+            if let h = invHeld { d["held"] = ["list": h.list, "index": h.index, "count": h.count] as [String: Any] }
+            if let fr = invFrame, let c = invCursor {
+                let rel = c - fr.center
+                d["cursor"] = [r2(simd_dot(rel, fr.right)), r2(simd_dot(rel, fr.up))]
+            }
+            if let n = noticeText { d["notice"] = n }
+            if let pf = pendingButtonForm { d["buttonForm"] = pf.formname }
+            return simJSON(d)
+        }
+    }
     #endif
 
     init(handoff: MeshHandoff, entityHandoff: EntityHandoff,
@@ -540,6 +652,9 @@ final class WorldSession {
         self.screenshotFlag = screenshotFlag
         self.player = player
         client.wantedRange = ViewSettings.shared.blocks   // view-distance slider
+        #if targetEnvironment(simulator)
+        SimControl.shared.start()
+        #endif
         mobRenderDist = min(96, Float(ViewSettings.shared.blocks * 16))
         client.onAuthenticated = { [weak self] seed in
             print("[session] AUTHENTICATED map_seed=\(seed) \(PerfStats.uptime())"); fflush(stdout)
@@ -2055,6 +2170,7 @@ final class WorldSession {
         input.textEntry = keyboardOpen
         var gi = input.poll()
         #if targetEnvironment(simulator)
+        SimControl.shared.drain(answer: { simAnswer($0) }, sendChat: { client.sendChat($0) })
         // -vrdev.flyTest 1: free_move parity. Grant fly, double-tap
         // jump, hold jump 2 s (should rise ~8 nodes at walk speed), release
         // (should HOVER, not fall), then double-tap again to land.
@@ -2949,9 +3065,11 @@ final class WorldSession {
 
         #if targetEnvironment(simulator)
         // No headset input in the sim: force focus so the companion is always
-        // visible. The menu auto-opens (for a screenshot) only when the demo
-        // default is set, so normal sim runs aren't blocked by the panel.
-        koganeFocused = true
+        // visible (only while it's shown at all: with the sprite hidden, forced
+        // focus made every trigger press open the menu). The menu auto-opens
+        // (for a screenshot) only when the demo default is set, so normal sim
+        // runs aren't blocked by the panel.
+        koganeFocused = koganeSpriteVisible
         if UserDefaults.standard.bool(forKey: "vrdev.koganeDemo") {
             koganeSimClock += dt
             // (skipped when the sim run is screenshotting the inventory panel instead)
@@ -4290,6 +4408,14 @@ final class WorldSession {
     /// Pointer ray in node space: the right controller (its -Z), else the gaze.
     /// Origin space -> node space undoes the renderer's Z mirror and yaw.
     private func inventoryRay() -> (origin: SIMD3<Float>, dir: SIMD3<Float>) {
+        #if targetEnvironment(simulator)
+        // vrctl "aim ...": point the real ray at a slot / widget / key so the
+        // normal hit-test (hover, cursor dot, clicks) runs on it.
+        if let pt = simAimPoint() {
+            let o = player.rayOrigin()
+            return (o, simd_normalize(pt - o))
+        }
+        #endif
         guard let m = player.rightHand() else { return (player.rayOrigin(), player.aim()) }
         let s = player.snapshot()
         let eyeN = player.origin()
