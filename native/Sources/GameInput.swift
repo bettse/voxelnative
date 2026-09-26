@@ -350,11 +350,13 @@ final class GameInput {
             let touch = readTouch(c, left: isLeft)
             if isLeft { s.touchL = touch } else { s.touchR = touch }
             let stick = p.dpads["Thumbstick"]
-            // Thumb off the stick: no movement at all, so a drifting stick can't
-            // slide or turn you. Thumb on: a smaller dead zone for fine moves.
-            // Only once this stick has reported touch; otherwise the old 0.15.
+            // Right stick (turning): thumb off means no turn at all, so a
+            // drifting stick can't spin you; thumb on gets a smaller dead zone.
+            // Only once the stick has reported touch; otherwise the old 0.15.
+            // Not the left (movement) stick: its touch dropped out mid-push on
+            // the headset and moves didn't register, so it keeps the plain 0.15.
             func dzs(_ v: Float) -> Float {
-                guard touch.stickKnown else { return dz(v) }
+                guard !isLeft, touch.stickKnown else { return dz(v) }
                 return touch.stick ? (abs(v) < 0.08 ? 0 : v) : 0
             }
             let sx = dzs(stick?.xAxis.value ?? 0), sy = dzs(stick?.yAxis.value ?? 0)

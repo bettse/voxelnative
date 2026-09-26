@@ -3195,7 +3195,7 @@ final class WorldSession {
 
     // Create button: press time decides photo (tap) vs video (hold).
     private static let videoHold: Float = 0.5
-    private static let videoMax: Float = 30          // a clip stops itself after this
+    private static let videoMax: Float = 5           // a clip stops itself after this (Eric: short clips)
     private static let videoLead: Float = 1          // "Recording" shows this long, then clears before frames are kept
     private var photoBtnHeld: Float = 0, photoBtnUsed = false
     private var videoStage = 0                        // 0 off, 1 lead-in (notice up), 2 recording
