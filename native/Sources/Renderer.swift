@@ -1761,9 +1761,20 @@ actor Renderer {
     // its own 16:9 target from a virtual camera at the head, looking where the
     // head looks but with the roll removed, so every shot is level.
     static let photoW = 3840, photoH = 2160
-    private var photoColor: MTLTexture?, photoDepth: MTLTexture?
-    private var photoMSAAColor: MTLTexture?, photoMSAADepth: MTLTexture?
-    private var photoVP: MTLBuffer?
+
+    /// One offscreen camera: the resolved colour (layer format, 1-slice array
+    /// so the pipelines' render_target_array_index works) plus depth, MSAA
+    /// when the eye pass uses it (the pipelines are built for that sample
+    /// count), and its own view-projection buffer.
+    private struct CameraTargets {
+        let w: Int, h: Int
+        let color: MTLTexture, depth: MTLTexture?
+        let msaaColor: MTLTexture?, msaaDepth: MTLTexture?
+        let vp: MTLBuffer
+        var allocations: [any MTLAllocation] { [color, depth, msaaColor, msaaDepth, vp].compactMap { $0 } }
+    }
+    private var photoTargets: CameraTargets?
+    private var videoTargets: CameraTargets?
 
     /// The head pose with its roll taken out: same position and look direction,
     /// right vector kept horizontal.
@@ -1776,59 +1787,59 @@ actor Renderer {
         return float4x4(SIMD4(right, 0), SIMD4(up, 0), SIMD4(-fwd, 0), head.columns.3)
     }
 
-    private func ensurePhotoTargets() {
-        guard photoColor == nil else { return }
-        let w = Self.photoW, h = Self.photoH
+    /// shared: the CPU reads the colour back (photos); otherwise private (video,
+    /// which the GPU converts straight into the encoder's pixel buffer).
+    private func makeCameraTargets(w: Int, h: Int, shared: Bool) -> CameraTargets? {
         let colorFmt = layerRenderer.configuration.colorFormat, depthFmt = layerRenderer.configuration.depthFormat
-        // Array textures of length 1: the pipelines write render_target_array_index.
         let c = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: colorFmt, width: w, height: h, mipmapped: false)
         c.textureType = .type2DArray; c.arrayLength = 1
-        c.usage = [.renderTarget, .shaderRead]; c.storageMode = .shared   // read back on the CPU
-        photoColor = device.makeTexture(descriptor: c)
+        c.usage = [.renderTarget, .shaderRead]; c.storageMode = shared ? .shared : .private
+        guard let color = device.makeTexture(descriptor: c),
+              let vp = device.makeBuffer(length: alignedViewProjectionArraySize, options: [.storageModeShared]) else { return nil }
         if device.supportsMSAA {
             // Memoryless: the multisampled targets live in tile memory only, so a
             // 4K MSAA pass costs no RAM; only the resolved image is stored.
             let mc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: colorFmt, width: w, height: h, mipmapped: false)
             mc.textureType = .type2DMultisampleArray; mc.arrayLength = 1; mc.sampleCount = device.rasterSampleCount
             mc.usage = .renderTarget; mc.storageMode = .memoryless
-            photoMSAAColor = device.makeTexture(descriptor: mc)
             let md = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthFmt, width: w, height: h, mipmapped: false)
             md.textureType = .type2DMultisampleArray; md.arrayLength = 1; md.sampleCount = device.rasterSampleCount
             md.usage = .renderTarget; md.storageMode = .memoryless
-            photoMSAADepth = device.makeTexture(descriptor: md)
-        } else {
-            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthFmt, width: w, height: h, mipmapped: false)
-            d.textureType = .type2DArray; d.arrayLength = 1
-            d.usage = .renderTarget; d.storageMode = .private
-            photoDepth = device.makeTexture(descriptor: d)
+            return CameraTargets(w: w, h: h, color: color, depth: nil,
+                                 msaaColor: device.makeTexture(descriptor: mc), msaaDepth: device.makeTexture(descriptor: md), vp: vp)
         }
-        photoVP = device.makeBuffer(length: alignedViewProjectionArraySize, options: [.storageModeShared])
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: depthFmt, width: w, height: h, mipmapped: false)
+        d.textureType = .type2DArray; d.arrayLength = 1
+        d.usage = .renderTarget; d.storageMode = .private
+        return CameraTargets(w: w, h: h, color: color, depth: device.makeTexture(descriptor: d), msaaColor: nil, msaaDepth: nil, vp: vp)
     }
 
-    private func encodePhoto(_ commandBuffer: MTLCommandBuffer, head: float4x4) {
-        ensurePhotoTargets()
-        guard let color = photoColor, let vpBuf = photoVP else { return }
-        let w = Self.photoW, h = Self.photoH
-        // Reverse-Z infinite projection (Metal clip z 0..1, near -> 1), matching
-        // the eye pass's depth compare and clear. 60 degree vertical FOV.
+    private func ensurePhotoTargets() {
+        if photoTargets == nil { photoTargets = makeCameraTargets(w: Self.photoW, h: Self.photoH, shared: true) }
+    }
+
+    /// Render the scene from the level camera into `t`. Reverse-Z infinite
+    /// projection (Metal clip z 0..1, near -> 1), matching the eye pass's
+    /// depth compare and clear. 60 degree vertical FOV.
+    private func encodeCamera(_ commandBuffer: MTLCommandBuffer, head: float4x4, into t: CameraTargets, label: String) -> Bool {
         let fovY: Float = 60 * .pi / 180, near: Float = 0.05
-        let f = 1 / tanf(fovY / 2), aspect = Float(w) / Float(h)
+        let f = 1 / tanf(fovY / 2), aspect = Float(t.w) / Float(t.h)
         let proj = float4x4(SIMD4(f / aspect, 0, 0, 0), SIMD4(0, f, 0, 0), SIMD4(0, 0, 0, -1), SIMD4(0, 0, near, 0))
         let vp = proj * Self.levelCamera(head).inverse
-        let arr = vpBuf.contents().bindMemory(to: ViewProjectionArray.self, capacity: 1)
+        let arr = t.vp.contents().bindMemory(to: ViewProjectionArray.self, capacity: 1)
         arr[0].viewProjectionMatrix.0 = vp; arr[0].inverseViewProjectionMatrix.0 = vp.inverse
         arr[0].viewProjectionMatrix.1 = vp; arr[0].inverseViewProjectionMatrix.1 = vp.inverse
         let pass = MTLRenderPassDescriptor()
-        if let mc = photoMSAAColor, let md = photoMSAADepth {
+        if let mc = t.msaaColor, let md = t.msaaDepth {
             pass.colorAttachments[0].texture = mc
-            pass.colorAttachments[0].resolveTexture = color
+            pass.colorAttachments[0].resolveTexture = t.color
             pass.colorAttachments[0].storeAction = .multisampleResolve
             pass.depthAttachment.texture = md
             pass.depthAttachment.storeAction = .dontCare
         } else {
-            pass.colorAttachments[0].texture = color
+            pass.colorAttachments[0].texture = t.color
             pass.colorAttachments[0].storeAction = .store
-            pass.depthAttachment.texture = photoDepth
+            pass.depthAttachment.texture = t.depth
             pass.depthAttachment.storeAction = .dontCare
         }
         pass.colorAttachments[0].loadAction = .clear
@@ -1836,12 +1847,73 @@ actor Renderer {
         pass.depthAttachment.loadAction = .clear
         pass.depthAttachment.clearDepth = 1e-5
         pass.renderTargetArrayLength = 1
-        guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return }
-        enc.label = "Photo Encoder"
-        let viewport = MTLViewport(originX: 0, originY: 0, width: Double(w), height: Double(h), znear: 0, zfar: 1)
-        encodeScene(enc, viewportsIn: [viewport], vpBuffer: vpBuf, vpOffset: 0, cullVP: vp, cullAll: true)
+        guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return false }
+        enc.label = label
+        let viewport = MTLViewport(originX: 0, originY: 0, width: Double(t.w), height: Double(t.h), znear: 0, zfar: 1)
+        encodeScene(enc, viewportsIn: [viewport], vpBuffer: t.vp, vpOffset: 0, cullVP: vp, cullAll: true)
         enc.endEncoding()
+        return true
+    }
+
+    private func encodePhoto(_ commandBuffer: MTLCommandBuffer, head: float4x4) {
+        ensurePhotoTargets()
+        guard let t = photoTargets, encodeCamera(commandBuffer, head: head, into: t, label: "Photo Encoder") else { return }
+        let color = t.color, w = t.w, h = t.h
         commandBuffer.addCompletedHandler { [weak self] _ in self?.savePhoto(color, w, h) }
+    }
+
+    // MARK: Photo mode video
+    private var recorder: VideoRecorder?
+    private lazy var videoConvertPipeline: MTLComputePipelineState? = {
+        guard let fn = device.makeDefaultLibrary()?.makeFunction(name: "videoConvert") else { return nil }
+        return try? device.makeComputePipelineState(function: fn)
+    }()
+    /// Every Nth eye frame goes into the clip (90 Hz / 3 = 30 fps).
+    private static let videoEvery = 3
+
+    /// Start or finish the clip to match the session's recording flag.
+    /// Returns true when this frame should be captured.
+    private func stepVideo(frameIndex: UInt64) -> Bool {
+        let want = appModel.screenshotFlag.recording
+        if want, recorder == nil {
+            if videoTargets == nil {
+                videoTargets = makeCameraTargets(w: VideoRecorder.width, h: VideoRecorder.height, shared: false)
+            }
+            recorder = VideoRecorder(device: device)
+            if recorder == nil { appModel.screenshotFlag.recording = false; videoDone(ok: false, denied: false) }
+        } else if !want, let r = recorder {
+            recorder = nil
+            r.finish { [weak self] ok, denied in self?.videoDone(ok: ok, denied: denied) }
+        }
+        return recorder != nil && frameIndex % UInt64(Self.videoEvery) == 0
+    }
+
+    nonisolated private func videoDone(ok: Bool, denied: Bool) {
+        Task { @MainActor in self.appModel.session.videoSaved(ok: ok, denied: denied) }
+    }
+
+    private func encodeVideoFrame(_ commandBuffer: MTLCommandBuffer, head: float4x4) {
+        guard let r = recorder, let t = videoTargets, let pipe = videoConvertPipeline,
+              let target = r.nextTarget() else { return }
+        guard encodeCamera(commandBuffer, head: head, into: t, label: "Video Encoder"),
+              let ce = commandBuffer.makeComputeCommandEncoder() else { return }
+        ce.label = "Video Convert"
+        ce.setComputePipelineState(pipe)
+        ce.setTexture(t.color, index: 0)
+        ce.setTexture(target.texture, index: 1)
+        // A plain unorm layer already holds sRGB-encoded values; float and
+        // _srgb formats read back linear and need encoding.
+        let fmt = t.color.pixelFormat
+        var encode: UInt32 = (fmt == .bgra8Unorm || fmt == .rgba8Unorm) ? 0 : 1
+        ce.setBytes(&encode, length: 4, index: 0)
+        let tg = MTLSize(width: 16, height: 16, depth: 1)
+        ce.dispatchThreadgroups(MTLSize(width: (t.w + 15) / 16, height: (t.h + 15) / 16, depth: 1), threadsPerThreadgroup: tg)
+        ce.endEncoding()
+        let now = CACurrentMediaTime(), buffer = target.buffer, ref = target.ref
+        commandBuffer.addCompletedHandler { _ in
+            _ = ref   // keeps the CVMetalTexture (and its IOSurface) alive until the GPU is done
+            r.append(buffer, at: now)
+        }
     }
 
     /// Read the photo back, convert to 8-bit sRGB PNG and add it to Photos
@@ -2151,10 +2223,11 @@ actor Renderer {
         frame.startSubmission()
 
         let wantShot = appModel.screenshotFlag.take()
+        let wantVideo = stepVideo(frameIndex: UInt64(frame.frameIndex))
         let pe0 = perf.now()
         for (i, drawable) in drawables.enumerated() {
             render(drawable: drawable, commandBuffer: commandBuffer, frameIndex: frame.frameIndex,
-                   capture: wantShot && i == 0)
+                   capture: wantShot && i == 0, video: wantVideo && i == 0)
         }
         perf.add("encode", pe0, perf.now())
         perf.endIteration(note: "blocks=\(worldBlocks.count) visible=\(visibleBlocks.count) tris=\(idxSolid / 3)/\(idxCutout / 3)/\(idxLiquid / 3) billboards=\(entityIndexCount / 6)")
@@ -2494,7 +2567,7 @@ actor Renderer {
     }
 
     func render(drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer, frameIndex: UInt64,
-                capture: Bool = false) {
+                capture: Bool = false, video: Bool = false) {
         let time = drawable.frameTiming.presentationTime.timeInterval
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
 
@@ -2519,7 +2592,10 @@ actor Renderer {
         buildPanelPointer()                  // panel dot from this frame's controller pose
         // Photo frame: the HUD is built against the level camera so it sits level
         // in the picture (the eyes see it level for that one frame too).
-        buildHudBillboards(head: capture ? Self.levelCamera(head) : head)   // place the HUD against this frame's head (no lag/ghost)
+        // Level for the whole recording, not just the captured frames, so the
+        // HUD doesn't flick between tilted and level at 30 Hz.
+        let levelHud = capture || recorder != nil
+        buildHudBillboards(head: levelHud ? Self.levelCamera(head) : head)   // place the HUD against this frame's head (no lag/ghost)
         // View frame -> node frame: undo the Z mirror, then the yaw (see modelMatrix).
         let fwdOrigin = simd_normalize(SIMD3<Float>(-head.columns.2.x, -head.columns.2.y, head.columns.2.z))
         let yaw = appModel.player.snapshot().yaw
@@ -2605,9 +2681,9 @@ actor Renderer {
         if let mtex = modelTextureArray { perFrame.append(mtex) }
         if capture {
             ensurePhotoTargets()
-            let res: [(any MTLAllocation)?] = [photoColor, photoDepth, photoMSAAColor, photoMSAADepth, photoVP]
-            perFrame.append(contentsOf: res.compactMap { $0 })
+            perFrame.append(contentsOf: photoTargets?.allocations ?? [])
         }
+        if video { perFrame.append(contentsOf: videoTargets?.allocations ?? []) }
         residencySet.removeAllAllocations()   // clear the prior frame's set (slot's GPU work is done)
         residencySet.addAllocations(perFrame)
         residencySet.commit()                 // one commit per frame, not two
@@ -2648,6 +2724,7 @@ actor Renderer {
         // Photo mode: render the same scene again into a 3840x2160 target from a
         // level camera at the head, then save it to Photos.
         if capture { encodePhoto(commandBuffer, head: head) }
+        if video { encodeVideoFrame(commandBuffer, head: head) }
 
         encodeTrackingArea(drawable, commandBuffer: commandBuffer)
         drawable.encodePresent(commandBuffer: commandBuffer)

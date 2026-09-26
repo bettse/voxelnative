@@ -569,3 +569,20 @@ fragment float4 deathFragment()
     // blended fullscreen pass.
     return float4(0.55, 0.0, 0.0, 0.5);
 }
+
+// Photo mode video: the camera target (the layer's colour format, read as
+// linear) -> the 8-bit BGRA pixel buffer the H.264 encoder takes, sRGB
+// encoded by hand since compute can't write an _srgb view. `encode` is 0 when
+// the source already holds encoded values (a plain unorm layer).
+kernel void videoConvert(texture2d_array<half, access::read> src [[ texture(0) ]],
+                         texture2d<half, access::write> dst [[ texture(1) ]],
+                         constant uint &encode [[ buffer(0) ]],
+                         uint2 gid [[ thread_position_in_grid ]])
+{
+    if (gid.x >= dst.get_width() || gid.y >= dst.get_height()) return;
+    float3 c = clamp(float3(src.read(gid, 0).rgb), 0.0, 1.0);
+    if (encode != 0) {
+        c = select(1.055 * pow(c, 1.0 / 2.4) - 0.055, 12.92 * c, c <= 0.0031308);
+    }
+    dst.write(half4(half3(c), 1.0h), gid);
+}

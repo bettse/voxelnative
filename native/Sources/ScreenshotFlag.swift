@@ -8,4 +8,13 @@ final class ScreenshotFlag {
     private var pending = false
     func request() { lock.lock(); pending = true; lock.unlock() }
     func take() -> Bool { lock.lock(); defer { lock.unlock() }; let p = pending; pending = false; return p }
+
+    /// Photo mode video: the session sets it while recording; the renderer
+    /// writes a frame every few frames while it's on and finishes the file
+    /// when it goes off.
+    private var _recording = false
+    var recording: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _recording }
+        set { lock.lock(); _recording = newValue; lock.unlock() }
+    }
 }

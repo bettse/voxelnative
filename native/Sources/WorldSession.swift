@@ -1062,6 +1062,7 @@ final class WorldSession {
     /// Called when the app backgrounds or the immersive space closes.
     func stop() {
         timer?.cancel(); timer = nil
+        screenshotFlag.recording = false   // leaving the world finishes a clip in progress
         started = false     // main-thread re-entry guard: allow a later start()
         // The rest is session-queue state; set it on the queue (this async is
         // enqueued with no delay, so it runs before any delayed reconnect, and
@@ -3024,12 +3025,12 @@ final class WorldSession {
         player.setSunDir(simd_normalize(SIMD3<Float>(cos(a), sin(a), 0)))
 
         // Photo mode: the left Create button (or P / F12), or the menu's "Take
-        // photo". Works with the inventory or a chest open (Eric wanted shots
-        // of those); not over the pause menu or the text keyboard.
-        let photoEdge = gi.photo && !prevPhotoBtn
-        prevPhotoBtn = gi.photo
-        if photoEdge, !koganeMenuOpen, !keyboardOpen, !dead, photoStage == 0 { startPhotoCountdown(1) }
+        // photo". A tap takes a photo (on release); holding it starts a video,
+        // and the next tap stops it. Works with the inventory or a chest open
+        // (Eric wanted shots of those); not over the pause menu or the keyboard.
+        stepPhotoButton(gi.photo, dt: dt)
         stepPhoto(dt: dt)
+        stepVideoRecording(dt: dt)
         var act = gi
         #if targetEnvironment(simulator)
         if simChordHold { act.dig = true; act.place = true }
@@ -3189,6 +3190,65 @@ final class WorldSession {
             client.setWieldIndex((client.wieldIndex + dir + hb) % hb)
             input.rumble(intensity: 0.45, sharpness: 0.9, leftOnly: true)
             print("[hotbar] twist wield=\(client.wieldIndex)"); fflush(stdout)
+        }
+    }
+
+    // Create button: press time decides photo (tap) vs video (hold).
+    private static let videoHold: Float = 0.5
+    private static let videoMax: Float = 30          // a clip stops itself after this
+    private static let videoLead: Float = 1          // "Recording" shows this long, then clears before frames are kept
+    private var photoBtnHeld: Float = 0, photoBtnUsed = false
+    private var videoStage = 0                        // 0 off, 1 lead-in (notice up), 2 recording
+    private var videoClock: Float = 0
+    private func stepPhotoButton(_ down: Bool, dt: Float) {
+        defer { prevPhotoBtn = down }
+        let canShoot = !koganeMenuOpen && !keyboardOpen && !dead
+        if down && !prevPhotoBtn {
+            photoBtnHeld = 0; photoBtnUsed = false
+            if videoStage != 0 { stopVideo(); photoBtnUsed = true }   // a tap while recording stops it
+        }
+        if down {
+            photoBtnHeld += dt
+            if !photoBtnUsed, photoBtnHeld >= Self.videoHold, canShoot, photoStage == 0 {
+                photoBtnUsed = true; startVideo()
+            }
+        } else if prevPhotoBtn, !photoBtnUsed, canShoot, photoStage == 0, videoStage == 0 {
+            startPhotoCountdown(1)
+        }
+    }
+    private func startVideo() {
+        videoStage = 1; videoClock = 0
+        noticeText = "Recording"; noticeExpiry = 0
+        input.rumble(intensity: 0.5, sharpness: 0.9, leftOnly: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in self?.input.rumble(intensity: 0.5, sharpness: 0.9, leftOnly: true) }
+        print("[video] start"); fflush(stdout)
+    }
+    private func stopVideo() {
+        guard videoStage != 0 else { return }
+        videoStage = 0
+        screenshotFlag.recording = false
+        noticeText = "Saving video"; noticeExpiry = AppClock.seconds + 10
+        input.rumble(intensity: 0.5, sharpness: 0.9, leftOnly: true)
+        print("[video] stop after \(Int(videoClock)) s"); fflush(stdout)
+    }
+    private func stepVideoRecording(dt: Float) {
+        guard videoStage != 0 else { return }
+        videoClock += dt
+        if dead { stopVideo(); return }
+        if videoStage == 1, videoClock >= Self.videoLead {
+            // Clear the notice first so the clip opens on the world.
+            videoStage = 2; videoClock = 0; noticeText = nil
+            screenshotFlag.recording = true
+        } else if videoStage == 2, videoClock >= Self.videoMax {
+            stopVideo()
+        }
+    }
+    /// Called by the renderer once Photos has the clip (or refused it).
+    func videoSaved(ok: Bool, denied: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.noticeText = ok ? "Video saved" : (denied ? "Photos access denied" : "Couldn't save video")
+            self.noticeExpiry = AppClock.seconds + 2.5
         }
     }
 
