@@ -4193,10 +4193,20 @@ final class WorldSession {
     /// achievements icons, the craft guide) as INVENTORY_FIELDS by form name.
     /// Before, only node forms submitted, so those icons did nothing.
     private func submitFormFields(_ fields: [String: String]) {
-        if let ctx = formspecContext {
-            client.sendNodeFields(pos: ctx, formname: formspecName, fields: fields)
+        sendFormFields(formname: formspecName, fields: fields)
+    }
+
+    /// Where a form's fields go, as on desktop: a form the server pushed with a
+    /// name (show_formspec: signs, chests, mcl_* dialogs) answers through
+    /// INVENTORY_FIELDS with that name; only a node's own meta form (no name)
+    /// answers through NODEMETA_FIELDS. Choosing by formspecContext alone sent
+    /// sign text to the last chest opened (a stale context), so signs stayed
+    /// blank.
+    private func sendFormFields(formname: String, fields: [String: String]) {
+        if formname.isEmpty, let ctx = formspecContext {
+            client.sendNodeFields(pos: ctx, formname: formname, fields: fields)
         } else {
-            client.sendPlayerFields(formname: formspecName, fields: fields)
+            client.sendPlayerFields(formname: formname, fields: fields)
         }
     }
 
@@ -4297,9 +4307,15 @@ final class WorldSession {
             // keyboard used to pop up on its chat field every time Eric went to
             // sleep.
             let fields = Formspec.parseFields(spec)
-            if let field = fields.first, let ctx = formspecContext, Formspec.isTextEditorForm(spec) {
+            if let field = fields.first, !name.isEmpty || formspecContext != nil, Formspec.isTextEditorForm(spec) {
+                // Send the text with the form's exit button, as desktop does when
+                // Done is pressed (mcl_signs only reads `text`; others check the button).
+                let exitButton = Formspec.parseButtons(spec).first?.name
                 openKeyboard(prefill: field.value) { [weak self] text in
-                    self?.client.sendNodeFields(pos: ctx, formname: name, fields: [field.name: text])
+                    var f = [field.name: text]
+                    if let b = exitButton { f[b] = "" }
+                    self?.sendFormFields(formname: name, fields: f)
+                    print("[formspec] text submitted to '\(name)'"); fflush(stdout)
                 }
                 return
             }
@@ -4673,11 +4689,7 @@ final class WorldSession {
             let rel = cur - fr.center
             let u = simd_dot(rel, fr.right), v = simd_dot(rel, fr.up)
             if let t = infoTargets.first(where: { abs(u - $0.u) <= $0.hw && abs(v - $0.v) <= $0.hh }) {
-                if let ctx = formspecContext {
-                    client.sendNodeFields(pos: ctx, formname: formspecName, fields: [t.field: t.value])
-                } else {
-                    client.sendPlayerFields(formname: formspecName, fields: [t.field: t.value])
-                }
+                sendFormFields(formname: formspecName, fields: [t.field: t.value])
                 print("[formspec] info tap \(t.field)=\(t.value)"); fflush(stdout)
                 return
             }
