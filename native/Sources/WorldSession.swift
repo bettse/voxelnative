@@ -157,7 +157,7 @@ final class WorldSession {
     }()
     private var koganeFocused = false          // gaze is on the companion
     private var koganeMenuOpen = false
-    private let koganeSpriteVisible = false   // hidden for now (right X opens the menu); code kept
+    private let koganeSpriteVisible = false   // hidden for now (right Options opens the menu); code kept
     private var koganeSel = 0                   // highlighted option
     private var koganeBob: Float = 0            // idle bob phase
     private var koganeOpenCooldown: Float = 0   // brief lockout so opening can't instant-confirm
@@ -2986,12 +2986,12 @@ final class WorldSession {
         let a = (Self.wickedTimeOfDay(client.timeFraction) - 0.25) * 2 * .pi
         player.setSunDir(simd_normalize(SIMD3<Float>(cos(a), sin(a), 0)))
 
-        // Photo mode: the left Create button (or P / F12) during play, or the
-        // menu's "Take photo". Only while nothing is open, so Create still backs
-        // out of a panel.
+        // Photo mode: the left Create button (or P / F12), or the menu's "Take
+        // photo". Works with the inventory or a chest open (Eric wanted shots
+        // of those); not over the pause menu or the text keyboard.
         let photoEdge = gi.photo && !prevPhotoBtn
         prevPhotoBtn = gi.photo
-        if photoEdge, !inventoryOpen, !koganeMenuOpen, !keyboardOpen, !dead, photoStage == 0 { startPhotoCountdown(1) }
+        if photoEdge, !koganeMenuOpen, !keyboardOpen, !dead, photoStage == 0 { startPhotoCountdown(1) }
         stepPhoto(dt: dt)
         var act = gi
         #if targetEnvironment(simulator)
@@ -3056,7 +3056,7 @@ final class WorldSession {
 
         let trigger = gi.dig                          // right trigger (pinch too, later)
         let triggerEdge = trigger && !prevKoganeTrigger
-        let menuBtnEdge = gi.koganeMenu && !prevKoganeMenuBtn   // right X: open the menu without looking up
+        let menuBtnEdge = gi.koganeMenu && !prevKoganeMenuBtn   // right Options / Esc: open the menu
         prevKoganeMenuBtn = gi.koganeMenu
         prevKoganeTrigger = trigger
         let cancel = gi.place || gi.cancel
@@ -3087,7 +3087,7 @@ final class WorldSession {
             // Ignore the trigger for a beat after opening so the same double-tap
             // that opened the menu can't immediately confirm "Exit to menu".
             if selEdge && koganeOpenCooldown <= 0 { activateKoganeOption() }
-            // Cancel (grip/menu) OR the Kogane-activate button (right X) closes
+            // Cancel (grip/menu) OR the menu button again (right Options / Esc) closes
             // it, same as Resume. The cooldown stops the opening press from
             // instantly re-closing it.
             else if cancelEdge || (menuBtnEdge && koganeOpenCooldown <= 0) { koganeMenuOpen = false; print("[kogane] menu closed"); fflush(stdout) }
@@ -3096,7 +3096,7 @@ final class WorldSession {
         }
         prevKoganeNav = 0
         // Esc clears chat / the join message first when any is showing; the
-        // next Esc opens the menu. The controller's X opens it as before.
+        // next Esc opens the menu. Right Options opens it directly.
         if menuBtnEdge, gi.escape, !inventoryOpen, chatVisible {
             dismissChat()
             return false
@@ -3119,8 +3119,8 @@ final class WorldSession {
     }
     private func stepPhoto(dt: Float) {
         guard photoStage != 0 else { return }
-        // A panel, the menu or death cancels a pending photo.
-        if inventoryOpen || koganeMenuOpen || dead { photoStage = 0; noticeText = nil; return }
+        // The menu, the keyboard or death cancels a pending photo.
+        if koganeMenuOpen || keyboardOpen || dead { photoStage = 0; noticeText = nil; return }
         if photoStage == 2 {
             photoStage = 0
             screenshotFlag.request()

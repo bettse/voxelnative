@@ -14,8 +14,9 @@ import simd
 /// Mapping: left stick = walk (x strafe, y forward), right stick x = turn,
 /// left trigger = jump, left grip = sprint, left stick click = sneak,
 /// right trigger = dig, right grip = place, right trigger + right grip together
-/// = drop the wielded stack (WorldSession.gateDropChord), menu = exit, both
-/// grips (left + right) = screenshot.
+/// = drop the wielded stack (WorldSession.gateDropChord), right Options = pause
+/// menu (and back out of a panel), left Create = photo, right O = inventory,
+/// left square / triangle = hotbar prev / next. Right X is unassigned.
 ///
 /// A BLE keyboard is an alternative to the controllers (gaze aims), on desktop
 /// Luanti's keys; the full map is the keyboard block in poll(). Look-and-pinch
@@ -28,8 +29,8 @@ final class GameInput {
         var turn: Float = 0
         var dig = false
         var place = false
-        var cancel = false      // controller Menu button or Esc: back out of a panel, keyboard or menu
-        var photo = false       // LEFT Menu (Create) button, or P / F12: take a photo (only during play)
+        var cancel = false      // RIGHT Menu (Options) or Esc: back out of a panel, keyboard or menu
+        var photo = false       // LEFT Menu (Create) button, or P / F12: take a photo
         var escape = false      // keyboard Esc (also sets cancel + koganeMenu)
         var jump = false
         var fast = false        // sprint (aux1); in a panel also the quick-move modifier (left grip / E / Ctrl)
@@ -37,7 +38,7 @@ final class GameInput {
         var hotbarPrev = false  // LEFT face button (square / Button A on the left Sense)
         var hotbarNext = false  // LEFT face button (triangle / Button B on the left Sense)
         var inventory = false   // RIGHT O (Button B): toggle the inventory panel
-        var koganeMenu = false  // RIGHT X (Button A) or Esc: open the Kogane menu
+        var koganeMenu = false  // RIGHT Menu (Options) or Esc: open the pause menu
         var dismissChat = false // RIGHT stick click: clear the join/chat lines
         var menuNavY: Float = 0 // EITHER stick Y, for menu navigation
         var menuSelect = false  // EITHER trigger, for menu confirm
@@ -299,11 +300,12 @@ final class GameInput {
                 if gp.rightShoulder.isPressed { s.place = true; rightGrip = true }   // right grip
                 if gp.leftShoulder.isPressed { s.fast = true; leftGrip = true }     // left grip = sprint
                 if gp.leftThumbstickButton?.isPressed == true { s.sneak = true }
-                if gp.buttonMenu.isPressed { s.cancel = true }
+                // MFi names: buttonMenu is the right Options, buttonOptions the left Create.
+                if gp.buttonMenu.isPressed { s.cancel = true; s.koganeMenu = true }
+                if gp.buttonOptions?.isPressed == true { s.photo = true }
                 if gp.buttonX.isPressed { s.hotbarPrev = true }   // left square -> prev hotbar
                 if gp.buttonY.isPressed { s.hotbarNext = true }   // left triangle -> next hotbar
                 if gp.buttonB.isPressed { s.inventory = true }    // right O -> inventory
-                if gp.buttonA.isPressed { s.koganeMenu = true }   // right X -> Kogane menu
                 if gp.rightThumbstickButton?.isPressed == true { s.dismissChat = true }   // right stick click -> clear chat
                 s.menuNavY = abs(ly) >= abs(dz(gp.rightThumbstick.yAxis.value)) ? ly : dz(gp.rightThumbstick.yAxis.value)
                 if gp.leftTrigger.value > 0.5 || gp.rightTrigger.value > 0.5 { s.menuSelect = true }
@@ -335,16 +337,17 @@ final class GameInput {
                 // names X/Y too so hotbar prev/next survive a future relabel.
                 if p.buttons["Button A"]?.isPressed == true || p.buttons["Button X"]?.isPressed == true { s.hotbarPrev = true }   // left square
                 if p.buttons["Button B"]?.isPressed == true || p.buttons["Button Y"]?.isPressed == true { s.hotbarNext = true }   // left triangle
-                if p.buttons["Button Menu"]?.isPressed == true { s.photo = true }   // left Create: photo (still backs out of panels too)
+                if p.buttons["Button Menu"]?.isPressed == true { s.photo = true }   // left Create: photo only, so it works with a panel open
             } else {
                 if sx != 0 { s.turn = sx }
                 if trigger { s.dig = true }
                 if grip { s.place = true; rightGrip = true }
                 if p.buttons["Button B"]?.isPressed == true { s.inventory = true }    // right O
-                if p.buttons["Button A"]?.isPressed == true { s.koganeMenu = true }   // right X
+                // Right X (Button A) is free: it opened the menu before Options did.
                 if p.buttons["Thumbstick Button"]?.isPressed == true { s.dismissChat = true }   // right stick click -> clear chat
+                // Right Options: the pause menu, and backs out of a panel first (like Esc).
+                if p.buttons["Button Menu"]?.isPressed == true { s.cancel = true; s.koganeMenu = true }
             }
-            if p.buttons["Button Menu"]?.isPressed == true { s.cancel = true }
         }
         if debug { fflush(stdout) }
         // A BLE keyboard is an alternative to the Sense controllers: gaze still
@@ -386,7 +389,7 @@ final class GameInput {
             if k(.keyP) || k(.F12) { s.photo = true }    // photo (F12 is desktop Luanti's screenshot key)
             if k(.keyI)         { s.inventory = true }   // toggle inventory
             if k(.keyQ)         { s.drop = true }
-            // Esc opens/closes the Kogane menu (the keyboard has no right X) and
+            // Esc opens/closes the pause menu (like right Options) and
             // still cancels: it closes the inventory or the text keyboard first.
             if k(.escape)       { s.escape = true; s.cancel = true; s.koganeMenu = true }
             if k(.openBracket) || k(.keyB)  { s.hotbarPrev = true }

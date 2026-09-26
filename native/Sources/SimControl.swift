@@ -84,7 +84,7 @@ final class SimControl: @unchecked Sendable {
         type <text> | chat <text>
         state | slots | widgets  (JSON, answered on the next game tick)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
-                 rt lt rgrip lgrip square triangle circle cross menu create l3 r3
+                 rt lt rgrip lgrip square triangle circle options create l3 r3
         """
 
     /// One command line -> one reply line. Runs on the listener queue.
@@ -177,9 +177,8 @@ final class SimControl: @unchecked Sendable {
         if k.contains("f") { s.menuSelect = true }
         if k.contains("r") || k.contains("rgrip") { s.place = true }
         if k.contains("p") || k.contains("create") { s.photo = true }
-        if k.contains("create") || k.contains("menu") { s.cancel = true }
+        if k.contains("options") { s.cancel = true; s.koganeMenu = true }
         if k.contains("i") || k.contains("circle") { s.inventory = true }
-        if k.contains("cross") { s.koganeMenu = true }
         if k.contains("q") { s.drop = true }
         if k.contains("b") || k.contains("square") { s.hotbarPrev = true }
         if k.contains("n") || k.contains("triangle") { s.hotbarNext = true }
