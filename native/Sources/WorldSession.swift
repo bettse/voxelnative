@@ -3141,9 +3141,10 @@ final class WorldSession {
     // dead zone the selection starts moving that way, faster the further you
     // twist, with a tick on the left controller per slot. Clockwise (as you
     // look down the controller) is next. Twist back or lift the thumb to stop.
-    private static let twistDead: Float = 15 * .pi / 180      // wobble inside this does nothing
-    private static let twistFull: Float = 45 * .pi / 180      // top speed from here on
-    private static let twistRateMin: Float = 2, twistRateMax: Float = 10   // slots per second
+    // Eric found 15/45 deg at 2-10 slots/s too tight to control: wider and slower.
+    private static let twistDead: Float = 25 * .pi / 180      // wobble inside this does nothing
+    private static let twistFull: Float = 70 * .pi / 180      // top speed from here on
+    private static let twistRateMin: Float = 1, twistRateMax: Float = 4    // slots per second
     private static let twistArmDelay: Float = 0.2   // thumb must rest this long first, so passing over the buttons doesn't count
     private var twistRest: Float = 0                 // seconds the thumb has rested
     private var twistPrevUp: SIMD3<Float>? = nil
