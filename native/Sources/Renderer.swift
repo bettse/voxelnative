@@ -2438,6 +2438,11 @@ actor Renderer {
                 print("Layer is invalidated")
                 Task { @MainActor in
                     appModel.immersiveSpaceState = .closed
+                    if !appModel.exitingByUser {
+                        appModel.resumeWorld = true
+                        print("[launcher] world closed by the system; will resume"); fflush(stdout)
+                    }
+                    appModel.exitingByUser = false
                 }
                 return
             } else if layerRenderer.state == .paused {

@@ -9,6 +9,11 @@ final class AppModel {
     let launcherWindowID = "launcher"
     enum ImmersiveSpaceState { case closed, inTransition, open }
     var immersiveSpaceState = ImmersiveSpaceState.closed
+    // The system closed the world under us (Siri, the Digital Crown): the
+    // layer was invalidated without the menu's Exit/Quit. The launcher reopens
+    // it as soon as the app is active again, so it doesn't read as a crash.
+    var resumeWorld = false
+    @ObservationIgnored var exitingByUser = false   // set by Exit to menu / Quit before we close the space
 
     // True once the world has enough streamed + meshed to show something (the
     // first real block mesh was posted). The launcher keeps its spinner up and

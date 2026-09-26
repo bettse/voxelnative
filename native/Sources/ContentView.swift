@@ -11,6 +11,7 @@ struct ContentView: View {
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var store = ServerStore()
     @State private var connecting = false
@@ -49,8 +50,12 @@ struct ContentView: View {
     // appModel.onExit, installed here, so it still works once this window is gone.
     var body: some View {
         launcher
+            .onChange(of: scenePhase) { _, _ in resumeIfNeeded() }
+            .onChange(of: appModel.resumeWorld) { _, _ in resumeIfNeeded() }
             .onAppear {
+                resumeIfNeeded()
                 appModel.onExit = { kind in
+                    appModel.exitingByUser = true
                     Task { @MainActor in
                         appModel.stopSession()
                         if appModel.immersiveSpaceState != .closed {
@@ -65,7 +70,20 @@ struct ContentView: View {
             }
     }
 
-    @State private var autoConnectStarted = false
+    // Once per process, not per view: the launcher view is rebuilt when it
+    // comes back (after the world closes), and a per-view flag re-fired the
+    // sim's auto-connect every time.
+    private static var autoConnectStarted = false
+
+    /// Reopen the world the system closed (see AppModel.resumeWorld), once
+    /// we're active with no space open and not already connecting.
+    private func resumeIfNeeded() {
+        guard appModel.resumeWorld, scenePhase == .active,
+              appModel.immersiveSpaceState == .closed, !connecting else { return }
+        appModel.resumeWorld = false
+        print("[launcher] resuming the world"); fflush(stdout)
+        connect()
+    }
 
     // MARK: - Launcher
 
@@ -115,8 +133,8 @@ struct ContentView: View {
             if selectedID == nil { selectedID = store.selected?.id ?? store.profiles.first?.id }   // Play needs a target
             // Automated loop only: auto-connect to the selected server so a
             // screenshot can be taken without tapping Connect.
-            if !autoConnectStarted, UserDefaults.standard.bool(forKey: "vrdev.autoConnect") {
-                autoConnectStarted = true
+            if !Self.autoConnectStarted, UserDefaults.standard.bool(forKey: "vrdev.autoConnect") {
+                Self.autoConnectStarted = true
                 // Stable sim identity so the server keeps ONE account we can grant
                 // privs to (creative/give for test scenes), and so relaunches
                 // actually exercise the same-name reconnect path instead of dodging
