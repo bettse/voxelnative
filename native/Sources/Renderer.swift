@@ -2451,7 +2451,7 @@ actor Renderer {
     func renderLoop() {
         while true {
             if layerRenderer.state == .invalidated {
-                print("Layer is invalidated")
+                print("Layer is invalidated \(Date())")
                 Task { @MainActor in
                     appModel.immersiveSpaceState = .closed
                     if !appModel.exitingByUser {
@@ -2462,10 +2462,14 @@ actor Renderer {
                 }
                 return
             } else if layerRenderer.state == .paused {
+                // Logged with the wall clock so a device log lines up with Photos
+                // timestamps (Siri screenshots sometimes close the space).
+                print("[layer] paused \(Date())"); fflush(stdout)
                 Task { @MainActor in
                     appModel.immersiveSpaceState = .inTransition
                 }
                 layerRenderer.waitUntilRunning()
+                print("[layer] running again \(Date())"); fflush(stdout)
                 continue
             } else {
                 Task { @MainActor in

@@ -2839,7 +2839,7 @@ final class WorldSession {
         posLogTimer += Double(dt)
         if posLogTimer >= 5 { posLogTimer = 0
             let gts = groundTop.map { String($0) } ?? "nil"
-            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid)"); fflush(stdout) }
+            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime())"); fflush(stdout) }
         // Underground the engine slides the sky and fog toward the "indoors"
         // colour scaled by how much sunlight the camera can see
         // (Sky::update, getBackgroundBrightness). Cheap stand-in: the day-bank
@@ -5690,6 +5690,11 @@ final class WorldSession {
             entStepDist = entStepDist.filter { seen.contains($0.key) }
         }
     }
+
+    /// Local wall-clock time for log lines, so a device log lines up with
+    /// Photos screenshot times.
+    private static let clockFormat: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
+    static func clockTime() -> String { clockFormat.string(from: Date()) }
 
     private func postEntities() {
         frameUptime = AppClock.seconds
