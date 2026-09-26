@@ -109,11 +109,15 @@ final class SkyPacketTests: XCTestCase {
         XCTAssertFalse(c.sky.sunVisible)
         XCTAssertEqual(c.sky.sunScale, 2.5, accuracy: 1e-6)
 
+        XCTAssertEqual(c.sky.sunTexture, "sun.png")
+
+        // VoxeLibre's mcl_moon: the phase is a cell of a 4x2 sheet.
         let moon = PacketWriter()
-        moon.u8(1).string16("moon.png").string16("").f32(0.5)
+        moon.u8(1).string16("mcl_moon_moon_phases.png^[sheet:4x2:2,0").string16("").f32(0.5)
         c.handleSetMoon(moon.data)
         XCTAssertTrue(c.sky.moonVisible)
         XCTAssertEqual(c.sky.moonScale, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(c.sky.moonTexture, "mcl_moon_moon_phases.png^[sheet:4x2:2,0")
         XCTAssertEqual(fired(), 2)
     }
 

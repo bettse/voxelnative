@@ -224,6 +224,16 @@ actor Renderer {
     // SET_SKY "skybox" cube (the End). A 1x1 black cube stays bound when
     // there is none so skyFragment always has a texture at its slot.
     var skyboxTexture: MTLTexture?
+    // Sun (layer 0) and moon (layer 1) textures, SkyboxHandoff.bodySize square.
+    // Always allocated so skyFragment has something at its slot; skyBodyFlags
+    // says which layers hold a real texture.
+    lazy var skyBodyTexture: MTLTexture? = {
+        let n = SkyboxHandoff.bodySize
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: n, height: n, mipmapped: false)
+        d.textureType = .type2DArray; d.arrayLength = 2; d.usage = .shaderRead
+        return device.makeTexture(descriptor: d)
+    }()
+    private var skyBodyFlags: Float = 0
     lazy var skyboxPlaceholder: MTLTexture? = {
         let d = MTLTextureDescriptor.textureCubeDescriptor(pixelFormat: .rgba8Unorm_srgb, size: 1, mipmapped: false)
         d.usage = .shaderRead
@@ -1575,6 +1585,10 @@ actor Renderer {
         // Unit length here, once: skyFragment dots against it per pixel.
         let sdUnit = simd_normalize(SIMD3<Float>(sdRot.x, sdRot.y, sdRot.z))
         self.uniforms[0].sunDir = SIMD4<Float>(sdUnit.x, sdUnit.y, sdUnit.z, tSec)
+        // The sun orbits in the world's X-Y plane (WorldSession.setSunDir), so
+        // its axis is world Z; rotated the same way as the sun.
+        let ax = mirror * r * SIMD4<Float>(0, 0, 1, 0)
+        self.uniforms[0].skyOrbit = SIMD4<Float>(ax.x, ax.y, ax.z, skyBodyFlags)
     }
 
     /// Swap in a freshly streamed+meshed world if one is waiting. Runs on the
@@ -1983,6 +1997,20 @@ actor Renderer {
     /// Face order on the wire is the API's Y+ Y- X- X+ Z+ Z-; Metal cube slices
     /// are +X -X +Y -Y +Z -Z.
     private func consumeSkyboxHandoff() {
+        if let b = appModel.skyboxHandoff.takeBodies(), let tex = skyBodyTexture {
+            let n = SkyboxHandoff.bodySize, need = n * n * 4
+            var flags: Float = 0
+            for (slice, px) in [b.sun, b.moon].enumerated() {
+                guard let px, px.count == need else { continue }
+                px.withUnsafeBytes { raw in
+                    guard let base = raw.baseAddress else { return }
+                    tex.replace(region: MTLRegionMake2D(0, 0, n, n), mipmapLevel: 0, slice: slice,
+                                withBytes: base, bytesPerRow: n * 4, bytesPerImage: need)
+                }
+                flags += slice == 0 ? 1 : 2
+            }
+            skyBodyFlags = flags
+        }
         guard let upd = appModel.skyboxHandoff.take() else { return }
         guard let faces = upd, faces.count == 6 else { skyboxTexture = nil; return }
         let n = SkyboxHandoff.size, need = n * n * 4
@@ -2295,6 +2323,7 @@ actor Renderer {
         renderEncoder.setDepthStencilState(skyDepthState)
         renderEncoder.setFragmentTexture(skyboxTexture ?? skyboxPlaceholder, index: 1)
         renderEncoder.setFragmentTexture(cloudNoiseTexture, index: 2)
+        renderEncoder.setFragmentTexture(skyBodyTexture, index: 3)
         renderEncoder.setVertexBuffer(vpBuffer, offset: vpOffset, index: BufferIndex.viewProjection.rawValue)
         renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
 

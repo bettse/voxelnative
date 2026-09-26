@@ -98,6 +98,8 @@ final class WorldSession {
     let skyboxHandoff: SkyboxHandoff
     private var skyboxWanted: [String] = []   // SET_SKY skybox textures (6) or empty
     private var skyboxBuilt: [String] = []    // what the renderer currently holds
+    private var skyBodiesWanted: [String] = []   // [sun texture, moon texture] from SET_SUN / SET_MOON
+    private var skyBodiesBuilt: [String] = []
     let handHudHandoff: HandHudHandoff
     let screenshotFlag: ScreenshotFlag
     let player: PlayerState
@@ -830,7 +832,10 @@ final class WorldSession {
             if UserDefaults.standard.bool(forKey: "vrdev.fakeSkybox"), s.skyboxTextures.isEmpty, self?.fakeSkyboxSent == true { return }
             #endif
             self?.player.setSky(s)
-            self?.queue.async { self?.skyboxWanted = s.skyboxTextures.count == 6 ? s.skyboxTextures : [] }
+            self?.queue.async {
+                self?.skyboxWanted = s.skyboxTextures.count == 6 ? s.skyboxTextures : []
+                self?.skyBodiesWanted = [s.sunTexture, s.moonTexture]
+            }
         }
         client.onXp = { [weak self] level, fraction in self?.xpLevel = level; self?.xpFraction = fraction }
         client.onMediaPushed = { [weak self] name in self?.forgetTexture(name) }
@@ -1097,6 +1102,25 @@ final class WorldSession {
     /// Bake a "skybox" sky's six faces once their PNGs are here and hand them
     /// to the renderer; clear it when the sky type changes back. The End is
     /// the one VoxeLibre skybox (six copies of its starry texture).
+    /// Sun/moon textures from SET_SUN / SET_MOON. VoxeLibre's moon is a phase
+    /// cell of mcl_moon_moon_phases.png ([sheet:4x2:x,y], changes once a day);
+    /// its sun is "sun.png", which it doesn't ship, so like the engine that
+    /// falls back to plain squares.
+    private func stepSkyBodies() {
+        guard skyBodiesWanted != skyBodiesBuilt, skyBodiesWanted.count == 2 else { return }
+        // nil = still downloading; .some(nil) = no such texture.
+        func bake(_ t: String) -> [UInt8]?? {
+            let names = NodeRegistry.imageNames(t)
+            if t.isEmpty || names.isEmpty || names.contains(where: { !client.media.announced.contains($0) }) { return .some(nil) }
+            let missing = Set(names.filter { client.media.bytes($0) == nil })
+            if !missing.isEmpty { client.media.request(missing); return nil }
+            return .some(TextureAtlas.evaluateModifiedFill(t, media: client.media, canvas: SkyboxHandoff.bodySize))
+        }
+        guard let sun = bake(skyBodiesWanted[0]), let moon = bake(skyBodiesWanted[1]) else { return }
+        skyboxHandoff.postBodies(sun: sun, moon: moon); skyBodiesBuilt = skyBodiesWanted
+        print("[sky] sun \(sun == nil ? "plain" : skyBodiesWanted[0]) moon \(moon == nil ? "none" : skyBodiesWanted[1])"); fflush(stdout)
+    }
+
     private func stepSkybox() {
         guard skyboxWanted != skyboxBuilt else { return }
         if skyboxWanted.isEmpty { skyboxHandoff.postClear(); skyboxBuilt = []; return }
@@ -1114,6 +1138,7 @@ final class WorldSession {
 
     private func tick(dt: Float) {
         stepSkybox()
+        stepSkyBodies()
         // An uncontended unfair lock is ~20 ns; the audio queue only ever
         // appends here when a handled sound actually ends.
         let doneSounds = finishedSounds.withLock { l -> [Int] in let d = l; l.removeAll(keepingCapacity: true); return d }

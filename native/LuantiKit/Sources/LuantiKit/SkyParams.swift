@@ -4,7 +4,7 @@ import simd
 /// The server-driven sky look, gathered from TOCLIENT_SET_SKY / SET_SUN /
 /// SET_MOON / SET_STARS / CLOUD_PARAMS / SET_LIGHTING. Kept in engine units so
 /// the renderer can feed its procedural sky; only the fields that sky can
-/// honour are kept (textures, tonemaps, fog, exposure, bloom are dropped).
+/// honour are kept (tonemaps, exposure, bloom are dropped).
 /// Defaults are SkyboxDefaults from the engine's skyparams.h.
 public struct SkyParams: Equatable {
     // SET_SKY "regular" colour table (rgb 0..1). The night pair are bright
@@ -26,8 +26,10 @@ public struct SkyParams: Equatable {
 
     public var sunVisible = true
     public var sunScale: Float = 1
+    public var sunTexture = "sun.png"     // no such file in VoxeLibre: the engine then draws plain squares
     public var moonVisible = true
     public var moonScale: Float = 1
+    public var moonTexture = "moon.png"   // VoxeLibre: mcl_moon_moon_phases.png^[sheet:4x2:x,y (the phase)
 
     public var starsVisible = true
     public var starCount = 1000

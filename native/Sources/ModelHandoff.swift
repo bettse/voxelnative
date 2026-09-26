@@ -121,4 +121,14 @@ final class SkyboxHandoff {
         if clearPending { clearPending = false; return .some(nil) }
         return nil
     }
+
+    /// Sun and moon textures (bodySize square RGBA, nil = no texture: the sun
+    /// then draws as plain squares like the engine's fallback).
+    static let bodySize = 64
+    private var bodies: (sun: [UInt8]?, moon: [UInt8]?)?
+    func postBodies(sun: [UInt8]?, moon: [UInt8]?) { lock.lock(); bodies = (sun, moon); lock.unlock() }
+    func takeBodies() -> (sun: [UInt8]?, moon: [UInt8]?)? {
+        lock.lock(); defer { lock.unlock() }
+        let b = bodies; bodies = nil; return b
+    }
 }

@@ -1650,7 +1650,8 @@ public final class Client {
         let r = PacketReader(payload)
         var s = sky
         s.sunVisible = r.u8() != 0
-        _ = r.string16(); _ = r.string16(); _ = r.string16()   // texture, tonemap, sunrise
+        s.sunTexture = r.string16()
+        _ = r.string16(); _ = r.string16()                     // tonemap, sunrise
         _ = r.u8()                                             // sunrise_visible
         s.sunScale = r.f32()
         if r.overrun { return }
@@ -1661,7 +1662,8 @@ public final class Client {
         let r = PacketReader(payload)
         var s = sky
         s.moonVisible = r.u8() != 0
-        _ = r.string16(); _ = r.string16()                     // texture, tonemap
+        s.moonTexture = r.string16()
+        _ = r.string16()                                       // tonemap
         s.moonScale = r.f32()
         if r.overrun { return }
         sky = s; onSky?(s)

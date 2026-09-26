@@ -382,7 +382,8 @@ vertex SkyInOut skyVertex(uint vid [[vertex_id]],
 fragment float4 skyFragment(SkyInOut in [[stage_in]],
                             constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                             texturecube<half> skybox [[ texture(1) ]],
-                            texture2d<half> cloudNoise [[ texture(2) ]])
+                            texture2d<half> cloudNoise [[ texture(2) ]],
+                            texture2d_array<half> skyBodies [[ texture(3) ]])
 {
     float3 rd = normalize(in.rayDir);
     // Server-set solid sky (a plain/skybox SET_SKY, e.g. the Nether/End): a flat
@@ -421,33 +422,65 @@ fragment float4 skyFragment(SkyInOut in [[stage_in]],
     }
     float3 col = mix(horizon, zenith, smoothstep(0.0, 0.55, up));
 
-    // Sun: a sharp disk plus a soft glow, only while it's up and daytime.
-    // sunDir is unit length from the CPU.
-    float sdot = dot(rd, uniforms.sunDir.xyz);
-    // SET_SUN scale widens the disk (cosine threshold); visible gates it.
-    // Engine sun quad: half-size 0.07*1.7 at unit distance = ~13.6 deg across
-    // (cos threshold 0.007); drawn at full strength whenever it's above the
-    // horizon (no elevation fade), which is what makes it visible at sunrise
-    // instead of ~2 minutes later.
-    float sr = 0.007 * uniforms.skyBodies.y;
-    float disk = smoothstep(1.0 - sr, 1.0 - sr + 0.003, sdot);
-    float g = max(sdot, 0.0);
-    g *= g; g *= g; g *= g; g *= g;            // g^16
-    float glow = g * g * g * 0.35;             // g^48, no exp/log
-    float sunUp = smoothstep(-0.02, 0.02, uniforms.sunDir.y);
-    col += (disk + glow) * float3(1.0, 0.96, 0.82) * mix(0.7, 1.0, d) * sunUp * uniforms.skyBodies.x;
+    // Sun and moon are flat squares, like the engine's sky bodies (sky.cpp
+    // draw_sky_body): a quad at unit distance facing the camera, edges along
+    // the orbit and its axis. Projecting the ray onto that plane gives the
+    // same square per pixel. Hidden once below the horizon.
+    float3 S = uniforms.sunDir.xyz;
+    float3 A = normalize(uniforms.skyOrbit.xyz);
+    int bodyFlags = int(uniforms.skyOrbit.w + 0.5);
+    constexpr sampler px(filter::nearest, address::clamp_to_edge);
+    float sdot = dot(rd, S);
+    float sunUp = smoothstep(-0.02, 0.02, S.y) * uniforms.skyBodies.x;
+    if (sdot > 0.0 && sunUp > 0.0) {
+        float3 T = cross(A, S);
+        float2 q = float2(dot(rd, T), dot(rd, A)) / sdot;
+        float sc = uniforms.skyBodies.y;
+        if (bodyFlags & 1) {
+            // A server sun texture: one square, half-size 0.07*1.7*scale.
+            float h = 0.07 * 1.7 * sc;
+            if (max(abs(q.x), abs(q.y)) < h) {
+                // Engine uv (draw_sky_body + place_sky_body at +90): u runs
+                // against the orbit axis, v against the direction of travel.
+                // T here points against travel (the origin-space mirror flips
+                // the cross product), hence (-q.y, q.x).
+                float4 t = float4(skyBodies.sample(px, float2(-q.y, q.x) / (2.0 * h) + 0.5, 0));
+                col = mix(col, t.rgb, t.a * sunUp);
+            }
+        } else {
+            // No texture (VoxeLibre sends "sun.png", which doesn't exist): the
+            // engine's four stacked squares, a faint halo, then the yellow sun
+            // and a white core. Yellower as the day dims (sky.cpp suncolor).
+            float3 sunCol = float3(1.0, clamp(0.85 + 0.5 * d, 0.3, 1.0), clamp(d, 0.0, 1.0));
+            float m = max(abs(q.x), abs(q.y)) / (0.07 * sc);
+            if (m < 1.7) col = mix(col, sunCol, 0.05 * sunUp);
+            if (m < 1.2) col = mix(col, sunCol, 0.15 * sunUp);
+            if (m < 1.0) col = mix(col, sunCol, sunUp);
+            if (m < 0.7) col = mix(col, float3(1.0), sunUp);
+        }
+    }
 
-    // Moon: opposite the sun, up and visible at night.
-    float mdot = -sdot;
-    // Engine moon quad: 0.04*1.9 half-size = ~8.7 deg across (cos threshold
-    // 0.0029; the old 0.011 drew it twice the desktop size). A little hashed
-    // mottling so it reads as a moon, not a lamp.
-    float mr = 0.0029 * uniforms.skyBodies.w;                // SET_MOON scale
-    float moon = smoothstep(1.0 - mr, 1.0 - mr + 0.0015, mdot);
-    float moonUp = smoothstep(-0.02, 0.02, -uniforms.sunDir.y);
-    if (moon > 0.0) {   // the hash only matters on the disk itself
-        float mottle = 0.8 + 0.2 * skyHash(floor(rd.xz * 90.0));
-        col += moon * float3(0.85, 0.87, 0.95) * mottle * (1.0 - d) * moonUp * uniforms.skyBodies.z;
+    // Moon: opposite the sun, its square turned half a turn from the sun's
+    // like the engine's (-90 vs 90 horizon angle). The texture is the phase
+    // (VoxeLibre's mcl_moon picks one of 8 cells of a sheet each day).
+    float3 M = -S;
+    float mdot = dot(rd, M);
+    float moonUp = smoothstep(-0.02, 0.02, M.y) * uniforms.skyBodies.z;
+    if (mdot > 0.0 && moonUp > 0.0) {
+        float3 T = cross(A, M);
+        float2 q = float2(dot(rd, T), dot(rd, A)) / mdot;
+        float h = 0.04 * 1.9 * uniforms.skyBodies.w;
+        if (max(abs(q.x), abs(q.y)) < h) {
+            if (bodyFlags & 2) {
+                // Placed at -90 instead: u along the orbit axis, v along the
+                // direction of travel, so the phase's lit side sits where
+                // desktop puts it.
+                float4 t = float4(skyBodies.sample(px, float2(q.y, -q.x) / (2.0 * h) + 0.5, 1));
+                col = mix(col, t.rgb, t.a * moonUp);
+            } else {
+                col = mix(col, float3(0.85, 0.87, 0.95), moonUp);   // no texture: a plain square
+            }
+        }
     }
 
     // World-space ray so stars/clouds are anchored to the world (turn with a

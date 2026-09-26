@@ -71,6 +71,10 @@ typedef struct
     // w of skySunTint = horizon blend weight (0 outside the sunrise/sunset window).
     vector_float4 skySunTint;
     vector_float4 skyMoonTint;
+    // Sun/moon squares (sky.cpp draws them as flat quads): xyz = the orbit's
+    // axis in origin space (the quads' edges run along it and along the
+    // orbit), w = flags: 1 the sun has a texture, 2 the moon does (layers 0/1).
+    vector_float4 skyOrbit;
     vector_float4 eyePos;         // xyz
 } Uniforms;
 
