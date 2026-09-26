@@ -880,6 +880,33 @@ actor Renderer {
         face(SIMD3(-a, -a, z1), SIMD3(a, -a, z1), SIMD3(a, -a, z0), SIMD3(-a, -a, z0), bx + 12, by + 4, 4, 12, shade: 0.6)  // back, down
         face(SIMD3(a, a, z0), SIMD3(-a, a, z0), SIMD3(-a, -a, z0), SIMD3(a, -a, z0), bx + 8, by, 4, 4, shade: 0.9)          // fist end
         face(SIMD3(a, -a, z1), SIMD3(-a, -a, z1), SIMD3(-a, a, z1), SIMD3(a, a, z1), bx + 4, by, 4, 4, shade: 0.9)          // shoulder end
+        // Fingers from the controller's touch sensors: index lifted off the
+        // trigger points forward out of the fist, thumb lifted off the stick and
+        // face buttons sticks up. One skin pixel square, cut from the fist end's
+        // texture so they match the hand. The thumb side is toward the body
+        // (-X for the right hand, +X for the left).
+        let pose = FingerPose.shared.get(left: left)
+        guard pose.indexOut || pose.thumbUp else { return }
+        let px: Float = 0.015, inner: Float = left ? 1 : -1
+        func box(_ lo: SIMD3<Float>, _ hi: SIMD3<Float>) {
+            // Every face samples the same 1x1 px of the hand end.
+            let ux = bx + 9, uy = by + 1
+            face(SIMD3(hi.x, hi.y, hi.z), SIMD3(lo.x, hi.y, hi.z), SIMD3(lo.x, hi.y, lo.z), SIMD3(hi.x, hi.y, lo.z), ux, uy, 1, 1, shade: 1.0)   // +Y
+            face(SIMD3(hi.x, lo.y, lo.z), SIMD3(lo.x, lo.y, lo.z), SIMD3(lo.x, lo.y, hi.z), SIMD3(hi.x, lo.y, hi.z), ux, uy, 1, 1, shade: 0.6)   // -Y
+            face(SIMD3(hi.x, lo.y, hi.z), SIMD3(hi.x, hi.y, hi.z), SIMD3(hi.x, hi.y, lo.z), SIMD3(hi.x, lo.y, lo.z), ux, uy, 1, 1, shade: 0.8)   // +X
+            face(SIMD3(lo.x, hi.y, hi.z), SIMD3(lo.x, lo.y, hi.z), SIMD3(lo.x, lo.y, lo.z), SIMD3(lo.x, hi.y, lo.z), ux, uy, 1, 1, shade: 0.8)   // -X
+            face(SIMD3(hi.x, hi.y, lo.z), SIMD3(lo.x, hi.y, lo.z), SIMD3(lo.x, lo.y, lo.z), SIMD3(hi.x, lo.y, lo.z), ux, uy, 1, 1, shade: 0.9)   // -Z (tip)
+            face(SIMD3(hi.x, lo.y, hi.z), SIMD3(lo.x, lo.y, hi.z), SIMD3(lo.x, hi.y, hi.z), SIMD3(hi.x, hi.y, hi.z), ux, uy, 1, 1, shade: 0.9)   // +Z
+        }
+        // x span of a one-pixel column on the thumb side of the fist.
+        let xa = inner * a, xb = inner * (a - px)
+        let x0 = min(xa, xb), x1 = max(xa, xb)
+        if pose.indexOut {   // along -Z, level with the top of the fist, 3 px long
+            box(SIMD3(x0, a - 2 * px, z0 - 3 * px), SIMD3(x1, a - px, z0))
+        }
+        if pose.thumbUp {    // up out of the top of the fist, 2 px tall
+            box(SIMD3(x0, a, z0 + px * 0.5), SIMD3(x1, a + 2 * px, z0 + px * 1.5))
+        }
     }
     /// Draw a held item at `grip` (a hand pose already moved forward-up of the
     /// fist). side = 1 for the right hand, -1 for the left: the left hand's

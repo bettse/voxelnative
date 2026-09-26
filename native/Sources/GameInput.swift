@@ -49,6 +49,23 @@ final class GameInput {
         var enterPrimary = false   // Enter: left-click the gazed panel slot or keyboard key (take / put all)
         var enterSecondary = false // Shift+Enter: right-click it (put one)
         var typed: [TypedKey] = [] // text entry only: keys typed since the last poll
+        // Which Sense sensors a finger is resting on (capacitive touch, not press).
+        var touchL = HandTouch(), touchR = HandTouch()
+    }
+
+    /// Finger-on-sensor state for one Sense controller. A sensor only counts
+    /// once it has reported a touch at least once (`*Known`): if touch never
+    /// comes through, everything that reads it falls back to today's behaviour.
+    struct HandTouch {
+        var stick = false, a = false, b = false, grip = false, trigger = false
+        var stickKnown = false, gripKnown = false, triggerKnown = false
+        var thumbKnown: Bool { stickKnown }
+        /// Thumb is on the stick or a face button.
+        var thumbDown: Bool { stick || a || b }
+        /// Index finger lifted off the trigger (pointing).
+        var indexOut: Bool { triggerKnown && !trigger }
+        /// Thumb lifted off everything (thumbs up).
+        var thumbUp: Bool { thumbKnown && !thumbDown }
     }
 
     /// A key typed into the in-game text panel from a BLE keyboard.
@@ -262,6 +279,10 @@ final class GameInput {
     }
 
     private var pollDebug = 0
+    // Touch: when each sensor last reported a finger, and which have ever reported.
+    fileprivate var touchLast: [String: Double] = [:]
+    fileprivate var touchSeen: Set<String> = []
+    fileprivate static let touchGrace: Double = 0.12
 
     /// Deadzoned, combined state across all connected controllers.
     func poll() -> State {
@@ -269,6 +290,7 @@ final class GameInput {
         #if targetEnvironment(simulator)
         SimControl.shared.apply(&s, textEntry: textEntry)
         #endif
+        FingerPose.shared.set(left: s.touchL, right: s.touchR)
         return s
     }
 
@@ -317,8 +339,17 @@ final class GameInput {
             // by name; the hand comes from the vendor string "(L)" / "(R)".
             let p = c.physicalInputProfile
             let isLeft = isLeftHand(c, index: i, total: cs.count)
+            let touch = readTouch(c, left: isLeft)
+            if isLeft { s.touchL = touch } else { s.touchR = touch }
             let stick = p.dpads["Thumbstick"]
-            let sx = dz(stick?.xAxis.value ?? 0), sy = dz(stick?.yAxis.value ?? 0)
+            // Thumb off the stick: no movement at all, so a drifting stick can't
+            // slide or turn you. Thumb on: a smaller dead zone for fine moves.
+            // Only once this stick has reported touch; otherwise the old 0.15.
+            func dzs(_ v: Float) -> Float {
+                guard touch.stickKnown else { return dz(v) }
+                return touch.stick ? (abs(v) < 0.08 ? 0 : v) : 0
+            }
+            let sx = dzs(stick?.xAxis.value ?? 0), sy = dzs(stick?.yAxis.value ?? 0)
             let trigger = (p.buttons["Trigger"]?.value ?? 0) > 0.5
             let grip = p.buttons["Grip"]?.isPressed == true
             if debug {
@@ -497,5 +528,53 @@ final class PointerInput: @unchecked Sendable {
         let v = down || clicked
         clicked = false
         return v
+    }
+}
+
+extension GameInput {
+    /// Touch for one Sense controller, from the live input (touchedInput) or
+    /// the physical input profile (isTouched), whichever reports. Each sensor
+    /// stays "touched" for a short grace after the finger leaves, so sliding
+    /// between the stick and a face button doesn't flicker.
+    fileprivate func readTouch(_ c: GCController, left: Bool) -> HandTouch {
+        let live = c.input, prof = c.physicalInputProfile
+        let now = AppClock.seconds
+        let hand = left ? "L" : "R"
+        func raw(_ e: (any GCButtonElement)?, _ profName: String) -> Bool {
+            e?.touchedInput?.isTouched == true || prof.buttons[profName]?.isTouched == true
+        }
+        func sensor(_ key: String, _ on: Bool) -> (touched: Bool, known: Bool) {
+            let k = hand + key
+            if on {
+                touchLast[k] = now
+                if !touchSeen.contains(k) {
+                    touchSeen.insert(k)
+                    print("[touch] \(hand) \(key) reports touch"); fflush(stdout)
+                }
+            }
+            return (now - (touchLast[k] ?? -1) < Self.touchGrace, touchSeen.contains(k))
+        }
+        var t = HandTouch()
+        let st = sensor("stick", raw(live.buttons[.thumbstickButton], "Thumbstick Button"))
+        let ga = sensor("a", raw(live.buttons[.a], "Button A")), gb = sensor("b", raw(live.buttons[.b], "Button B"))
+        let gr = sensor("grip", raw(live.buttons[.grip], "Grip")), tr = sensor("trigger", raw(live.buttons[.trigger], "Trigger"))
+        t.stick = st.touched; t.a = ga.touched; t.b = gb.touched; t.grip = gr.touched; t.trigger = tr.touched
+        t.stickKnown = st.known; t.gripKnown = gr.known; t.triggerKnown = tr.known
+        return t
+    }
+}
+
+/// The latest finger pose per hand, written by GameInput.poll and read by the
+/// renderer (which draws a pointing finger / thumbs up on the blocky hand).
+final class FingerPose: @unchecked Sendable {
+    static let shared = FingerPose()
+    private let lock = NSLock()
+    private var l = GameInput.HandTouch(), r = GameInput.HandTouch()
+    func set(left: GameInput.HandTouch, right: GameInput.HandTouch) {
+        lock.lock(); l = left; r = right; lock.unlock()
+    }
+    func get(left: Bool) -> GameInput.HandTouch {
+        lock.lock(); defer { lock.unlock() }
+        return left ? l : r
     }
 }

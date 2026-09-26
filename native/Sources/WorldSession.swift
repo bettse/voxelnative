@@ -3303,8 +3303,14 @@ final class WorldSession {
                 gi.dig = chordPendingDig; gi.place = !chordPendingDig; chordWait = 0
             }
         } else if (gi.dig && !prevDig) || (gi.place && !prevPlace) {
-            chordWait = Self.chordWindow; chordPendingDig = gi.dig
-            gi.dig = false; gi.place = false
+            // Touch: if the finger for the other half of the chord isn't even
+            // on its button, this can't be a drop, so skip the wait.
+            let t = gi.touchR
+            let partnerOff = gi.dig ? (t.gripKnown && !t.grip) : (t.triggerKnown && !t.trigger)
+            if !partnerOff {
+                chordWait = Self.chordWindow; chordPendingDig = gi.dig
+                gi.dig = false; gi.place = false
+            }
         }
     }
 

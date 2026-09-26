@@ -30,6 +30,7 @@ final class SimControl: @unchecked Sendable {
     private var yawDelta: Float = 0
     private var typed: [GameInput.TypedKey] = []
     private var chats: [String] = []
+    private var touches: [String: Bool] = [:]   // "l.trigger" -> finger on (sensors never set stay unknown)
     private var _pitchDeg: Float = 0
     private var _aim: Aim? = nil
     private var queries: [(String, (String) -> Void)] = []
@@ -82,6 +83,7 @@ final class SimControl: @unchecked Sendable {
         turn <deg> | pitch <deg> (turn is relative body yaw; pitch is absolute head pitch)
         aim slot <n> | aim <list> <index> | aim widget <name> | aim uv <u> <v> | aim key <id> | aim off
         type <text> | chat <text>
+        touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
         state | slots | widgets  (JSON, answered on the next game tick)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
                  rt lt rgrip lgrip square triangle circle options create l3 r3
@@ -118,6 +120,9 @@ final class SimControl: @unchecked Sendable {
         case "type":
             for ch in rest { typed.append(ch == "\u{8}" ? .backspace : .char(ch)) }
         case "chat" where !rest.isEmpty: chats.append(String(rest))
+        case "touch" where a.count == 3 && ["l", "r"].contains(a[0]) && ["stick", "a", "b", "grip", "trigger"].contains(a[1]):
+            touches["\(a[0]).\(a[1])"] = a[2] == "1" || a[2] == "on"
+        case "touch" where a.first == "off": touches.removeAll()
         default:
             return "err unknown: \(line)"
         }
@@ -151,6 +156,19 @@ final class SimControl: @unchecked Sendable {
         var k = held
         for (key, n) in pulses { k.insert(key); pulses[key] = n > 1 ? n - 1 : nil }
         if !typed.isEmpty { s.typed += typed; typed = [] }
+        for (key, on) in touches {
+            let parts = key.split(separator: ".")
+            func set(_ t: inout GameInput.HandTouch) {
+                switch parts[1] {
+                case "stick": t.stick = on; t.stickKnown = true
+                case "a": t.a = on; t.stickKnown = true
+                case "b": t.b = on; t.stickKnown = true
+                case "grip": t.grip = on; t.gripKnown = true
+                default: t.trigger = on; t.triggerKnown = true
+                }
+            }
+            if parts[0] == "l" { set(&s.touchL) } else { set(&s.touchR) }
+        }
         if k.contains("esc") { s.escape = true; s.cancel = true; if !textEntry { s.koganeMenu = true } }
         if k.contains("enter") { s.enterPrimary = true; s.menuSelect = true }
         if k.contains("shift-enter") { s.enterSecondary = true; s.menuSelect = true }
