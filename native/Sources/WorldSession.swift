@@ -3342,17 +3342,34 @@ final class WorldSession {
     private var dowseSearchTimer: Float = 0
     private var dowsePulse: Float = 0          // 0..1 toward the next pulse
     private var dowseLogTimer: Float = 0
-    private var dowseIds: Set<UInt16> = []
     private static let dowseRadius = 32
 
+    private var prevDowseGripR = false
+    private var dowseHoldR = false, dowseHoldL = false   // after dowsing: keep that grip inert until released
     private func stepDowsing(_ gi: inout GameInput.State, dt: Float) {
-        let want = dowsingUnlocked && gi.place && gi.fast && !inventoryOpen && !koganeMenuOpen && !keyboardOpen && !dead
+        let usable = dowsingUnlocked && !inventoryOpen && !koganeMenuOpen && !keyboardOpen && !dead
+        // Starts only when the right grip is pressed while the left is already
+        // held, so that press is never a place (right first then left is just
+        // sprinting while placing). The controller grips themselves, not
+        // fast/place, which keys and the mouse also set.
+        let rightEdge = gi.gripR && !prevDowseGripR
+        prevDowseGripR = gi.gripR
+        let want = usable && gi.gripL && gi.gripR && (dowsing || rightEdge)
         if want != dowsing {
             dowsing = want
             dowseTarget = nil; dowseSearchTimer = 0; dowsePulse = 0
-            if want { input.rumble(intensity: 0.3, sharpness: 0.9, rightOnly: true) }
+            if want {
+                chordWait = 0   // no replay of a half-started drop chord as a place
+                input.rumble(intensity: 0.3, sharpness: 0.9, rightOnly: true)
+            } else {
+                // Whichever grip is still down stays inert until it's let go,
+                // or releasing the other one first would place or sprint.
+                dowseHoldR = gi.gripR; dowseHoldL = gi.gripL
+            }
             print("[dowse] \(want ? "start" : "stop")"); fflush(stdout)
         }
+        if dowseHoldR { if gi.gripR { gi.place = false } else { dowseHoldR = false } }
+        if dowseHoldL { if gi.gripL { gi.fast = false } else { dowseHoldL = false } }
         guard dowsing else { return }
         // The grips are the dowsing rods now: no sprint, no placing.
         gi.place = false; gi.fast = false
@@ -3388,27 +3405,29 @@ final class WorldSession {
     /// among loaded blocks. Runs every 1.5 s while dowsing: at most ~125
     /// mapblocks of 4096 nodes.
     private func nearestDiamond() -> SIMD3<Int>? {
-        if dowseIds.isEmpty {
-            for n in ["mcl_core:stone_with_diamond", "mcl_deepslate:deepslate_with_diamond"] {
-                if let id = client.nodes.id(for: n) { dowseIds.insert(id) }
-            }
-            if dowseIds.isEmpty { return nil }
-        }
+        // Looked up each search (every 1.5 s): ids change if the server's mods do.
+        let ids = ["mcl_core:stone_with_diamond", "mcl_deepslate:deepslate_with_diamond"].compactMap { client.nodes.id(for: $0) }
+        guard let id0 = ids.first else { return nil }
+        let id1 = ids.count > 1 ? ids[1] : id0
         let eye = player.origin()
         let e = SIMD3<Int>(Int(floor(eye.x)), Int(floor(eye.y)), Int(floor(eye.z)))
         let r = Self.dowseRadius, rb = (r + 15) / 16
         let eb = SIMD3<Int>(e.x >> 4, e.y >> 4, e.z >> 4)
         let blocks = client.world.blocks
-        var best: SIMD3<Int>? = nil, bestD2 = Int.max
+        var best: SIMD3<Int>? = nil, bestD2 = r * r + 1
         for bx in (eb.x - rb)...(eb.x + rb) { for by in (eb.y - rb)...(eb.y + rb) { for bz in (eb.z - rb)...(eb.z + rb) {
-            guard let b = blocks[SIMD3(bx, by, bz)] else { continue }
-            let p0 = b.param0
-            for i in 0..<p0.count where dowseIds.contains(p0[i]) {
-                // index = x + y*16 + z*256 (WorldMap.index)
-                let n = SIMD3(bx * 16 + (i & 15), by * 16 + ((i >> 4) & 15), bz * 16 + (i >> 8))
-                let dv = n &- e
-                let d2 = dv.x * dv.x + dv.y * dv.y + dv.z * dv.z
-                if d2 <= r * r && d2 < bestD2 { bestD2 = d2; best = n }
+            // Skip a mapblock whose nearest point is already out of range.
+            let lo = SIMD3(bx * 16, by * 16, bz * 16)
+            let cx = max(lo.x, min(e.x, lo.x + 15)) - e.x, cy = max(lo.y, min(e.y, lo.y + 15)) - e.y, cz = max(lo.z, min(e.z, lo.z + 15)) - e.z
+            guard cx * cx + cy * cy + cz * cz < bestD2, let b = blocks[SIMD3(bx, by, bz)] else { continue }
+            b.param0.withUnsafeBufferPointer { p0 in
+                for i in 0..<p0.count where p0[i] == id0 || p0[i] == id1 {
+                    // index = x + y*16 + z*256 (WorldMap.index)
+                    let n = SIMD3(lo.x + (i & 15), lo.y + ((i >> 4) & 15), lo.z + (i >> 8))
+                    let dv = n &- e
+                    let d2 = dv.x * dv.x + dv.y * dv.y + dv.z * dv.z
+                    if d2 < bestD2 { bestD2 = d2; best = n }
+                }
             }
         } } }
         return best
@@ -3804,7 +3823,8 @@ final class WorldSession {
             placeRepeatArmed = false
         }
         prevPlace = gi.place
-        updateEat(dt: dt, gripHeld: simGripOverride ?? (gi.place || foodAtMouth(gi)))   // hold grip, or food to the mouth, to eat; also mirrors RMB bit
+        // Not while dowsing: the "rods" near your face shouldn't eat.
+        updateEat(dt: dt, gripHeld: simGripOverride ?? (dowsing ? false : (gi.place || foodAtMouth(gi))))   // hold grip, or food to the mouth, to eat; also mirrors RMB bit
         client.digHeld = gi.dig                  // LMB control bit: mcl_playerplus reads control.LMB
         client.jumpHeld = gi.jump                // jump bit: horse jump, boat dismount
         // Sim aid: periodically dig straight down on the local dev world to

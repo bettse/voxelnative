@@ -41,6 +41,7 @@ final class GameInput {
         var koganeMenu = false  // RIGHT Menu (Options) or Esc: open the pause menu
         var dismissChat = false // RIGHT stick click: clear the join/chat lines
         var cross = false       // RIGHT X (Button A): unassigned; the Konami code's final "A"
+        var gripL = false, gripR = false   // the controller grips themselves (fast/place also come from keys)
         var menuNavY: Float = 0 // EITHER stick Y, for menu navigation
         var menuSelect = false  // EITHER trigger, for menu confirm
         var lookYaw: Float = 0  // MOUSE X: a direct yaw delta (radians) this frame
@@ -130,7 +131,13 @@ final class GameInput {
         nc.addObserver(forName: .GCControllerDidDisconnect, object: nil, queue: .main) { [weak self] note in
             let c = note.object as? GCController
             print("[input] GCControllerDidDisconnect vendor=\(c?.vendorName ?? "?")"); fflush(stdout)
-            if let c { self?.hapticEngines[ObjectIdentifier(c)]?.stop(); self?.hapticEngines[ObjectIdentifier(c)] = nil }
+            if let c {
+                let k = ObjectIdentifier(c)
+                self?.hapticEngines[k]?.stop(); self?.hapticEngines[k] = nil
+                // Forget its hand too, so rightOnly/leftOnly fall back to all
+                // controllers instead of pulsing a controller that's gone.
+                self?.leftHapticKeys.remove(k); self?.rightHapticKeys.remove(k)
+            }
             self?.assignPlayerIndices()
             self?.refresh()
         }
@@ -397,6 +404,7 @@ final class GameInput {
             }
         }
         if debug { fflush(stdout) }
+        s.gripL = leftGrip; s.gripR = rightGrip
         // A BLE keyboard is an alternative to the Sense controllers: gaze still
         // aims, the keyboard drives movement + actions. Applied after the sticks
         // so a key press wins only when actually held (either input works).

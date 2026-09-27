@@ -201,6 +201,8 @@ final class SimControl: @unchecked Sendable {
         if k.contains("lt") || k.contains("rt") { s.menuSelect = true }
         if k.contains("shift") || k.contains("l3") { s.sneak = true }
         if k.contains("e") || k.contains("lgrip") { s.fast = true }
+        if k.contains("lgrip") { s.gripL = true }
+        if k.contains("rgrip") { s.gripR = true }
         if k.contains("f") || k.contains("rt") { s.dig = true }
         if k.contains("f") { s.menuSelect = true }
         if k.contains("r") || k.contains("rgrip") { s.place = true }
