@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import simd
 
 /// Per-frame model geometry (mob meshes already transformed into origin space,
@@ -80,6 +81,14 @@ final class ModelTextureHandoff {
     /// full until they match, so a dropped/failed rebuild (device memory pressure)
     /// self-heals instead of leaving high-index icons sampling out of range.
     func reportBuilt(_ n: Int) { lock.lock(); _builtCount = n; lock.unlock() }
+
+    /// The GPU array itself, and how many of its layers hold data. Kept here,
+    /// not in the Renderer, so it outlives a renderer: when visionOS closes and
+    /// we reopen the world, the new renderer picks up the same texture instead
+    /// of needing every layer re-uploaded, which is what lets the session drop
+    /// its CPU copy of each layer once it's on the GPU. Render thread only.
+    var gpuArray: MTLTexture?
+    var gpuLogical = 0
     var builtCount: Int { lock.lock(); defer { lock.unlock() }; return _builtCount }
 
     /// Queue a full layer set. Patches queued alongside are KEPT, not folded

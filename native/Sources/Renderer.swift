@@ -220,7 +220,10 @@ actor Renderer {
     private var lastModelGen = -1
     private var lastOverlayGen = -1
     private var lastBlendGen = -1
-    var modelTextureArray: MTLTexture?
+    var modelTextureArray: MTLTexture? {
+        get { appModel.modelTextureHandoff.gpuArray }
+        set { appModel.modelTextureHandoff.gpuArray = newValue }
+    }
     // SET_SKY "skybox" cube (the End). A 1x1 black cube stays bound when
     // there is none so skyFragment always has a texture at its slot.
     var skyboxTexture: MTLTexture?
@@ -281,7 +284,10 @@ actor Renderer {
     }()
     // Layers of modelTextureArray that hold real data; arrayLength is the
     // allocation (with headroom). Grows in place until it overflows.
-    private var modelArrayLogical = 0
+    private var modelArrayLogical: Int {
+        get { appModel.modelTextureHandoff.gpuLogical }
+        set { appModel.modelTextureHandoff.gpuLogical = newValue }
+    }
     var captureTexture: MTLTexture?   // CPU-readable copy of a frame, for screenshots
     let entityPipelineState: MTLRenderPipelineState
     let handPipelineState: MTLRenderPipelineState
@@ -2229,7 +2235,15 @@ actor Renderer {
                 // On failure leave the old array + logical count alone: builtCount
                 // stays behind postedCount and the producer re-posts (self-heal).
                 guard let tex = device.makeTexture(descriptor: desc) else { return }
-                for i in 0..<min(texs.count, desc.arrayLength) { upload(tex, i) }
+                // Existing layers are copied GPU to GPU (the session no longer
+                // keeps their pixels); only the new ones come from the post.
+                let keep = min(modelArrayLogical, desc.arrayLength, modelTextureArray?.arrayLength ?? 0)
+                if keep > 0, let old = modelTextureArray, let cb = commandQueue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
+                    blit.copy(from: old, sourceSlice: 0, sourceLevel: 0, to: tex, destinationSlice: 0, destinationLevel: 0,
+                              sliceCount: keep, levelCount: 1)
+                    blit.endEncoding(); cb.commit()
+                }
+                for i in keep..<min(texs.count, desc.arrayLength) { upload(tex, i) }
                 modelTextureArray = tex
                 modelArrayLogical = texs.count
                 appModel.modelTextureHandoff.reportBuilt(texs.count)

@@ -1087,13 +1087,11 @@ final class WorldSession {
             self.lastPostedAtlasGen = -1
             self.fullRemesh = true      // new renderer: rebuild + re-post the whole buffer
             self.dirty = true
-            // Same for everything else the renderer holds on the GPU: the model
-            // textures (skins, mob textures, HUD/panel text), the End skybox and
-            // the sun/moon. The handoff's "built" count was the OLD renderer's,
-            // so the catch-up check never fired and a resumed world had no arms,
-            // no mobs and blank menus.
-            self.modelTexPostedCount = -1
-            self.modelTextureHandoff.reportBuilt(0)
+            // The End skybox and the sun/moon live in the renderer, so send them
+            // again. Model textures (skins, mob textures, HUD/panel text) don't
+            // need it: they live in ModelTextureHandoff.gpuArray, which outlives
+            // the renderer. (Before that, a resumed world had no arms, no mobs
+            // and blank menus, because nothing re-sent them.)
             self.skyboxBuilt = ["(new renderer)"]
             self.skyBodiesBuilt = []
             self.client.connect(host: Self.host, port: Self.port)
@@ -7615,14 +7613,38 @@ final class WorldSession {
                 // wheat seeds drawn as iron boots.
                 if !modelTexDirty.isEmpty {
                     modelTextureHandoff.post(patches: modelTexDirty.map { ModelTexPatch(index: $0, rgba: modelTexData[$0]) })
+                    for i in modelTexDirty { patchedSinceFree.insert(i) }
                 }
                 modelTexDirty.removeAll()
             } else if !modelTexDirty.isEmpty {
                 // Only existing layers' pixels changed: patch them in place.
                 let patches = modelTexDirty.map { ModelTexPatch(index: $0, rgba: modelTexData[$0]) }
                 modelTextureHandoff.post(patches: patches)
+                for i in modelTexDirty { patchedSinceFree.insert(i) }
                 modelTexDirty.removeAll()
             }
+        }
+        freeUploadedModelPixels()
+    }
+
+    /// Drop the CPU pixels of every layer the renderer has on the GPU (it keeps
+    /// the array across renderers and copies layers GPU-to-GPU when it grows),
+    /// so a long session doesn't hold a second copy of every skin, icon and
+    /// label: 256 KB a layer, ~119 MB at the 476 layers seen on the headset.
+    /// A patch hands the handoff its own copy, so a patched layer can be
+    /// dropped once it's posted too. Layers past builtCount keep their pixels:
+    /// a grow the renderer dropped gets re-posted from them.
+    private var pixelsFreedUpTo = 0
+    private var patchedSinceFree: Set<Int> = []
+    private func freeUploadedModelPixels() {
+        let built = min(modelTextureHandoff.builtCount, modelTexData.count)
+        if built > pixelsFreedUpTo {
+            for i in pixelsFreedUpTo..<built where !modelTexDirty.contains(i) { modelTexData[i] = [] }
+            pixelsFreedUpTo = built
+        }
+        if !patchedSinceFree.isEmpty {
+            for i in patchedSinceFree where i < built && !modelTexDirty.contains(i) { modelTexData[i] = [] }
+            patchedSinceFree.removeAll()
         }
     }
 
