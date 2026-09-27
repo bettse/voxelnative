@@ -96,14 +96,37 @@ final class AppModel {
         keyboardOn = GCKeyboard.coalesced != nil
         print("[input] sense L=\(l) R=\(r) kbd=\(keyboardOn)"); fflush(stdout)
         lossTimer?.invalidate(); lossTimer = nil
-        if !controllersReady, immersiveSpaceState != .closed {
-            lossTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
-                guard let self, !self.controllersReady, self.immersiveSpaceState != .closed else { return }
-                print("[input] controller lost in-game -> back to launcher"); fflush(stdout)
+        if controllersReady {
+            if lossCountdownShown { session.showControllerLoss(secondsLeft: nil); lossCountdownShown = false }
+            return
+        }
+        guard immersiveSpaceState != .closed else { return }
+        // Controllers gone mid-game: a visible countdown first (they often
+        // come back within a second or two), and only leave if they don't.
+        // The first 2 s stay quiet so a radio blip doesn't flash a warning.
+        var left = Self.lossGrace
+        lossTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] t in
+            guard let self else { t.invalidate(); return }
+            guard !self.controllersReady, self.immersiveSpaceState != .closed else {
+                t.invalidate(); self.lossTimer = nil
+                if self.lossCountdownShown { self.session.showControllerLoss(secondsLeft: nil); self.lossCountdownShown = false }
+                return
+            }
+            left -= 1
+            if left <= 0 {
+                t.invalidate(); self.lossTimer = nil; self.lossCountdownShown = false
+                print("[input] controllers lost for \(Self.lossGrace) s -> back to launcher"); fflush(stdout)
+                // Exit to menu sends the server a goodbye, so the character
+                // leaves the world at once instead of standing there for the
+                // server's ~30 s timeout, where mobs could kill it.
                 self.requestExit(.toMenu)
+            } else if left <= Self.lossGrace - 2 {
+                self.session.showControllerLoss(secondsLeft: left); self.lossCountdownShown = true
             }
         }
     }
+    static let lossGrace = 12          // seconds without controllers before leaving the world
+    @ObservationIgnored private var lossCountdownShown = false
 
     func startSession() { session.appModel = self; session.start() }
     func stopSession() { session.stop() }

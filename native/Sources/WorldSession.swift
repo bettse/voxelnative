@@ -3316,6 +3316,18 @@ final class WorldSession {
             stopVideo()
         }
     }
+    /// Controllers lost: a countdown notice until the world closes (nil clears it).
+    func showControllerLoss(secondsLeft: Int?) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            if let s = secondsLeft {
+                self.noticeText = "Controllers disconnected, leaving in \(s)"; self.noticeExpiry = 0
+            } else if self.noticeText?.hasPrefix("Controllers disconnected") == true {
+                self.noticeText = "Controllers back"; self.noticeExpiry = AppClock.seconds + 1.5
+            }
+        }
+    }
+
     /// Called by the renderer once Photos has the clip (or refused it).
     func videoSaved(ok: Bool, denied: Bool) {
         queue.async { [weak self] in
