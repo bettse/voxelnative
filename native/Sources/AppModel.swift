@@ -164,5 +164,12 @@ final class AppModel {
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.session.start()
         }
+        // Log heat and memory changes as they happen (see WorldSession.healthNote).
+        nc.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { _ in
+            print("[health] thermal changed \(WorldSession.healthNote()) at=\(WorldSession.clockTime())"); fflush(stdout)
+        }
+        nc.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
+            print("[health] MEMORY WARNING \(WorldSession.healthNote()) at=\(WorldSession.clockTime())"); fflush(stdout)
+        }
     }
 }

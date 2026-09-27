@@ -405,3 +405,16 @@ final class BedView: @unchecked Sendable {
         set { lock.lock(); _tilt = newValue; lock.unlock() }
     }
 }
+
+/// The server's zoom (TOCLIENT_FOV) when it's a spyglass-style narrow view:
+/// the FOV in degrees, 0 = no zoom. Written by the session, read by the
+/// renderer, which shows it as a lens rather than re-projecting the headset.
+final class ZoomView: @unchecked Sendable {
+    static let shared = ZoomView()
+    private let lock = NSLock()
+    private var _fov: Float = 0
+    var fovDeg: Float {
+        get { lock.lock(); defer { lock.unlock() }; return _fov }
+        set { lock.lock(); _fov = newValue; lock.unlock() }
+    }
+}

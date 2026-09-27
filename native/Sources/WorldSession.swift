@@ -5,6 +5,7 @@
 // local dev world to stage a test scene.
 import Foundation
 import os
+import Darwin
 import CoreText
 import CoreGraphics
 import simd
@@ -1122,6 +1123,7 @@ final class WorldSession {
     func stop() {
         timer?.cancel(); timer = nil
         screenshotFlag.recording = false   // leaving the world finishes a clip in progress
+        ZoomView.shared.fovDeg = 0
         BedView.shared.tilt = 0
         started = false     // main-thread re-entry guard: allow a later start()
         // The rest is session-queue state; set it on the queue (this async is
@@ -1211,6 +1213,10 @@ final class WorldSession {
     private func tick(dt: Float) {
         stepSkybox()
         stepBedView(dt: dt)
+        // Spyglass: an absolute FOV under 40 degrees is a zoom request (mcl_fovapi
+        // sends multipliers for sprint/bow, those stay ignored).
+        let fo = client.fovOverride
+        ZoomView.shared.fovDeg = (!fo.isMultiplier && fo.fov > 0 && fo.fov < 40) ? fo.fov : 0
         stepSkyBodies()
         // An uncontended unfair lock is ~20 ns; the audio queue only ever
         // appends here when a handled sound actually ends.
@@ -3074,7 +3080,7 @@ final class WorldSession {
         posLogTimer += Double(dt)
         if posLogTimer >= 5 { posLogTimer = 0
             let gts = groundTop.map { String($0) } ?? "nil"
-            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime())"); fflush(stdout) }
+            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime()) \(Self.healthNote())"); fflush(stdout) }
         // Underground the engine slides the sky and fog toward the "indoors"
         // colour scaled by how much sunlight the camera can see
         // (Sky::update, getBackgroundBrightness). Cheap stand-in: the day-bank
@@ -5519,6 +5525,9 @@ final class WorldSession {
         // the vitals and doesn't sit on top of the heart row.
         if e.type == 0, e.text.hasPrefix("mcl_offhand_slot") { return true }
         if e.type == 3, e.text == "offhand" { return true }
+        // The spyglass's black scope mask: we zoom with our own lens disc
+        // (Renderer.prepareLens), and the mask drew as a black-framed square.
+        if e.type == 0, e.text.hasPrefix("mcl_spyglass_scope") { return true }
         return false
     }
 
@@ -6184,6 +6193,25 @@ final class WorldSession {
     /// Photos screenshot times.
     private static let clockFormat: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f }()
     static func clockTime() -> String { clockFormat.string(from: Date()) }
+
+    /// Heat and memory, for working out why visionOS closes the world: it can
+    /// close an immersive app when the headset runs hot or memory runs short,
+    /// and neither shows up in the log otherwise.
+    static func healthNote() -> String {
+        let t: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: t = "nominal"
+        case .fair: t = "fair"
+        case .serious: t = "serious"
+        case .critical: t = "critical"
+        @unknown default: t = "?"
+        }
+        let freeMB = os_proc_available_memory() / (1024 * 1024)
+        var info = task_vm_info_data_t(), count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) } }
+        let usedMB = kr == KERN_SUCCESS ? Int(info.phys_footprint / (1024 * 1024)) : -1
+        return "thermal=\(t) memUsed=\(usedMB)MB memFree=\(freeMB)MB"
+    }
 
     private func postEntities() {
         frameUptime = AppClock.seconds
@@ -9913,6 +9941,7 @@ final class WorldSession {
                                          wieldTint: wieldName.flatMap { client.items.color(for: $0) }.map { -max($0, 1) } ?? 16777215,
                                          wieldTintAll: wieldName.flatMap { client.nodes.id(for: $0) }.map { client.nodes.kind($0) == .allfaces } ?? false,
                                          wieldScale: wieldName.map { max(0.5, min(2.5, client.items.wieldScale(for: $0).x)) } ?? 1,
+                                         wieldHeld: wieldName.map { client.items.caps(for: $0)?.groupCaps.isEmpty == false } ?? false,
                                          wieldCountLayer: wieldCountLayer, wieldCountAspect: wieldCountAspect,
                                          hotbar: hudF & 1 != 0 ? slots : [], wieldIndex: wi,
                                          slotLayer: atlas.hotbarSlotLayer,

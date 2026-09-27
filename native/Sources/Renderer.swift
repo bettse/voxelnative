@@ -1007,13 +1007,13 @@ actor Renderer {
     /// and back; thin edges give it depth.
     private func emitHandSlab(_ m: simd_float4x4, offset: SIMD3<Float>, size: Float,
                               layer: Int32, uv: SIMD2<Float>, light: Float = 255, tint: Float = 16777215,
-                              into v: inout [Float], idx: inout [UInt32]) {
+                              flat: Bool = false, into v: inout [Float], idx: inout [UInt32]) {
         let h = size * 0.5, d = size * 0.06        // half-size and half-depth
         let l = Float(layer)
         // Tilt so it reads like a first-person held tool (Minecraft-style): laid
         // back toward the player and rolled diagonally, so a pickaxe/axe extends
         // up-forward from the fist instead of lying flat. Tune on device.
-        let pitch: Float = -0.85, roll: Float = -0.55
+        let pitch: Float = flat ? 0 : -0.85, roll: Float = flat ? 0 : -0.55   // flat: the caller already posed it
         let cx = cosf(pitch), sx = sinf(pitch), cz = cosf(roll), sz = sinf(roll)
         func tilt(_ p: SIMD3<Float>) -> SIMD3<Float> {   // rotZ(roll) * rotX(pitch)
             let y1 = p.y * cx - p.z * sx, z1 = p.y * sx + p.z * cx
@@ -1096,10 +1096,29 @@ actor Renderer {
             let sp = now - wieldSwitchTime
             if sp >= 0 && sp < popDur { dipY = -popAmp * Float(sin(sp / popDur * .pi)) }   // down then back
             if hud.digging { swing = 0.5 * Float(sin(now * 2 * 2 * .pi)) }                  // ~2 Hz pitch swing
-            let grip = hand * matrix4x4_translation(0.0, 0.035 + dipY, -0.10)               // forward-up of the fist
-                            * matrix4x4_rotation(radians: swing, axis: SIMD3(1, 0, 0))
-            emitWield(w, grip: grip, side: 1, silhouette: hud.wieldSilhouette, scale: hud.wieldScale,
-                      tint: hud.wieldTint, tintAll: hud.wieldTintAll, light: hud.wieldLight, into: &v, idx: &idx)
+            if hud.wieldHeld, case .item(let layer, let uv) = w {
+                // Gripped: the icon's handle corner (tool icons are all drawn
+                // handle bottom-left, tip top-right) in the fist, its diagonal
+                // run forward along the controller and tipped up 20 degrees,
+                // the flat of the blade facing sideways like a real sword.
+                let size = 0.16 * hud.wieldScale
+                let held = hand * matrix4x4_translation(0.0, dipY, -0.05)                       // in the fist
+                         * matrix4x4_rotation(radians: swing, axis: SIMD3(1, 0, 0))
+                         * matrix4x4_rotation(radians: 20 * .pi / 180, axis: SIMD3(1, 0, 0))    // tip up
+                         * matrix4x4_rotation(radians: .pi / 2, axis: SIMD3(0, 1, 0))           // icon +X -> forward, flat faces sideways
+                         * matrix4x4_rotation(radians: -.pi / 4, axis: SIMD3(0, 0, 1))          // diagonal -> icon +X
+                         * matrix4x4_translation(0.35 * size, 0.35 * size, 0)                    // handle corner to the origin
+                if let sil = hud.wieldSilhouette {
+                    emitHandSilhouette(held, mesh: sil, size: size, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, into: &v, idx: &idx)
+                } else {
+                    emitHandSlab(held, offset: .zero, size: size * 0.94, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, flat: true, into: &v, idx: &idx)
+                }
+            } else {
+                let grip = hand * matrix4x4_translation(0.0, 0.035 + dipY, -0.10)               // forward-up of the fist
+                                * matrix4x4_rotation(radians: swing, axis: SIMD3(1, 0, 0))
+                emitWield(w, grip: grip, side: 1, silhouette: hud.wieldSilhouette, scale: hud.wieldScale,
+                          tint: hud.wieldTint, tintAll: hud.wieldTintAll, light: hud.wieldLight, into: &v, idx: &idx)
+            }
             // Count and wear both sit like a wristwatch: a small patch on top of
             // the wrist (hand-local +Y), just toward the elbow, raised off the
             // surface so it doesn't sink in. Anchored to `hand`, not `grip`, so
@@ -1835,8 +1854,9 @@ actor Renderer {
     /// Render the scene from the level camera into `t`. Reverse-Z infinite
     /// projection (Metal clip z 0..1, near -> 1), matching the eye pass's
     /// depth compare and clear. 60 degree vertical FOV.
-    private func encodeCamera(_ commandBuffer: MTLCommandBuffer, head: float4x4, into t: CameraTargets, label: String) -> Bool {
-        let fovY: Float = 60 * .pi / 180, near: Float = 0.05
+    private func encodeCamera(_ commandBuffer: MTLCommandBuffer, head: float4x4, into t: CameraTargets, label: String,
+                              fovDeg: Float = 60, worldOnly: Bool = false) -> Bool {
+        let fovY: Float = fovDeg * .pi / 180, near: Float = 0.05
         let f = 1 / tanf(fovY / 2), aspect = Float(t.w) / Float(t.h)
         let proj = float4x4(SIMD4(f / aspect, 0, 0, 0), SIMD4(0, f, 0, 0), SIMD4(0, 0, 0, -1), SIMD4(0, 0, near, 0))
         let vp = proj * Self.levelCamera(head).inverse
@@ -1864,7 +1884,7 @@ actor Renderer {
         guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return false }
         enc.label = label
         let viewport = MTLViewport(originX: 0, originY: 0, width: Double(t.w), height: Double(t.h), znear: 0, zfar: 1)
-        encodeScene(enc, viewportsIn: [viewport], vpBuffer: t.vp, vpOffset: 0, cullVP: vp, cullAll: true)
+        encodeScene(enc, viewportsIn: [viewport], vpBuffer: t.vp, vpOffset: 0, cullVP: vp, cullAll: true, worldOnly: worldOnly)
         enc.endEncoding()
         return true
     }
@@ -1874,6 +1894,47 @@ actor Renderer {
         guard let t = photoTargets, encodeCamera(commandBuffer, head: head, into: t, label: "Photo Encoder") else { return }
         let color = t.color, w = t.w, h = t.h
         commandBuffer.addCompletedHandler { [weak self] _ in self?.savePhoto(color, w, h) }
+    }
+
+    // MARK: Spyglass
+    // VoxeLibre's spyglass asks for an 8 degree FOV. Narrowing the whole
+    // headset view is sickening, so the zoom is a lens instead: the world
+    // rendered at that FOV into a square texture, shown as a disc in the
+    // middle of the view like looking through a real scope.
+    private var zoomTargets: CameraTargets?
+    private var lensVerts: [Float] = []
+    private var lensLog = 0
+    static let lensSize = 1024
+    private static let lensDistance: Float = 0.5, lensRadius: Float = 0.1   // about 23 degrees across
+
+    /// Render the magnified view (before the eye pass) and lay out the disc.
+    private func prepareLens(_ commandBuffer: MTLCommandBuffer, head: float4x4) {
+        lensVerts.removeAll(keepingCapacity: true)
+        let fov = ZoomView.shared.fovDeg
+        guard fov > 0 else { return }
+        if zoomTargets == nil { zoomTargets = makeCameraTargets(w: Self.lensSize, h: Self.lensSize, shared: false) }
+        guard let t = zoomTargets,
+              encodeCamera(commandBuffer, head: head, into: t, label: "Spyglass Encoder", fovDeg: fov, worldOnly: true) else {
+            print("[spyglass] no lens: targets=\(zoomTargets != nil)"); fflush(stdout); return
+        }
+        lensLog += 1
+        if lensLog % 90 == 1 { print("[spyglass] lens at \(fov) deg"); fflush(stdout) }
+        // Level like the camera, so the picture doesn't turn inside the lens.
+        let cam = Self.levelCamera(head)
+        let r = SIMD3<Float>(cam.columns.0.x, cam.columns.0.y, cam.columns.0.z)
+        let u = SIMD3<Float>(cam.columns.1.x, cam.columns.1.y, cam.columns.1.z)
+        let f = -SIMD3<Float>(cam.columns.2.x, cam.columns.2.y, cam.columns.2.z)
+        let c = SIMD3<Float>(cam.columns.3.x, cam.columns.3.y, cam.columns.3.z) + f * Self.lensDistance
+        let R = Self.lensRadius, n = 48
+        func vert(_ a: Float?) {
+            let (x, y): (Float, Float) = a.map { (cosf($0), sinf($0)) } ?? (0, 0)
+            let p = c + r * (x * R) + u * (y * R)
+            pushV9(&lensVerts, p.x, p.y, p.z, 0.5 + x * 0.5, 0.5 - y * 0.5, 0, 1.0, 255, 16777215)
+        }
+        for i in 0..<n {
+            let a0 = Float(i) / Float(n) * 2 * .pi, a1 = Float(i + 1) / Float(n) * 2 * .pi
+            vert(nil); vert(a0); vert(a1)
+        }
     }
 
     // MARK: Photo mode video
@@ -2290,7 +2351,8 @@ actor Renderer {
     /// matrix are what differ. cullAll draws every block (the photo camera's
     /// field of view isn't the eye's).
     private func encodeScene(_ renderEncoder: MTLRenderCommandEncoder, viewportsIn: [MTLViewport],
-                             vpBuffer: MTLBuffer, vpOffset: Int, cullVP: float4x4, cullAll: Bool) {
+                             vpBuffer: MTLBuffer, vpOffset: Int, cullVP: float4x4, cullAll: Bool,
+                             worldOnly: Bool = false) {
         renderEncoder.pushDebugGroup("Draw World")
 
         // Winding: the mesher winds faces counter-clockwise with outward
@@ -2467,6 +2529,10 @@ actor Renderer {
                                                 indexType: .uint32, indexBuffer: modelBlendIndexBuffer, indexBufferOffset: 0)
         }
 
+        // The spyglass lens view: world and mobs only. The HUD, hands and panels
+        // sit a metre from the head, so at 8 degrees they'd fill the lens.
+        if worldOnly { renderEncoder.popDebugGroup(); return }
+
         // Underwater tint: last, so it casts the whole view (world, entities,
         // HUD) toward water colour whenever the eye node is a liquid. Fullscreen
         // blended triangle; no vertex/index buffers (driven by vertex_id).
@@ -2574,6 +2640,18 @@ actor Renderer {
             renderEncoder.setRenderPipelineState(deathPipelineState)
             renderEncoder.setDepthStencilState(underwaterDepthState)
             renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            renderEncoder.popDebugGroup()
+        }
+        // Spyglass lens on top of everything (built this frame by prepareLens).
+        if !lensVerts.isEmpty, let lens = zoomTargets?.color {
+            renderEncoder.pushDebugGroup("Spyglass Lens")
+            renderEncoder.setRenderPipelineState(entityPipelineState)
+            renderEncoder.setDepthStencilState(noDepthState)
+            renderEncoder.setFragmentTexture(lens, index: TextureIndex.color.rawValue)
+            lensVerts.withUnsafeBytes { raw in
+                renderEncoder.setVertexBytes(raw.baseAddress!, length: raw.count, index: BufferIndex.meshPositions.rawValue)
+            }
+            renderEncoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: lensVerts.count / 9)
             renderEncoder.popDebugGroup()
         }
 
@@ -2698,6 +2776,10 @@ actor Renderer {
             perFrame.append(contentsOf: photoTargets?.allocations ?? [])
         }
         if video { perFrame.append(contentsOf: videoTargets?.allocations ?? []) }
+        if ZoomView.shared.fovDeg > 0 {
+            if zoomTargets == nil { zoomTargets = makeCameraTargets(w: Self.lensSize, h: Self.lensSize, shared: false) }
+            perFrame.append(contentsOf: zoomTargets?.allocations ?? [])
+        }
         residencySet.removeAllAllocations()   // clear the prior frame's set (slot's GPU work is done)
         residencySet.addAllocations(perFrame)
         residencySet.commit()                 // one commit per frame, not two
@@ -2721,6 +2803,8 @@ actor Renderer {
         }
         commandBuffer.useResidencySet(worldRes)
         #endif
+
+        prepareLens(commandBuffer, head: head)
 
         /// Final pass rendering code here
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
@@ -2771,7 +2855,7 @@ actor Renderer {
     func renderLoop() {
         while true {
             if layerRenderer.state == .invalidated {
-                print("Layer is invalidated \(Date())")
+                print("Layer is invalidated \(Date()) \(WorldSession.healthNote())")
                 Task { @MainActor in
                     appModel.immersiveSpaceState = .closed
                     if !appModel.exitingByUser {

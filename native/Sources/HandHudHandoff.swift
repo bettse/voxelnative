@@ -44,6 +44,10 @@ struct HandHudState {
     // engine's wieldmesh scale: VoxeLibre tools are 1.8, shields 2, rods 1.5,
     // so they read at desktop proportions instead of toy-sized.
     var wieldScale: Float = 1
+    // A tool (it has dig capabilities: swords, axes, pickaxes, shovels, hoes,
+    // shears): drawn gripped, handle in the fist and blade along the
+    // controller, instead of the flat card tilted up in front of the fist.
+    var wieldHeld = false
     // Wielded stack count: a baked digit layer in the MODEL texture array
     // (not the node atlas), drawn on the right hand for stackable items >1. -1 =
     // no count (single item or a tool). Items never have both a count and wear.
