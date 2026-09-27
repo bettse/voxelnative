@@ -9472,8 +9472,13 @@ final class WorldSession {
             appendNodeSolidBoxes(SIMD3(x, y, z), into: &floorScratch, cur: &cur)
         } }
         var top: Float? = nil
+        // Only a surface the feet have sunk a little into (it happens a few
+        // hundredths per tick). A box whose top is well above the feet is the
+        // side of a neighbouring block the footprint grazed; lifting onto it
+        // popped a mob a whole block up until the next server update dropped
+        // it back (the "jumping" witches).
         for b in floorScratch where b.lo.x < hi.x && b.hi.x > lo.x && b.lo.z < hi.z && b.hi.z > lo.z
-                                   && b.lo.y <= lo.y && b.hi.y > lo.y {
+                                   && b.lo.y <= lo.y && b.hi.y > lo.y && b.hi.y - lo.y <= 0.5 {
             top = max(top ?? b.hi.y, b.hi.y)
         }
         return top
