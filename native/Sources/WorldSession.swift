@@ -6728,7 +6728,7 @@ final class WorldSession {
         }
         // Armor moved to a left-wrist gauntlet (postHandHud/buildHandHud),
         // so it no longer draws as a peripheral column here.
-        if !inBed { appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud) }
+        appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud)
         // The offhand item is held in the left hand now (postHandHud), not
         // drawn as a HUD icon above the hunger row.
         // Hotbar is now wrist-anchored (postHandHud / buildHandHud), not head-locked.
@@ -6992,12 +6992,21 @@ final class WorldSession {
     /// left. Only once there is any XP, like VoxeLibre's own HUD. The level
     /// digits are drawn in the overlay stream (appendXpLevel) since text lives
     /// in the model texture set, not the node atlas these billboards sample.
+    /// The XP bar and its level number show and hide together, and sit at the
+    /// same distance: they're drawn in two passes (the digits are text in the
+    /// overlay stream), and gating them separately let the number linger in bed.
+    private var xpHudShown: Bool {
+        let (level, fraction) = xpDisplay()
+        return !inBed && (level > 0 || fraction > 0)
+    }
+    private static let xpHudDist: Float = 1.35   // focal plane, was 1.7 (HUD P1/P9)
+
     private func appendXpHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                              into billboards: inout [EntityInstance]) {
-        let (level, fraction) = xpDisplay()
-        guard level > 0 || fraction > 0 else { return }
+        guard xpHudShown else { return }
+        let (_, fraction) = xpDisplay()
         let frac = max(0, min(1, fraction))
-        let hudDist: Float = 1.35          // focal plane, was 1.7 (HUD P1/P9)
+        let hudDist = Self.xpHudDist
         // A flat row across the bottom of view, just above the hearts / hunger
         // rows. It used to bow (+0.35 rad/rad^2, the ends 1.5 degrees above
         // the centre) and read as bent next to the level rows (Eric).
@@ -7035,7 +7044,7 @@ final class WorldSession {
     /// The XP level digits, in XP green, just above the bar (overlay stream).
     private func appendXpLevel(v: inout [Float], idx: inout [UInt32]) {
         let (level, _) = xpDisplay()
-        guard level > 0, highlightLayer >= 0, !inBed else { return }
+        guard xpHudShown, level > 0, highlightLayer >= 0 else { return }
         let text = String(level)
         if xpLevelLayer == -1 || xpLevelText != text {
             let px = Self.renderTextRGBA(text, canvas: ModelTextureHandoff.size, fontFrac: 0.30)
@@ -7055,8 +7064,10 @@ final class WorldSession {
         // the bar and number never drift apart the way the old two-anchor
         // layout did.
         let dir = simd_normalize(hf + hu * tanf(xpBarElev() + 0.05))
-        let center = headPos + dir * 1.7
-        appendQuad(center: center, right: hr, up: hu, hw: 0.10, hh: 0.10,
+        // Same distance as the bar, the digits scaled to keep their old size.
+        let k = Self.xpHudDist / 1.7
+        let center = headPos + dir * Self.xpHudDist
+        appendQuad(center: center, right: hr, up: hu, hw: 0.10 * k, hh: 0.10 * k,
                    layer: xpLevelLayer, tint: Self.packTint(128, 255, 32), v: &v, idx: &idx)
     }
 
