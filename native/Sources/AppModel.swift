@@ -103,7 +103,8 @@ final class AppModel {
         guard immersiveSpaceState != .closed else { return }
         // Controllers gone mid-game: a visible countdown first (they often
         // come back within a second or two), and only leave if they don't.
-        // The first 2 s stay quiet so a radio blip doesn't flash a warning.
+        // The first second stays quiet so a radio blip doesn't flash a warning,
+        // then 3-2-1 (Eric: 12 s was too long to stand there defenceless).
         var left = Self.lossGrace
         lossTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] t in
             guard let self else { t.invalidate(); return }
@@ -120,12 +121,12 @@ final class AppModel {
                 // leaves the world at once instead of standing there for the
                 // server's ~30 s timeout, where mobs could kill it.
                 self.requestExit(.toMenu)
-            } else if left <= Self.lossGrace - 2 {
+            } else if left <= Self.lossGrace - 1 {
                 self.session.showControllerLoss(secondsLeft: left); self.lossCountdownShown = true
             }
         }
     }
-    static let lossGrace = 12          // seconds without controllers before leaving the world
+    static let lossGrace = 4           // seconds without controllers before leaving the world
     @ObservationIgnored private var lossCountdownShown = false
 
     func startSession() { session.appModel = self; session.start() }

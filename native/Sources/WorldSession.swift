@@ -6253,7 +6253,12 @@ final class WorldSession {
                     e.pos = parent.pos + SIMD3(l.x * ca - l.z * sa, l.y, l.x * sa + l.z * ca)
                 }
             }
-            let node = SIMD3(Int(floor(e.pos.x)), Int(floor(e.pos.y)), Int(floor(e.pos.z)))   // our grid: containing node = floor
+            // Light from the middle of the collision box, like desktop's
+            // GenericCAO::getLightPosition. Sampled at the feet, a mob whose
+            // feet dipped into a block (snow, a slab) read that block's light,
+            // 0, and drew solid black.
+            let lp = e.pos + (e.cbMin + e.cbMax) * 0.5
+            let node = SIMD3(Int(floor(lp.x)), Int(floor(lp.y)), Int(floor(lp.z)))   // our grid: containing node = floor
             // ObjectProperties.glow self-illuminates: raise each light bank to at
             // least `glow` (glow < 0 = full bright). Glow squid/blaze, dropped
             // light blocks, TNT minecart, burning mobs render lit in the dark.
