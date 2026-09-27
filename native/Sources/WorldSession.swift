@@ -4187,8 +4187,8 @@ final class WorldSession {
             // default), a hanging one needs the node above (an==4). Without the
             // support the server drops the node, so predicting it flickers.
             // We handle only the Y-axis cases: wallmounted support (torches) and
-            // the facedir an==2 case depend on a direction that's mirrored in our
-            // frame, so leave those to the server rather than risk a false refuse.
+            // the facedir an==2 case depend on the mount direction, left to the
+            // server rather than risk a false refuse.
             let an = client.nodes.groups(id)["attached_node"] ?? 0
             let pt2 = phys.pt2(id)
             let wallmounted = pt2 == 4 || pt2 == 10
@@ -4201,7 +4201,10 @@ final class WorldSession {
                 return false   // interact already reported; skip the local prediction
             }
             if client.nodes.isBuildableTo(client.world.nodeId(nodepos)) {
-                let p2 = predictedParam2(id: id, nodepos: nodepos, neighborpos: hit.under, item: name)
+                // game.cpp passes nodepos = the pointed node, neighborpos = the
+                // one in front of it; swapped, a floor-mounted node predicted as
+                // ceiling-mounted until the server corrected it.
+                let p2 = predictedParam2(id: id, nodepos: hit.under, neighborpos: hit.above, item: name)
                 client.world.setNode(nodepos, param0: id, param2: p2)
                 markNodeDirty(nodepos); remeshCooldown = 0   // remesh next tick, not after the 0.4s coalesce
                 // The item's sound_place, at the placed node, like SoundMaker.
@@ -7690,7 +7693,10 @@ final class WorldSession {
         if let m = modelCache[name] { return m }
         if name.isEmpty || modelFailed.contains(name) { return nil }
         guard let data = client.media.store[name] else { return nil }   // not downloaded yet
-        if let m = B3DLoader.load(data) { modelCache[name] = m; return m }
+        // .obj too (arrows, tridents, rockets, the armor stand): Luanti treats
+        // both formats the same; without this they fell back to a sprite.
+        let m = name.lowercased().hasSuffix(".obj") ? OBJLoader.load(data) : B3DLoader.load(data)
+        if let m { modelCache[name] = m; return m }
         modelFailed.insert(name); return nil
     }
 
@@ -8087,6 +8093,12 @@ final class WorldSession {
         [SIMD3(-1, -1, 1), SIMD3(1, -1, 1), SIMD3(1, 1, 1), SIMD3(-1, 1, 1)],       // +Z
         [SIMD3(1, -1, -1), SIMD3(-1, -1, -1), SIMD3(-1, 1, -1), SIMD3(1, 1, -1)],   // -Z
     ]
+    /// Luanti's UV at each corner above (WorldMesher.boxUV), same as the world mesh,
+    /// so a falling block or dropped item isn't textured mirrored.
+    private static let unitCubeUVs: [[SIMD2<Float>]] = {
+        let normals: [SIMD3<Int>] = [SIMD3(0, 1, 0), SIMD3(0, -1, 0), SIMD3(1, 0, 0), SIMD3(-1, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 0, -1)]
+        return unitCubeFaces.enumerated().map { fi, f in f.map { WorldMesher.boxUV(normals[fi], ($0 + 1) * 0.5) } }
+    }()
 
     /// appendItemModel (world-locked + gentle spin); per-face node-atlas layers in
     /// the +Y,-Y,+X,-X,+Z,-Z order NodeRegistry uses.
@@ -8104,12 +8116,11 @@ final class WorldSession {
         let spinA = spin ? Float(frameUptime.truncatingRemainder(dividingBy: 1000)) * (Float.pi * 0.5) : 0
         let a = spinA + playerYaw
         let ca = cos(a), sa = sin(a)
-        let uvs = Self.quadUVsBL
         let half = SIMD3<Float>(h, h, h)
         for fi in 0..<6 {
             let vb = UInt32(v.count / 9)
             let l = Float(faceLayers[fi])
-            let f = Self.unitCubeFaces[fi]
+            let f = Self.unitCubeFaces[fi], uvs = Self.unitCubeUVs[fi]
             for k in 0..<4 {
                 let c = f[k] * half
                 // e.pos is the item's centre (symmetric collisionbox), so centre
@@ -8118,7 +8129,7 @@ final class WorldSession {
                 // its world spot instead of mirroring across the player (#drop).
                 let lx = c.x * scale, ly = c.y * scale, lz = c.z * scale
                 let wx = lx * ca - lz * sa, wz = lx * sa + lz * ca
-                pushV(&v, op.x + wx, op.y + ly, -(op.z + wz), uvs[k].0, uvs[k].1, l, 1.0, light, 16777215)
+                pushV(&v, op.x + wx, op.y + ly, -(op.z + wz), uvs[k].x, uvs[k].y, l, 1.0, light, 16777215)
             }
             pushQuad(&idx, vb)
         }
@@ -8137,17 +8148,16 @@ final class WorldSession {
         let rx = (pos.x - eye.x) * scale, ry = (pos.y - eye.y) * scale, rz = (pos.z - eye.z) * scale
         let op = SIMD3<Float>(rx * cosY - rz * sinY, ry, rx * sinY + rz * cosY)
         let ca = cos(yaw), sa = sin(yaw)
-        let uvs = Self.quadUVsBL
         let half = SIMD3<Float>(hx, hy, hz)
         for f in 0..<6 where faces[f].layer >= 0 {
             let vb = UInt32(v.count / 9)
             let l = Float(faces[f].layer), uv = faces[f].uv
-            let fc = Self.unitCubeFaces[f]
+            let fc = Self.unitCubeFaces[f], uvs = Self.unitCubeUVs[f]
             for k in 0..<4 {
                 let c = fc[k] * half
                 let lx = c.x * scale, ly = c.y * scale, lz = c.z * scale
                 let wx = lx * ca - lz * sa, wz = lx * sa + lz * ca
-                pushV(&v, op.x + wx, op.y + ly, -(op.z + wz), uvs[k].0 * uv.x, uvs[k].1 * uv.y, l, 1.0, light, tint)
+                pushV(&v, op.x + wx, op.y + ly, -(op.z + wz), uvs[k].x * uv.x, uvs[k].y * uv.y, l, 1.0, light, tint)
             }
             pushQuad(&idx, vb)
         }

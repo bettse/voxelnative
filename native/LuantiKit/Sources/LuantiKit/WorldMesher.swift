@@ -10,7 +10,14 @@ import simd
 public enum WorldMesher {
     // normal, 4 CCW corners (unit cube), the Luanti tile index for this face,
     // and a directional shade.
-    private struct Face { let n: SIMD3<Int>; let c: [SIMD3<Float>]; let tile: Int; let shade: Float }
+    private struct Face {
+        let n: SIMD3<Int>; let c: [SIMD3<Float>]; let tile: Int; let shade: Float
+        let uv: [SIMD2<Float>]   // Luanti's UV at each corner (boxUV), so textures aren't mirrored
+        init(n: SIMD3<Int>, c: [SIMD3<Float>], tile: Int, shade: Float) {
+            self.n = n; self.c = c; self.tile = tile; self.shade = shade
+            uv = c.map { WorldMesher.boxUV(n, $0) }
+        }
+    }
     private static let faces: [Face] = [
         Face(n: SIMD3(0, 1, 0),  c: [SIMD3(0,1,0), SIMD3(0,1,1), SIMD3(1,1,1), SIMD3(1,1,0)], tile: 0, shade: 1.00), // +Y top
         Face(n: SIMD3(0,-1, 0),  c: [SIMD3(0,0,1), SIMD3(0,0,0), SIMD3(1,0,0), SIMD3(1,0,1)], tile: 1, shade: 0.447), // -Y bottom (mesh.cpp applyFacesShading)
@@ -22,16 +29,18 @@ public enum WorldMesher {
     // UV per corner (top-left texture origin).
     private static let uv: [SIMD2<Float>] = [SIMD2(0,1), SIMD2(1,1), SIMD2(1,0), SIMD2(0,0)]
 
-    // UV for a point on a nodebox face, in node-local 0..1 coords. Derived from
-    // the cube face UVs above so a full-extent box textures identically to a
-    // cube, and a partial box (slab, stair step) samples the matching sub-rect.
-    private static func boxUV(_ n: SIMD3<Int>, _ p: SIMD3<Float>) -> SIMD2<Float> {
-        if n.y > 0 { return SIMD2(p.z, 1 - p.x) }        // +Y top
-        if n.y < 0 { return SIMD2(1 - p.z, 1 - p.x) }    // -Y bottom
-        if n.z > 0 { return SIMD2(p.x, 1 - p.y) }        // +Z
-        if n.z < 0 { return SIMD2(1 - p.x, 1 - p.y) }    // -Z
-        if n.x > 0 { return SIMD2(1 - p.z, 1 - p.y) }    // +X
-        return SIMD2(p.z, 1 - p.y)                       // -X
+    // UV for a point on a cube or nodebox face, in node-local 0..1 coords, as
+    // content_mapblock.cpp setupCuboidVertices lays them out in Luanti's own
+    // node space (we mirror Z only at output). A partial box (slab, stair
+    // step) samples the matching sub-rect. These used to be mirrored on every
+    // face, from before the output Z mirror existed.
+    public static func boxUV(_ n: SIMD3<Int>, _ p: SIMD3<Float>) -> SIMD2<Float> {
+        if n.y > 0 { return SIMD2(p.x, 1 - p.z) }        // +Y top
+        if n.y < 0 { return SIMD2(p.x, p.z) }            // -Y bottom
+        if n.z > 0 { return SIMD2(1 - p.x, 1 - p.y) }    // +Z back
+        if n.z < 0 { return SIMD2(p.x, 1 - p.y) }        // -Z front
+        if n.x > 0 { return SIMD2(p.z, 1 - p.y) }        // +X right
+        return SIMD2(1 - p.z, 1 - p.y)                   // -X left
     }
 
     /// meshoptions plant styles 0-4 as sets of cards (MesherShapes.plantCard):
@@ -439,6 +448,7 @@ public enum WorldMesher {
         // no copy-on-write copy is triggered.
         var fcorners = [SIMD3<Float>](repeating: .zero, count: 4)
         var ftopUV = [SIMD2<Float>](repeating: .zero, count: 4)   // flowing-liquid top UV scratch, reused per top face
+        var faceUV = [SIMD2<Float>](repeating: .zero, count: 4)   // cube face UV scratch (emitFace)
         ov.reserveCapacity(only == nil ? (1 << 16) : 4096)   // single-block meshes stay small
         // opaque faces split into si (solid NDT_NORMAL cubes -> early-Z, no
         // discard) and oi (everything with possible alpha holes -> discard pass).
@@ -576,6 +586,11 @@ public enum WorldMesher {
         func emitQuad(_ corners: [SIMD3<Float>], base b: SIMD3<Int>, layer: Float, shade: Float, light: Float, liquid: Bool, tint: Float = 16777215, uvs: [SIMD2<Float>]? = nil) {
             emitQuad(corners, base: b, layer: layer, shade: shade, lights: SIMD4(repeating: light), liquid: liquid, tint: tint, uvs: uvs)
         }
+        // A cube face: its Luanti UVs, turned by the facedir tile rotation.
+        func emitFace(_ f: Face, _ corners: [SIMD3<Float>], base b: SIMD3<Int>, layer: Float, shade: Float, lights: SIMD4<Float>, liquid: Bool, tint: Float = 16777215, uvRot: UInt8 = 0) {
+            for k in 0..<4 { faceUV[k] = uvRot == 0 ? f.uv[k] : WorldMesher.rotUV(f.uv[k], uvRot) }
+            emitQuad(corners, base: b, layer: layer, shade: shade, lights: lights, liquid: liquid, tint: tint, uvs: faceUV)
+        }
         // Per-corner light (smooth lighting): one packed day+night*16
         // value per vertex; the vertex shader unpacks so the banks interpolate
         // separately across the face.
@@ -681,7 +696,11 @@ public enum WorldMesher {
         // right way, mirroring drawMeshNode's rotateMeshBy6dFacedir.
         @inline(__always)
         func emitMeshModel(_ m: B3DLoader.Mesh, base b: SIMD3<Int>, id: UInt16, p2: UInt8, light: Float, vscale: Float, tint: Float = 16777215) {
-            let layer = Float(atlas.layer(id: id, face: 0))
+            // Surface j takes tile j, up to 6 (drawMeshNode useTile(min(slot, 5))).
+            // A vertex shared by two surfaces with different tiles is copied.
+            let layers = (0..<6).map { Float(atlas.layer(id: id, face: $0)) }
+            let multi = m.surfaces.count > 1 && m.surfaces.indices.contains { layers[min($0, 5)] != layers[0] }
+            let layer = layers[0]
             let vbase = UInt32(ov.count / 9)
             let pt2 = ms.p2t(id)
             let facedir = WorldMesher.meshFacedir(p2, pt2)
@@ -724,7 +743,21 @@ public enum WorldMesher {
                 let vl = lit ? light : octantLight(b, SIMD3(lx, ly, lz))
                 pushVert(&ov, px, py, pz, t.x, t.y, layer, shade + waveShift, vl, tint)
             }
-            for i in m.indices { oi.append(vbase + i) }
+            guard multi else { for i in m.indices { oi.append(vbase + i) }; return }
+            // Other tiles: re-emit the vertices a surface uses with its layer.
+            // The layer is the 6th of 9 floats per vertex.
+            for (j, surf) in m.surfaces.enumerated() {
+                let l = layers[min(j, 5)]
+                if l == layer { for i in surf.indices { oi.append(vbase + i) }; continue }
+                var remap: [UInt32: UInt32] = [:]
+                for i in surf.indices {
+                    if let r = remap[i] { oi.append(r); continue }
+                    let src = Int(vbase + i) * 9
+                    let r = UInt32(ov.count / 9)
+                    for f in 0..<9 { ov.append(f == 5 ? l : ov[src + f]) }
+                    remap[i] = r; oi.append(r)
+                }
+            }
         }
 
         // Packed biome tint (r + g*256 + b*65536) for a node/param2, or packed
@@ -925,7 +958,7 @@ public enum WorldMesher {
                         if occludes(cNodeId(np), ms) { continue }
                         let layer = Float(atlas.layer(id: id, face: f.tile))
                         let light = Float(cNodeLight(np))
-                        emitQuad(f.c, base: g, layer: layer, shade: f.shade, light: light, liquid: false, tint: tint)
+                        emitFace(f, f.c, base: g, layer: layer, shade: f.shade, lights: SIMD4(repeating: light), liquid: false, tint: tint)
                     }
                     if let sp = nodes.specialTile(id), let sl = atlas.tileLayer(sp) {
                         emitSolid = false                    // plant has alpha: cutout stream
@@ -1012,8 +1045,8 @@ public enum WorldMesher {
                             let np = SIMD3(g.x + f.n.x, g.y + f.n.y, g.z + f.n.z)
                             if occludes(cNodeId(np), ms) { continue }
                             let layer = Float(atlas.layer(id: id, face: f.tile))
-                            emitQuad(f.c, base: g, layer: layer, shade: f.shade,
-                                     light: Float(cNodeLight(np)), liquid: false, tint: tint)
+                            emitFace(f, f.c, base: g, layer: layer, shade: f.shade,
+                                     lights: SIMD4(repeating: Float(cNodeLight(np))), liquid: false, tint: tint)
                         }
                     }
                 case .mesh:
@@ -1081,9 +1114,9 @@ public enum WorldMesher {
                             fc = f.c.map { $0 + d }
                         }
                         if glass {
-                            emitQuad(fc, base: g, layer: layer, shade: faceShade + 2.0, lights: lights, liquid: true, tint: faceTint, uvRot: uvRot)
+                            emitFace(f, fc, base: g, layer: layer, shade: faceShade + 2.0, lights: lights, liquid: true, tint: faceTint, uvRot: uvRot)
                         } else {
-                            emitQuad(fc, base: g, layer: layer, shade: faceShade, lights: lights, liquid: false, tint: faceTint, uvRot: uvRot)
+                            emitFace(f, fc, base: g, layer: layer, shade: faceShade, lights: lights, liquid: false, tint: faceTint, uvRot: uvRot)
                         }
                         // tiles_overlay: the engine's second layer on the same
                         // face (the grass fringe over dirt). Drawn as a cutout
@@ -1095,7 +1128,7 @@ public enum WorldMesher {
                                 let lift: Float = 0.003
                                 let oc = f.c.map { $0 + SIMD3<Float>(Float(f.n.x), Float(f.n.y), Float(f.n.z)) * lift }
                                 let wasSolid = emitSolid; emitSolid = false
-                                emitQuad(oc, base: g, layer: Float(ol), shade: faceShade, lights: lights, liquid: false, tint: tint)
+                                emitFace(f, oc, base: g, layer: Float(ol), shade: faceShade, lights: lights, liquid: false, tint: tint, uvRot: uvRot)
                                 emitSolid = wasSolid
                             }
                         }

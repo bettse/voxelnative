@@ -108,4 +108,28 @@ final class OBJLoaderTests: XCTestCase {
     func testGarbageReturnsNil() {
         XCTAssertNil(load("# just a comment\no cube\n"))   // no geometry
     }
+
+    func testMaterialChangesSplitSurfacesLikeIrrlicht() {
+        // Two usemtl blocks -> two surfaces (tile 0 and tile 1); the default
+        // material has no faces so it's dropped.
+        let obj = """
+        v 0 0 0
+        v 1 0 0
+        v 0 1 0
+        g body
+        usemtl wood
+        f 1 2 3
+        usemtl fire
+        f 1 3 2
+        """
+        let m = try! XCTUnwrap(load(obj))
+        XCTAssertEqual(m.surfaces.count, 2)
+        XCTAssertEqual(m.surfaces.map(\.indices.count), [3, 3])
+        XCTAssertEqual(m.indices.count, 6)
+    }
+
+    func testNoMaterialIsOneSurface() {
+        let m = try! XCTUnwrap(load("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\nf 1 3 2"))
+        XCTAssertEqual(m.surfaces.count, 1)
+    }
 }
