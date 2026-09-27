@@ -1741,7 +1741,7 @@ actor Renderer {
     /// offset (fwd -Z, right +X, up +Y, node units); map it through the current
     /// head's gravity-stable basis and scale into origin space.
     private func buildHudBillboards(head: simd_float4x4) {
-        guard !hudInstances.isEmpty else { hudIndexCount = 0; return }
+        guard !hudInstances.isEmpty else { hudIndexCount = 0; hudGlassIndexCount = 0; return }
         let scale = PlayerState.scale
         let headPos = SIMD3<Float>(head.columns.3.x, head.columns.3.y, head.columns.3.z)
         let headFwd = -SIMD3<Float>(head.columns.2.x, head.columns.2.y, head.columns.2.z)

@@ -23,7 +23,8 @@ final class OBJLoaderTests: XCTestCase {
         let m = try! XCTUnwrap(load(obj))
         XCTAssertEqual(m.positions.count, 4)
         XCTAssertEqual(m.indices.count, 6)
-        XCTAssertEqual(Array(m.indices), [0, 1, 2, 0, 2, 3])
+        // Winding reversed with the X flip, like Irrlicht's loader.
+        XCTAssertEqual(Array(m.indices), [0, 2, 1, 0, 3, 2])
     }
 
     func testTexcoordVIsFlipped() {
@@ -53,7 +54,8 @@ final class OBJLoaderTests: XCTestCase {
         let m = try! XCTUnwrap(load(obj))
         XCTAssertEqual(m.positions.count, 3)
         XCTAssertEqual(m.indices.count, 3)
-        XCTAssertEqual(m.positions[Int(m.indices[2])], SIMD3(0, 1, 0))
+        XCTAssertEqual(m.positions[Int(m.indices[1])], SIMD3(0, 1, 0))
+        XCTAssertEqual(m.positions[Int(m.indices[2])], SIMD3(-1, 0, 0), "X negated like Irrlicht's loader")
     }
 
     func testSameVertexUvPairIsDeduped() {

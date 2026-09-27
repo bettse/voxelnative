@@ -527,8 +527,11 @@ final class WorldSession {
 
     /// Ease the bed view in while the bed has us (frozen by mcl_beds, its dialog
     /// up) and back out on getting up, over about a second.
+    /// mcl_beds has us: frozen with its "leave bed" dialog up. The HUD hides
+    /// meanwhile, so lying there looks at the ceiling and not at hearts.
+    private var inBed: Bool { wasFrozen && pendingButtonForm?.formname == "mcl_beds_form" && !dead }
+
     private func stepBedView(dt: Float) {
-        let inBed = wasFrozen && pendingButtonForm?.formname == "mcl_beds_form" && !dead
         let cur = BedView.shared.tilt, target: Float = inBed ? 1 : 0
         guard cur != target else { return }
         var next = cur + (target - cur) * min(1, dt * 3)
@@ -5434,13 +5437,48 @@ final class WorldSession {
             return true
         case .mesh(let file, let layer, let mid, let scale):
             guard let model = nodeModelCache[file] else { return false }
+            // Same flattened decal as the cube: +z after iso() faces the viewer,
+            // which is -oToward. Drop the far-facing triangles, draw the rest far
+            // to near at stepped depths, and shade by facing like the cube's
+            // top/left/right, so a mob head reads as a head and not its inside.
             let s = size * scale
-            let vb = UInt32(v.count / 9)
-            for k in 0..<model.positions.count {
-                let r = iso((model.positions[k] - mid) * s)
-                push(center + r.x * oRight + r.y * oUp + r.z * oToward, model.uvs[k].x, model.uvs[k].y, Float(layer), 16777215)
+            // Node -Z (the front) onto the icon's left face and +X onto its right,
+            // the same faces the cube icon shows (tiles 5 and 2), so a mob head
+            // shows its face.
+            @inline(__always) func local(_ vi: Int) -> SIMD3<Float> {
+                let p = model.positions[vi] - mid
+                return SIMD3(p.z, p.y, p.x)
             }
-            for i in model.indices { idx.append(vb + i) }
+            // One depth per face plane, not per triangle: two halves of a quad
+            // at different depths opened a light seam down the diagonal.
+            var tris: [(i: Int, key: SIMD4<Int32>, tint: Float)] = []
+            var planeZ: [SIMD4<Int32>: (sum: Float, n: Float)] = [:]
+            let ix = model.indices
+            for t in stride(from: 0, to: ix.count - 2, by: 3) {
+                let a = iso(local(Int(ix[t]))), b = iso(local(Int(ix[t + 1]))), c = iso(local(Int(ix[t + 2])))
+                var n = simd_cross(b - a, c - a)
+                guard simd_length_squared(n) > 1e-12 else { continue }
+                n = simd_normalize(n)
+                if simd_dot(n, (a + b + c) / 3) < 0 { n = -n }   // outward, whatever the winding
+                guard n.z > 0.02 else { continue }
+                let tint = n.y > 0.5 ? Self.packTint(255, 255, 255) : n.x < 0 ? Self.packTint(184, 184, 184) : Self.packTint(140, 140, 140)
+                let key = SIMD4<Int32>(SIMD4(n * 8, simd_dot(n, a) * 64), rounding: .toNearestOrAwayFromZero)
+                tris.append((t, key, tint))
+                let z = (a.z + b.z + c.z) / 3
+                planeZ[key, default: (0, 0)].sum += z; planeZ[key, default: (0, 0)].n += 1
+            }
+            let planes = planeZ.sorted { $0.value.sum / $0.value.n < $1.value.sum / $1.value.n }.map(\.key)
+            let planeRank = Dictionary(uniqueKeysWithValues: planes.enumerated().map { ($1, $0) })
+            for tri in tris {
+                let dep = -0.010 - 0.004 * Float(planeRank[tri.key] ?? 0) / Float(max(1, planes.count - 1))
+                let vb = UInt32(v.count / 9)
+                for k in 0..<3 {
+                    let vi = Int(ix[tri.i + k])
+                    let r = iso(local(vi) * s)
+                    push(center + r.x * oRight + r.y * oUp + dep * oToward, model.uvs[vi].x, model.uvs[vi].y, Float(layer), tri.tint)
+                }
+                idx.append(vb); idx.append(vb + 1); idx.append(vb + 2)
+            }
             return true
         }
     }
@@ -6669,12 +6707,14 @@ final class WorldSession {
         // the ENGINE bars off at join (flags 111101001) because it draws its
         // own via HUDADD statbars, and these vitals stand in for those. Only
         // wielditem/hotbar (postHandHud) follow the flags.
-        appendHealthHUD(origin: .zero, gaze: hudGaze, into: &hud)
-        appendHungerHUD(origin: .zero, gaze: hudGaze, into: &hud)
-        appendBreathHUD(origin: .zero, gaze: hudGaze, into: &hud)
+        if !inBed {
+            appendHealthHUD(origin: .zero, gaze: hudGaze, into: &hud)
+            appendHungerHUD(origin: .zero, gaze: hudGaze, into: &hud)
+            appendBreathHUD(origin: .zero, gaze: hudGaze, into: &hud)
+        }
         // Armor moved to a left-wrist gauntlet (postHandHud/buildHandHud),
         // so it no longer draws as a peripheral column here.
-        appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud)
+        if !inBed { appendXpHUD(origin: .zero, gaze: hudGaze, into: &hud) }
         // The offhand item is held in the left hand now (postHandHud), not
         // drawn as a HUD icon above the hunger row.
         // Hotbar is now wrist-anchored (postHandHud / buildHandHud), not head-locked.
@@ -10092,7 +10132,7 @@ final class WorldSession {
         #endif
         // HUD_SET_FLAGS: bit 8 wielditem (mcl_shields hides the hand while
         // blocking, the spyglass while zoomed), bit 1 hotbar.
-        let hudF = client.hudFlags
+        let hudF = inBed ? 0 : client.hudFlags   // in bed: no wield, no hotbar
         // The offhand item, resolved like the wield: its wield_image, its 3D
         // node shape, else its flat icon extruded.
         var offhand: HandHudState.Wield? = nil, offSil: B3DLoader.Mesh? = nil, offTile: String? = nil
@@ -10134,11 +10174,11 @@ final class WorldSession {
                                          slotLayer: atlas.hotbarSlotLayer,
                                          selectLayer: atlas.hotbarSelectLayer,
                                          whiteLayer: atlas.markerLayer,
-                                         armor: armorForHud,
+                                         armor: inBed ? 0 : armorForHud,
                                          armorFullLayer: atlas.armorFullLayer,
                                          armorHalfLayer: atlas.armorHalfLayer,
                                          armorEmptyLayer: atlas.armorEmptyLayer,
-                                         offhand: offhand, offhandSilhouette: offSil,
+                                         offhand: inBed ? nil : offhand, offhandSilhouette: offSil,
                                          offhandTint: offTint, offhandTintAll: offTintAll,
                                          skinLayer: Int32(skin?.layer ?? -1),
                                          skinUV: skin?.uv ?? SIMD2(1, 1),

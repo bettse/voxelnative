@@ -49,7 +49,7 @@ public enum OBJLoader {
             switch tag {
             case "v":
                 if f.count >= 4, let x = Float(f[1]), let y = Float(f[2]), let z = Float(f[3]) {
-                    positions.append(SIMD3(x, y, z))
+                    positions.append(SIMD3(-x, y, z))   // X negated like Irrlicht's loader (handedness)
                 }
             case "vt":
                 if f.count >= 3, let u = Float(f[1]), let v = Float(f[2]) {
@@ -61,7 +61,8 @@ public enum OBJLoader {
                 for tok in f.dropFirst() { if let idx = vertexFor(tok) { poly.append(idx) } }
                 guard poly.count >= 3 else { return }
                 for k in 1..<(poly.count - 1) {
-                    indices.append(poly[0]); indices.append(poly[k]); indices.append(poly[k + 1])
+                    // Reversed with the X flip, as Irrlicht does, so winding stays outward.
+                    indices.append(poly[0]); indices.append(poly[k + 1]); indices.append(poly[k])
                 }
             default:
                 break
