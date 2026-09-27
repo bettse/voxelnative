@@ -667,6 +667,19 @@ final class WorldSession {
                 let rel = c - fr.center
                 d["cursor"] = [r2(simd_dot(rel, fr.right)), r2(simd_dot(rel, fr.up))]
             }
+            if let fr = invFrame {
+                // Where the panel sits relative to the gaze: distance, and how
+                // far off-centre it is left/right and up/down (degrees).
+                // Measured at the content's centre (the bounds), not the frame's
+                // origin: the origin can be centred while the content isn't.
+                let eyeN = player.origin(), g = simd_normalize(player.aim())
+                let bb = invPanelBounds()
+                let to = fr.center + fr.right * ((bb.uMin + bb.uMax) / 2) + fr.up * ((bb.vMin + bb.vMax) / 2) - eyeN
+                let flatG = simd_normalize(SIMD3(g.x, 0, g.z)), flatT = simd_normalize(SIMD3(to.x, 0, to.z))
+                let yawOff = atan2(simd_cross(flatG, flatT).y, simd_dot(flatG, flatT)) * 180 / .pi
+                let pitchOff = (asin(to.y / simd_length(to)) - asin(g.y)) * 180 / .pi
+                d["panel"] = ["dist": r2(simd_length(to)), "yawOff": r2(yawOff), "pitchOff": r2(pitchOff), "scale": r2(invScale)]
+            }
             if let n = noticeText { d["notice"] = n }
             if let pf = pendingButtonForm { d["buttonForm"] = pf.formname }
             d["bedTilt"] = r2(BedView.shared.tilt); d["frozen"] = wasFrozen
@@ -4358,7 +4371,14 @@ final class WorldSession {
             // keyboard used to pop up on its chat field every time Eric went to
             // sleep.
             let fields = Formspec.parseFields(spec)
-            if let field = fields.first, !name.isEmpty || formspecContext != nil, Formspec.isTextEditorForm(spec) {
+            // Only a NAMED field is editable: Help's intro text is an unnamed
+            // textarea, and treating it as an editor popped the keyboard
+            // instead of opening Help.
+            // Nor a hidden one (Settings keeps its tab in a zero-size field),
+            // and a form with tabs is a panel, not a text box.
+            let hidden = Set(Formspec.parseFieldsPositioned(spec).filter { $0.w <= 0 }.map(\.name))
+            if let field = fields.first(where: { !$0.name.isEmpty && !hidden.contains($0.name) }),
+               !name.isEmpty || formspecContext != nil, !spec.contains("tabheader["), Formspec.isTextEditorForm(spec) {
                 // Send the text with the form's exit button, as desktop does when
                 // Done is pressed (mcl_signs only reads `text`; others check the button).
                 let exitButton = Formspec.parseButtons(spec).first?.name
@@ -4511,14 +4531,34 @@ final class WorldSession {
         var f = player.aim(); f.y = 0
         let l = simd_length(f); f = l > 1e-3 ? f / l : player.bodyForward()
         let right = SIMD3<Float>(f.z, 0, -f.x)          // right of fwd in Luanti's left-handed frame
-        invFrame = InvFrame(center: eye + f * 0.9 - SIMD3(0, 0.06, 0), right: right, up: SIMD3(0, 1, 0), fwd: f)
+        invAnchor = eye + f * 0.9 - SIMD3(0, 0.06, 0)
+        invFrame = InvFrame(center: invAnchor!, right: right, up: SIMD3(0, 1, 0), fwd: f)
         layoutInventory()
+    }
+
+    /// Where the panel's content should centre (0.9 m ahead, a touch low); set
+    /// on a fresh open, kept while one form replaces another.
+    private var invAnchor: SIMD3<Float>?
+
+    private func layoutInventory() {
+        layoutInventoryContent()
+        centreOnAnchor()
+    }
+
+    /// A form lays out from its own origin, so one whose content leans to a
+    /// side (the recipe book left, Skins right, Help low) sat off-centre. Shift
+    /// the frame so the content's bounds are centred on the anchor.
+    private func centreOnAnchor() {
+        guard let a = invAnchor, let fr = invFrame else { return }
+        let b = invPanelBounds()
+        let uc = (b.uMin + b.uMax) / 2, vc = (b.vMin + b.vMax) / 2
+        invFrame = InvFrame(center: a - fr.right * uc - fr.up * vc, right: fr.right, up: fr.up, fwd: fr.fwd)
     }
 
     /// Slot positions (u right, v up, metres from the panel centre), matching the
     /// desktop layout: main rows on top, hotbar row below a gap, craft 2x2 +
     /// preview on the right, armor column on the left.
-    private func layoutInventory() {
+    private func layoutInventoryContent() {
         let p = invPitch
         var slots: [InvSlot] = []
         if formspecOpen {
