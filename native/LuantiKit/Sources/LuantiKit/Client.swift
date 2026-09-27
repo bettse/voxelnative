@@ -709,7 +709,11 @@ public final class Client {
         objects.step(Float(delta))
         // Fetch textures for newly-seen entities (only after the initial node-tile
         // media finishes, so entity requests don't stall that batch's completion).
-        let newTiles = initialMediaDone ? objects.tiles.subtracting(requestedEntityTiles) : []
+        // Both sets only grow and requested is filled from tiles, so equal
+        // counts mean nothing new: skip re-hashing every texture seen this
+        // session 62 times a second.
+        let newTiles = initialMediaDone && objects.tiles.count != requestedEntityTiles.count
+            ? objects.tiles.subtracting(requestedEntityTiles) : []
         if !newTiles.isEmpty {
             requestedEntityTiles.formUnion(newTiles)
             var imgs = Set<String>()
@@ -717,7 +721,8 @@ public final class Client {
             if !imgs.isEmpty { media.request(imgs) }
         }
         // Download mob model files (.b3d) the same way, once initial media is done.
-        let newMeshes = initialMediaDone ? objects.meshes.subtracting(requestedEntityMeshes) : []
+        let newMeshes = initialMediaDone && objects.meshes.count != requestedEntityMeshes.count
+            ? objects.meshes.subtracting(requestedEntityMeshes) : []
         if !newMeshes.isEmpty {
             requestedEntityMeshes.formUnion(newMeshes)
             media.request(newMeshes)
@@ -1973,7 +1978,11 @@ public final class Client {
     /// was dropped so the caller can drop those meshes too.
     @discardableResult
     public func unloadUnusedBlocks(dt: Float, near: SIMD3<Int>) -> [SIMD3<Int>] {
-        let gone = world.expire(dt: dt, near: near)
+        // Tighter than the engine's desktop defaults (12 mapblocks, 600 s, 7500
+        // blocks, ~120 MB of node data plus a mesh each): keep what the server
+        // streams to us (the view range) plus a margin, age the rest out in two
+        // minutes, cap at 3000. DELETEDBLOCKS makes the server re-send on return.
+        let gone = world.expire(dt: dt, near: near, radius: wantedRange + 2, timeout: 120, limit: 3000)
         for pkt in Client.deletedBlocksPackets(gone) { conn.sendMessage(Op.toserverDeletedBlocks, pkt) }
         return gone
     }

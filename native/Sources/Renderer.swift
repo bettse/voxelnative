@@ -1884,7 +1884,9 @@ actor Renderer {
         guard let enc = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return false }
         enc.label = label
         let viewport = MTLViewport(originX: 0, originY: 0, width: Double(t.w), height: Double(t.h), znear: 0, zfar: 1)
-        encodeScene(enc, viewportsIn: [viewport], vpBuffer: t.vp, vpOffset: 0, cullVP: vp, cullAll: true, worldOnly: worldOnly)
+        // Cull against this camera: the spyglass's 8 degrees skips almost
+        // everything, where drawing every loaded block doubled the GPU work.
+        encodeScene(enc, viewportsIn: [viewport], vpBuffer: t.vp, vpOffset: 0, cullVP: vp, cullAll: false, worldOnly: worldOnly)
         enc.endEncoding()
         return true
     }
@@ -1894,6 +1896,9 @@ actor Renderer {
         guard let t = photoTargets, encodeCamera(commandBuffer, head: head, into: t, label: "Photo Encoder") else { return }
         let color = t.color, w = t.w, h = t.h
         commandBuffer.addCompletedHandler { [weak self] _ in self?.savePhoto(color, w, h) }
+        // Don't keep 33-66 MB of 4K target around between photos: the closure
+        // above holds the colour texture until it's saved, then it's freed.
+        photoTargets = nil
     }
 
     // MARK: Spyglass
@@ -1904,6 +1909,8 @@ actor Renderer {
     private var zoomTargets: CameraTargets?
     private var lensVerts: [Float] = []
     private var lensLog = 0
+    private var lensIdle = 0   // frames since the spyglass was last up
+    private var postedOpen = false   // renderLoop told the app the space is open
     static let lensSize = 1024
     private static let lensDistance: Float = 0.5, lensRadius: Float = 0.1   // about 23 degrees across
 
@@ -1911,7 +1918,12 @@ actor Renderer {
     private func prepareLens(_ commandBuffer: MTLCommandBuffer, head: float4x4) {
         lensVerts.removeAll(keepingCapacity: true)
         let fov = ZoomView.shared.fovDeg
-        guard fov > 0 else { return }
+        guard fov > 0 else {
+            // Free the lens target once the spyglass has been down a few seconds.
+            if zoomTargets != nil { lensIdle += 1; if lensIdle > 270 { zoomTargets = nil; lensIdle = 0 } }
+            return
+        }
+        lensIdle = 0
         if zoomTargets == nil { zoomTargets = makeCameraTargets(w: Self.lensSize, h: Self.lensSize, shared: false) }
         guard let t = zoomTargets,
               encodeCamera(commandBuffer, head: head, into: t, label: "Spyglass Encoder", fovDeg: fov, worldOnly: true) else {
@@ -1958,6 +1970,7 @@ actor Renderer {
             if recorder == nil { appModel.screenshotFlag.recording = false; videoDone(ok: false, denied: false) }
         } else if !want, let r = recorder {
             recorder = nil
+            videoTargets = nil   // in-flight frames keep their own references
             r.finish { [weak self] ok, denied in self?.videoDone(ok: ok, denied: denied) }
         }
         return recorder != nil && frameIndex % UInt64(Self.videoEvery) == 0
@@ -2352,7 +2365,7 @@ actor Renderer {
     /// field of view isn't the eye's).
     private func encodeScene(_ renderEncoder: MTLRenderCommandEncoder, viewportsIn: [MTLViewport],
                              vpBuffer: MTLBuffer, vpOffset: Int, cullVP: float4x4, cullAll: Bool,
-                             worldOnly: Bool = false) {
+                             cullVP2: float4x4? = nil, worldOnly: Bool = false) {
         renderEncoder.pushDebugGroup("Draw World")
 
         // Winding: the mesher winds faces counter-clockwise with outward
@@ -2414,17 +2427,28 @@ actor Renderer {
             if noCull || cullAll {
                 for i in blockList.indices { visibleBlocks.append((0, i)) }
             } else {
-                let m = cullVP * uniforms[0].modelMatrix
-                let planes = Self.frustumPlanes(m)
+                // Both eyes (a block is drawn if either sees it), with a 2-node
+                // margin. The margin used to be a whole mapblock (16 nodes each
+                // way), and only the left eye was tested, so ~60% of loaded
+                // blocks were drawn where ~40% are in view. This pass culls with
+                // this frame's matrices, so no turn latency needs covering.
+                let planes = Self.frustumPlanes(cullVP * uniforms[0].modelMatrix)
+                let planes2 = cullVP2.map { Self.frustumPlanes($0 * uniforms[0].modelMatrix) }
                 let mref = worldMeshRef, sc = PlayerState.scale
-                let sixteen = SIMD3<Float>(16, 16, 16), mvec = SIMD3<Float>(repeating: 16 * PlayerState.scale)
+                let sixteen = SIMD3<Float>(16, 16, 16)
                 let eight = SIMD3<Float>(8, 8, 8)
                 for i in blockList.indices {
                     let loN = blockList[i].loN
+                    // 2 nodes plus 5% of the distance (about 3 degrees), so a fast
+                    // turn under the compositor's reprojection doesn't show far
+                    // blocks popping in at the edge of view.
+                    let d = simd_length(loN + eight - e)
+                    let mvec = SIMD3<Float>(repeating: (2 + d * 0.05) * sc)
                     let lo = (loN - mref) * sc - mvec
                     let hi = (loN + sixteen - mref) * sc + mvec
-                    if Self.aabbVisible(lo: lo, hi: hi, planes: planes) {
-                        visibleBlocks.append((simd_length_squared(loN + eight - e), i))
+                    if Self.aabbVisible(lo: lo, hi: hi, planes: planes)
+                        || (planes2.map { Self.aabbVisible(lo: lo, hi: hi, planes: $0) } ?? false) {
+                        visibleBlocks.append((d * d, i))
                     }
                 }
                 // Front-to-back so the opaque early-Z pass rejects occluded
@@ -2815,7 +2839,8 @@ actor Renderer {
 
         encodeScene(renderEncoder, viewportsIn: drawable.views.map { $0.textureMap.viewport },
                     vpBuffer: drawableTarget.viewProjectionBuffer, vpOffset: drawableTarget.viewProjectionBufferOffset,
-                    cullVP: drawableTarget.viewProjectionArray[0].viewProjectionMatrix.0, cullAll: false)
+                    cullVP: drawableTarget.viewProjectionArray[0].viewProjectionMatrix.0, cullAll: false,
+                    cullVP2: drawable.views.count > 1 ? drawableTarget.viewProjectionArray[0].viewProjectionMatrix.1 : nil)
 
         renderEncoder.endEncoding()
 
@@ -2866,6 +2891,7 @@ actor Renderer {
                 }
                 return
             } else if layerRenderer.state == .paused {
+                postedOpen = false
                 // Logged with the wall clock so a device log lines up with Photos
                 // timestamps (Siri screenshots sometimes close the space).
                 print("[layer] paused \(Date())"); fflush(stdout)
@@ -2876,9 +2902,15 @@ actor Renderer {
                 print("[layer] running again \(Date())"); fflush(stdout)
                 continue
             } else {
-                Task { @MainActor in
-                    if appModel.immersiveSpaceState != .open {
-                        appModel.immersiveSpaceState = .open
+                // Mark the space open once per run of frames, not with a
+                // main-actor Task every frame (90 allocations and main-thread
+                // wakeups a second). Paused/invalidated clear the flag.
+                if !postedOpen {
+                    postedOpen = true
+                    Task { @MainActor in
+                        if appModel.immersiveSpaceState != .open {
+                            appModel.immersiveSpaceState = .open
+                        }
                     }
                 }
                 autoreleasepool {

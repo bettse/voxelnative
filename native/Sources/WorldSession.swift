@@ -362,7 +362,10 @@ final class WorldSession {
     // by mapblock position; positions are baked against a fixed meshRef (set once
     // at spawn), so cached geometry stays valid as the player moves.
     private typealias BlockGeom = (opaque: (v: [Float], solid: [UInt32], cutout: [UInt32]), liquid: ([Float], [UInt32]))
-    private var blockCache: [SIMD3<Int>: BlockGeom] = [:]   // mesherQueue only
+    // Which blocks have a mesh on the renderer (mesherQueue only). It used to
+    // hold every block's vertex/index arrays too, a CPU copy of what the GPU
+    // already has that nothing read (tens to 100+ MB); only the keys are used.
+    private var blockCache: Set<SIMD3<Int>> = []
     private var dirtyBlocks: Set<SIMD3<Int>> = []           // session queue
     private var fullRemesh = true                           // rebuild every block next remesh
     private var cachedMeshRef = SIMD3<Float>(.nan, .nan, .nan)   // mesherQueue only
@@ -7622,7 +7625,9 @@ final class WorldSession {
     /// aren't served at all), so we neither give them a texture layer nor let
     /// their geometry count toward the auto-fit bounds.
     static func isBlankSpec(_ spec: String) -> Bool {
-        let s = spec.lowercased()
+        // Called per mob surface per tick: only lowercase (an allocation) when
+        // the name actually has capitals, which texture names almost never do.
+        let s = spec.utf8.contains(where: { $0 >= 65 && $0 <= 90 }) ? spec.lowercased() : spec
         return s == "blank.png" || s.contains("_empty") || s == "empty.png"
     }
 
@@ -10046,21 +10051,21 @@ final class WorldSession {
             if rebuildAll {
                 self.blockCache.removeAll(keepingCapacity: true)
                 for bpos in live {
-                    let g = mesh(bpos); self.blockCache[bpos] = g; changedRaw[bpos] = raw(g)
+                    let g = mesh(bpos); self.blockCache.insert(bpos); changedRaw[bpos] = raw(g)
                 }
             } else {
                 for bpos in dirtySet {
                     if live.contains(bpos) {
-                        let g = mesh(bpos); self.blockCache[bpos] = g; changedRaw[bpos] = raw(g)
-                    } else if self.blockCache[bpos] != nil {
-                        self.blockCache[bpos] = nil; removedBlocks.append(bpos)   // block unloaded
+                        let g = mesh(bpos); self.blockCache.insert(bpos); changedRaw[bpos] = raw(g)
+                    } else if self.blockCache.contains(bpos) {
+                        self.blockCache.remove(bpos); removedBlocks.append(bpos)   // block unloaded
                     }
                 }
                 // Drop stale cache entries for blocks the world unloaded. Collect
                 // keys first (don't mutate the dict mid-iteration): a block can
                 // unload while another loads, leaving a ghost entry.
-                let stale = self.blockCache.keys.filter { !live.contains($0) }
-                for k in stale { self.blockCache[k] = nil; removedBlocks.append(k) }
+                let stale = self.blockCache.filter { !live.contains($0) }
+                for k in stale { self.blockCache.remove(k); removedBlocks.append(k) }
             }
 
             let posted = self.handoff.postDelta(changed: changedRaw, removed: removedBlocks,

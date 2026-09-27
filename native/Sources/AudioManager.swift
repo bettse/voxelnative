@@ -131,7 +131,10 @@ final class AudioManager: NSObject {
     // Music tracks (20 s+) aren't cached: they're tens of MB each and rare.
     private var pcmCache: [String: AVAudioPCMBuffer] = [:]
     private var pcmCacheOrder: [String] = []       // insertion order for a simple cap
-    private static let pcmCacheMax = 160           // ~15-20 MB of sfx
+    private static let pcmCacheMax = 160           // entries, and...
+    private static let pcmCacheByteMax = 16 << 20  // ...16 MB of decoded PCM, whichever comes first
+    private var pcmCacheBytes = 0
+    private static func pcmBytes(_ b: AVAudioPCMBuffer) -> Int { Int(b.frameLength) * Int(b.format.channelCount) * 4 }
     // Idle player->varispeed chains kept attached and wired to their stage, so
     // a play is a scheduleBuffer + play() instead of attach x2 / connect x2 /
     // detach x2 (each a graph edit under the engine's lock).
@@ -300,11 +303,17 @@ final class AudioManager: NSObject {
                 }
                 buf = decoded
                 let secs = buf.format.sampleRate > 0 ? Double(buf.frameLength) / buf.format.sampleRate : 0
-                if !cacheKey.isEmpty, secs < 20 {
-                    if self.pcmCacheOrder.count >= Self.pcmCacheMax, let oldest = self.pcmCacheOrder.first {
-                        self.pcmCacheOrder.removeFirst(); self.pcmCache[oldest] = nil
+                // Short effects only (a 19 s clip is ~7 MB of float PCM), and
+                // capped by bytes as well as count: the count alone let a long
+                // session hold tens of MB of decoded sound.
+                if !cacheKey.isEmpty, secs < 6 {
+                    let add = Self.pcmBytes(buf)
+                    while (self.pcmCacheOrder.count >= Self.pcmCacheMax || self.pcmCacheBytes + add > Self.pcmCacheByteMax),
+                          let oldest = self.pcmCacheOrder.first {
+                        self.pcmCacheOrder.removeFirst()
+                        if let old = self.pcmCache.removeValue(forKey: oldest) { self.pcmCacheBytes -= Self.pcmBytes(old) }
                     }
-                    self.pcmCache[cacheKey] = buf; self.pcmCacheOrder.append(cacheKey)
+                    self.pcmCache[cacheKey] = buf; self.pcmCacheOrder.append(cacheKey); self.pcmCacheBytes += add
                 }
             }
             // Length-based music classification (Eric): every VoxeLibre sfx is
