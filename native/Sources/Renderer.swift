@@ -2482,7 +2482,7 @@ actor Renderer {
                 guard let v = b.opaqueVerts, let s = b.solid else { continue }
                 renderEncoder.setVertexBuffer(v, offset: 0, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: s.count,
-                                                    indexType: .uint32, indexBuffer: s.buffer, indexBufferOffset: 0)
+                                                    indexType: s.type, indexBuffer: s.buffer, indexBufferOffset: 0)
                 idxSolid += s.count
             }
             // Cutout pass: leaves/plants/nodeboxes through the alpha-discard
@@ -2495,7 +2495,7 @@ actor Renderer {
                 guard let v = b.opaqueVerts, let c = b.cutout else { continue }
                 renderEncoder.setVertexBuffer(v, offset: 0, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: c.count,
-                                                    indexType: .uint32, indexBuffer: c.buffer, indexBufferOffset: 0)
+                                                    indexType: c.type, indexBuffer: c.buffer, indexBufferOffset: 0)
                 idxCutout += c.count
             }
         }

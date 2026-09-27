@@ -215,11 +215,11 @@ vertex ColorInOut entityVertex(Vertex in [[stage_in]],
 // tiles stop shimmering and stop thrashing the texture cache (one texel per
 // pixel instead of a 64-texel stride). The node atlas carries a full mip
 // chain (MeshHandoff.makeAtlas); the model array does not and keeps nearest.
-constexpr sampler worldSampler(mag_filter::nearest, min_filter::linear, mip_filter::linear, max_anisotropy(4));
+constexpr sampler worldSampler(mag_filter::nearest, min_filter::linear, mip_filter::linear, max_anisotropy(2));
 // Liquid tops carry a per-cell UV translate (drawLiquidTop's tcoord_translate)
 // so the flow animation lines up across cells; that pushes UVs outside 0..1,
 // so this pass must wrap instead of clamping.
-constexpr sampler liquidSampler(mag_filter::nearest, min_filter::linear, mip_filter::linear, max_anisotropy(4), address::repeat);
+constexpr sampler liquidSampler(mag_filter::nearest, min_filter::linear, mip_filter::linear, max_anisotropy(2), address::repeat);
 
 // Shared world shading: un-premultiply, biome tint, day/night light, saturation.
 static inline float4 worldLit(half4 c, ColorInOut in, constant Uniforms & uniforms)

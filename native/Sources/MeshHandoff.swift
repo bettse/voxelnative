@@ -19,8 +19,10 @@ final class MeshHandoff {
     // (an all-air or all-solid-interior block has no faces of that kind).
     struct BlockGPU {
         let opaqueVerts: MTLBuffer?
-        let solid: (buffer: MTLBuffer, count: Int)?
-        let cutout: (buffer: MTLBuffer, count: Int)?
+        // 16-bit indices when the block has <= 65536 vertices (nearly always):
+        // half the index bytes the GPU reads every frame.
+        let solid: (buffer: MTLBuffer, count: Int, type: MTLIndexType)?
+        let cutout: (buffer: MTLBuffer, count: Int, type: MTLIndexType)?
         let liquid: GPUMesh?
     }
     // One block's raw geometry as the mesher produced it (CPU side); built into
@@ -131,9 +133,15 @@ final class MeshHandoff {
     func postDelta(changed: [SIMD3<Int>: BlockRaw], removed: [SIMD3<Int>], reset: Bool,
                    atlasLayers: [[UInt8]]? = nil, animated: [TextureAtlas.AnimLayer] = []) -> Bool {
         guard let device = device else { return false }
-        func idxBuf(_ a: [UInt32]) -> (buffer: MTLBuffer, count: Int)? {
-            guard !a.isEmpty, let b = device.makeBuffer(bytes: a, length: a.count * 4, options: [.storageModeShared]) else { return nil }
-            return (b, a.count)
+        func idxBuf(_ a: [UInt32], vertexCount: Int) -> (buffer: MTLBuffer, count: Int, type: MTLIndexType)? {
+            guard !a.isEmpty else { return nil }
+            if vertexCount <= 65536 {
+                let small = a.map { UInt16(truncatingIfNeeded: $0) }
+                guard let b = device.makeBuffer(bytes: small, length: small.count * 2, options: [.storageModeShared]) else { return nil }
+                return (b, a.count, .uint16)
+            }
+            guard let b = device.makeBuffer(bytes: a, length: a.count * 4, options: [.storageModeShared]) else { return nil }
+            return (b, a.count, .uint32)
         }
         var built: [SIMD3<Int>: BlockGPU] = [:]
         built.reserveCapacity(changed.count)
@@ -141,7 +149,8 @@ final class MeshHandoff {
         for (bp, r) in changed {
             let ov: MTLBuffer? = r.ov.isEmpty ? nil
                 : device.makeBuffer(bytes: r.ov, length: r.ov.count * 4, options: [.storageModeShared])
-            let solid = idxBuf(r.solid), cutout = idxBuf(r.cutout)
+            let nv = r.ov.count / 9
+            let solid = idxBuf(r.solid, vertexCount: nv), cutout = idxBuf(r.cutout, vertexCount: nv)
             if solid != nil || cutout != nil { anyOpaque = true }
             built[bp] = BlockGPU(opaqueVerts: ov, solid: solid, cutout: cutout,
                                  liquid: makeMesh(device, r.lv, r.li))
