@@ -185,6 +185,8 @@ final class WorldSession {
     // qwerty in a headset (Eric). Text comes from a BLE keyboard; with only
     // controllers a note is just the context + screenshot.
     private var kbSimple = false
+    private var kbSymbols = false   // the ?123 page: punctuation instead of letters
+    private var kbShift = false     // next letter is a capital
     private var kbCursor: SIMD3<Float>? = nil   // aim ray hit on the board (node space) for the targeting dot
     private var keyboardBuffer = ""
     private var keyboardDone: ((String) -> Void)?
@@ -8514,7 +8516,7 @@ final class WorldSession {
     /// Open the on-screen keyboard, prefilled, calling `done(text)` on Done.
     private func openKeyboard(prefill: String, saveOnDismiss: Bool = false, simple: Bool = false, done: @escaping (String) -> Void) {
         keyboardBuffer = prefill; keyboardDone = done; kbSaveOnDismiss = saveOnDismiss; kbHover = nil; kbCursor = nil
-        kbSimple = simple
+        kbSimple = simple; kbSymbols = false; kbShift = false
         // Force the text layer to re-rasterise to the fresh (usually empty) buffer:
         // it only redraws when dirty, so without this a reopened bug note kept
         // SHOWING the previous note's text even though keyboardBuffer was "" (Eric,
@@ -8560,7 +8562,9 @@ final class WorldSession {
                             Key(id: "submit", u: 0.16,  v: y, hw: 0.11, hh: 0.075)]
             return
         }
-        let rows = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm/,."]
+        let letters = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm/,."]
+        let rows = kbSymbols ? ["1234567890", "!@#$%^&*()", "-_=+[]{};:", "'\"<>?\\|~`"]
+                 : kbShift ? letters.map { $0.uppercased() } : letters
         let p: Float = 0.08   // key pitch (was 0.05: too small to read/aim in VR)
         var keys: [Key] = []
         for (r, row) in rows.enumerated() {
@@ -8570,11 +8574,13 @@ final class WorldSession {
                 keys.append(Key(id: String(ch), u: u, v: (1.5 - Float(r)) * p, hw: p * 0.45))
             }
         }
-        // bottom row: space (wide), backspace, done
+        // bottom row: symbols page, shift, space (wide), backspace, done
         let by = (1.5 - 4) * p
-        keys.append(Key(id: "space", u: -2.1 * p, v: by, hw: p * 2.1))
-        keys.append(Key(id: "back",  u: 0.9 * p,  v: by, hw: p * 0.9))
-        keys.append(Key(id: "done",  u: 2.6 * p,  v: by, hw: p * 0.9))
+        keys.append(Key(id: kbSymbols ? "abc" : "?123", u: -3.9 * p, v: by, hw: p * 0.55))
+        if !kbSymbols { keys.append(Key(id: kbShift ? "SHIFT" : "shift", u: -2.65 * p, v: by, hw: p * 0.6)) }
+        keys.append(Key(id: "space", u: -0.25 * p, v: by, hw: p * 1.65))
+        keys.append(Key(id: "back",  u: 2.1 * p,  v: by, hw: p * 0.6))
+        keys.append(Key(id: "done",  u: 3.65 * p, v: by, hw: p * 0.8))
         keyboardKeys = keys
     }
 
@@ -8631,7 +8637,11 @@ final class WorldSession {
         case "clear": keyboardBuffer = ""; kbBufferDirty = true
         case "back": if !keyboardBuffer.isEmpty { keyboardBuffer.removeLast(); kbBufferDirty = true }
         case "space": keyboardBuffer.append(" "); kbBufferDirty = true
-        default: keyboardBuffer.append(keyboardKeys[hi].id); kbBufferDirty = true
+        case "?123", "abc": kbSymbols.toggle(); kbShift = false; layoutKeyboard()
+        case "shift", "SHIFT": kbShift.toggle(); layoutKeyboard()
+        default:
+            keyboardBuffer.append(keyboardKeys[hi].id); kbBufferDirty = true
+            if kbShift { kbShift = false; layoutKeyboard() }   // one capital, like a phone
         }
     }
 
