@@ -4078,7 +4078,14 @@ final class WorldSession {
     private var invScale: Float = 1
     private var invCell: Float { 0.054 * invScale }
     private var invPitch: Float { 0.062 * invScale }
+    /// The open form's declared size[] (real-coordinate forms), so the backdrop
+    /// covers the whole form like desktop and not just its content: Settings'
+    /// text starts 1 unit in from the form's edge and sat flush on the
+    /// content-sized backdrop. formRect is it in panel metres, set by layout.
+    private var formSizeGrid: SIMD2<Float>?
+    private var formRect: (uMin: Float, uMax: Float, vMin: Float, vMax: Float)?
     private func setPanelScale(_ spec: String, legacy: Bool) {
+        formSizeGrid = legacy ? nil : Formspec.formSize(spec)
         let w = Formspec.formWidth(spec, legacy: legacy) ?? 11.75
         invScale = min(1, 12.5 / max(1, w))
     }
@@ -4201,6 +4208,7 @@ final class WorldSession {
             }
         }
         formspecOpen = false; inventoryOpen = false; invFrame = nil; invSlots = []
+        formSizeGrid = nil; formRect = nil
         invHeld = nil; invHover = nil; invCursor = nil
         formspecElements = []; formspecRings = []; formspecLabelsRaw = []; invLabels = []
         formspecFields = []; formspecButtons = []; invWidgets = []
@@ -4595,6 +4603,7 @@ final class WorldSession {
                 }
             }
             invSlots = slots
+            formRect = formSizeGrid.map { (uMin: -cu, uMax: $0.x * p - cu, vMin: -$0.y * p - cv, vMax: -cv) }
             // Labels share the slots' grid + recenter. Formspec y grows downward,
             // so negate. In real-coordinate forms (formspec_version >= 2, all of
             // VoxeLibre) label y is the text's vertical CENTER; the old half-cell
@@ -4720,6 +4729,7 @@ final class WorldSession {
             uMin = min(uMin, u - hw); uMax = max(uMax, u + hw); vMin = min(vMin, v - hh); vMax = max(vMax, v + hh)
         }
         if formspecOpen {
+            if let r = formRect { grow((r.uMin + r.uMax) / 2, (r.vMin + r.vMax) / 2, (r.uMax - r.uMin) / 2, (r.vMax - r.vMin) / 2) }
             for b in invBackgrounds { grow(b.u, b.v, b.hw, b.hh) }
             for i in invImages { grow(i.u, i.v, i.hw, i.hh) }
             for w in invWidgets { grow(w.u, w.v, w.hw, w.hh) }

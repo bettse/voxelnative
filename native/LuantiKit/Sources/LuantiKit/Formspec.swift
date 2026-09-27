@@ -619,7 +619,7 @@ public enum Formspec {
             let xs = tabXs(t.captions)
             for (i, cap) in t.captions.enumerated() {
                 let mark = (i + 1 == t.current) ? "[ \(cap) ]" : cap
-                out.append(Label(gx: xs[i], gy: 0.3, text: mark, color: nil))
+                out.append(Label(gx: xs[i], gy: tabRowY, text: mark, color: nil))
             }
         }
         let maxRows = 12
@@ -700,6 +700,11 @@ public enum Formspec {
     /// Help dialog rather than a container or a text-editor form.
     /// Left x of each tab caption: at least 2.7 units apart, more for a long
     /// caption ("[ Player Settings ]" ran into "Game Rules" at a fixed step).
+    /// Tab captions sit in a strip ABOVE the form's top edge, like desktop's
+    /// tabheader: inside the form at 0.3 they ran into content that starts
+    /// near the top (Settings' first row).
+    static let tabRowY: Float = -0.45
+
     static func tabXs(_ captions: [String]) -> [Float] {
         var xs: [Float] = [], x: Float = 0.4
         for cap in captions { xs.append(x); x += max(2.7, Float(cap.count + 4) * 0.3) }
@@ -729,7 +734,7 @@ public enum Formspec {
         if let t = parseTabHeader(spec) {
             let xs = tabXs(t.captions)
             for (i, cap) in t.captions.enumerated() {
-                out.append(InfoTarget(gx: xs[i], gy: 0.3, w: max(1.2, Float(cap.count) * 0.28 + 0.6), h: 0.7,
+                out.append(InfoTarget(gx: xs[i], gy: tabRowY, w: max(1.2, Float(cap.count) * 0.28 + 0.6), h: 0.7,
                                       field: t.name, value: "\(i + 1)"))
             }
         }
@@ -845,6 +850,14 @@ public enum Formspec {
     /// The form's width in real-coordinate units from `size[w,h(,fixed)]`
     /// (legacy units converted), or nil when there's no size[]. The first
     /// size[] wins, like the engine.
+    /// A real-coordinate form's `size[w,h]`, or nil (no size[], or unparsable).
+    public static func formSize(_ spec: String) -> SIMD2<Float>? {
+        guard let r = spec.range(of: "size["), r.lowerBound == spec.startIndex
+                || !(spec[spec.index(before: r.lowerBound)].isLetter || spec[spec.index(before: r.lowerBound)] == "_") else { return nil }
+        let parts = spec[r.upperBound...].prefix { $0 != "]" }.split(separator: ",").compactMap { Float($0.trimmingCharacters(in: .whitespaces)) }
+        return parts.count >= 2 ? SIMD2(parts[0], parts[1]) : nil
+    }
+
     public static func formWidth(_ spec: String, legacy: Bool) -> Float? {
         guard let r = spec.range(of: "size[") else { return nil }
         // Don't mistake "tooltip[size_inc;...]" or similar for size[].
