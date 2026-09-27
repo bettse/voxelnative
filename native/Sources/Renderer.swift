@@ -981,8 +981,12 @@ actor Renderer {
                 wieldMeshExtent[key] = extent
             }
             let s: Float = extent > 1e-4 ? 0.12 / extent : 0.12
+            // Models are in Luanti's node space; mirror Z into the hand's frame
+            // like the world mesh, or a held chest or mob head comes out mirrored.
+            // The half turn shows the front (the chest latch, the head's face).
+            var zFlip = matrix4x4_rotation(radians: .pi, axis: SIMD3(0, 1, 0)); zFlip.columns.2 = -zFlip.columns.2
             let m = grip * matrix4x4_rotation(radians: -0.5 * side, axis: SIMD3(0, 1, 0))
-                         * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0))
+                         * matrix4x4_rotation(radians: 0.4, axis: SIMD3(1, 0, 0)) * zFlip
             emitHandSilhouette(m, mesh: model, size: s, layer: layer, uv: SIMD2(1, 1), light: light, into: &v, idx: &idx)
         case .item(let layer, let uv):
             // Angle the tool up-forward out of the fist (diagonal like desktop).

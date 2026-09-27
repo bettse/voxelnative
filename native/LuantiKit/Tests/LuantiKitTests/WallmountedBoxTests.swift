@@ -13,10 +13,13 @@ final class WallmountedBoxTests: XCTestCase {
         let bottom = box(SIMD3(-0.1, -0.5, -0.1), SIMD3(0.1, -0.4, 0.1))
         let side = box(SIMD3(-0.1, -0.1, 0.3), SIMD3(0.1, 0.1, 0.5))
         let boxes = [top, bottom, side]
-        // floor (0) -> wall_bottom, ceiling (1) -> wall_top.
+        // ceiling (0, y+) -> wall_top, floor (1, y-) -> wall_bottom (mapnode.cpp).
         XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 0).count, 1)
-        XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 0)[0].min.y, bottom.min.y, accuracy: 1e-6)
-        XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 1)[0].max.y, top.max.y, accuracy: 1e-6)
+        XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 0)[0].max.y, top.max.y, accuracy: 1e-6)
+        XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 1)[0].min.y, bottom.min.y, accuracy: 1e-6)
+        // 6 / 7: the same boxes turned a quarter, not an out-of-range crash.
+        XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 6)[0].max.y, top.max.y, accuracy: 1e-6)
+        XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: 7)[0].min.y, bottom.min.y, accuracy: 1e-6)
         // walls (2..5) -> a single side box.
         for p2: UInt8 in [2, 3, 4, 5] {
             XCTAssertEqual(WorldMesher.wallmountedBox(boxes, param2: p2).count, 1, "wall p2=\(p2) is one box")

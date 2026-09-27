@@ -240,9 +240,11 @@ final class ActiveObjectsTests: XCTestCase {
 
     func testAttachedPositionRotatesForwardOffsetByYaw() {
         // A boat facing yaw = +90deg carries a seat that sits +1 on local x.
-        // Convention (Z-mirrored render frame): x' = x*cos + z*sin, z' = -x*sin + z*cos.
+        // Luanti node space, like the model draw: x' = x*cos - z*sin, z' = x*sin + z*cos.
         let r = ActiveObjects.attachedPosition(parent: .zero, yaw: .pi / 2, offset: SIMD3(1, 0, 0))
-        approx(r, SIMD3(0, 0, -1))
+        approx(r, SIMD3(0, 0, 1))
+        // Facing yaw 90 (toward -X), a seat behind the driver (local -Z) lands at +X.
+        approx(ActiveObjects.attachedPosition(parent: .zero, yaw: .pi / 2, offset: SIMD3(0, 0, -1)), SIMD3(1, 0, 0))
     }
 
     func testStepFollowLoopUsesTheSharedHelper() {

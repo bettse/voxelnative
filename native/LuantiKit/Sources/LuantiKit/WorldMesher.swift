@@ -147,16 +147,24 @@ public enum WorldMesher {
     // 13 4dir, 14 color4dir. Anything else has no directional rotation.
     /// A type="wallmounted" node_box carries 3 boxes (wall_top, wall_bottom,
     /// wall_side); exactly ONE is drawn, chosen by the wallmounted param2, not
-    /// all three (the plus-clump on buttons/floor heads). Floor (0) uses
-    /// wall_bottom, ceiling (1) wall_top, walls (2-5) wall_side rotated about Y
+    /// all three (the plus-clump on buttons/floor heads). Ceiling (0, and 6
+    /// turned 90) uses wall_top, floor (1, and 7 turned -90) wall_bottom, as in
+    /// mapnode.cpp transformNodeBox; walls (2-5) wall_side rotated about Y
     /// to face the wall. (Wall facing may want a device spot-check; the box is
     /// centred on the origin so rotateFacedir's low 2 bits are a pure Y turn.)
     private static let wallSideFacedir: [UInt8] = [2, 0, 1, 3]
     public static func wallmountedBox(_ boxes: [NodeRegistry.Box], param2: UInt8) -> [NodeRegistry.Box] {
         guard boxes.count >= 3 else { return boxes }
         switch Int(param2 & 0x07) {
-        case 1:  return [boxes[0]]                 // ceiling -> wall_top
-        case 0:  return [boxes[1]]                 // floor -> wall_bottom
+        case 0:  return [boxes[0]]                 // ceiling (y+) -> wall_top
+        case 1:  return [boxes[1]]                 // floor (y-) -> wall_bottom
+        case 6, 7:
+            // rotateXZBy(+-90): x' = x cos - z sin, z' = x sin + z cos.
+            let b = param2 & 0x07 == 6 ? boxes[0] : boxes[1]
+            let sn: Float = param2 & 0x07 == 6 ? 1 : -1
+            func turn(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(-p.z * sn, p.y, p.x * sn) }
+            let a = turn(b.min), c = turn(b.max)
+            return [NodeRegistry.Box(min: simd_min(a, c), max: simd_max(a, c))]
         default:
             // 2..5 wall -> wall_side turned to face the wall. The engine
             // (mapnode.cpp transformNodeBox) turns it 180 for x+, 0 for x-,

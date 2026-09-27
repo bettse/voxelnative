@@ -2357,10 +2357,12 @@ final class WorldSession {
         // frozen world and the menu, but skip physics, movement, and interaction.
         if keyboardOpen {
             handleKeyboardInput(gi)
+            holdDigUntilRelease = true
             postEntities()
             return
         }
         if updateKogane(&gi, dt: dt) {
+            holdDigUntilRelease = true
             postEntities()
             return
         }
@@ -3130,8 +3132,14 @@ final class WorldSession {
         if simChordHold { act.dig = true; act.place = true }
         if simTapPlace { act.place = true; simTapPlace = false }
         #endif
-        if inventoryOpen { handleInventoryInput(gi); act.dig = false; act.place = false }   // trigger/grip belong to the panel
+        if inventoryOpen { handleInventoryInput(gi); act.dig = false; act.place = false; holdDigUntilRelease = true }   // trigger/grip belong to the panel
         else { (invPrevPrimary, invPrevSecondary) = panelClicks(gi) }
+        // A trigger press that closed a panel or the menu (sign "Done", "Exit
+        // to menu") is still held on the next tick; without this it digs the
+        // sign off the wall or plays a mining sound on the way out.
+        if holdDigUntilRelease {
+            if act.dig { act.dig = false } else { holdDigUntilRelease = false }
+        }
         let pA = perf.now()
         handleInteraction(act, dt: dt)
         let pB = perf.now()
@@ -3965,6 +3973,7 @@ final class WorldSession {
     // on a tool or block does nothing. (The panel steals the grip when open, so
     // this can't fire while an inventory/chest is up.)
     private var eatKick: Float = 0
+    private var holdDigUntilRelease = false   // a UI had the trigger; ignore it until released
     private var rmbSuppressed = false   // this grip press used a node; don't report RMB until released
     /// Fall damage the way Luanti's client does it (clientenvironment.cpp
     /// step): on a floor collision, the vertical speed lost beyond a 14 node/s
@@ -6481,8 +6490,8 @@ final class WorldSession {
                     let p4 = g * SIMD4<Float>(e.attachOffset * ActiveObjects.BS, 1)
                     let vsz = parent.size.z != 0 ? parent.size.z : parent.size.x
                     var l = SIMD3<Float>(p4.x, p4.y, p4.z) * (SIMD3<Float>(parent.size.x, parent.size.y, vsz) * 0.1)
-                    l = WorldMesher.pitchLocal(l, parent.roll)
-                    l = WorldMesher.tiltLocal(l, parent.pitch)
+                    l = WorldMesher.pitchLocal(l, -parent.roll)   // negated like the model draw
+                    l = WorldMesher.tiltLocal(l, -parent.pitch)
                     let ca = cos(parent.yaw), sa = sin(parent.yaw)
                     e.pos = parent.pos + SIMD3(l.x * ca - l.z * sa, l.y, l.x * sa + l.z * ca)
                 }
@@ -7021,7 +7030,7 @@ final class WorldSession {
     /// The XP level digits, in XP green, just above the bar (overlay stream).
     private func appendXpLevel(v: inout [Float], idx: inout [UInt32]) {
         let (level, _) = xpDisplay()
-        guard level > 0, highlightLayer >= 0 else { return }
+        guard level > 0, highlightLayer >= 0, !inBed else { return }
         let text = String(level)
         if xpLevelLayer == -1 || xpLevelText != text {
             let px = Self.renderTextRGBA(text, canvas: ModelTextureHandoff.size, fontFrac: 0.30)
@@ -7986,7 +7995,10 @@ final class WorldSession {
         // in the model-local X-Y plane before yaw, so it is identity when 0 --
         // mobs (which never roll) are unchanged. Pitch (rotation.x) tilts in
         // the Y-Z plane (boats bobbing); both are zero for nearly everything.
-        let roll = e.roll, pitch = e.pitch
+        // Negated: Luanti draws object rotation with setPitchYawRoll(-rot)
+        // (content_cao.cpp), and unnegated a minecart on a slope tipped the
+        // wrong way.
+        let roll = -e.roll, pitch = -e.pitch
         // Each surface emits its own copy of the vertices it uses so the texture
         // layer/uv can differ per surface (layer is a per-vertex attribute).
         if modelRemap.count < mesh.positions.count {
@@ -9693,9 +9705,10 @@ final class WorldSession {
         if let raw = coll ?? phys.nodeBox(id), !raw.isEmpty {
             // A wallmounted node_box ships wall_top/bottom/side; only the one the
             // param2 selects exists physically (same pick as the mesher).
-            let boxes = (coll == nil && phys.isWallmounted(id))
-                ? WorldMesher.wallmountedBox(raw, param2: client.world.nodeParam2(n)) : raw
-            let fd = WorldMesher.meshFacedir(client.world.nodeParam2(n), phys.pt2(id))
+            let picked = coll == nil && phys.isWallmounted(id)
+            let boxes = picked ? WorldMesher.wallmountedBox(raw, param2: client.world.nodeParam2(n)) : raw
+            // wallmountedBox already turned it to its wall; turning again skewed wall heads.
+            let fd = picked ? 0 : WorldMesher.meshFacedir(client.world.nodeParam2(n), phys.pt2(id))
             func toAABB(_ b: NodeRegistry.Box) -> AABB {
                 var lo = b.min, hi = b.max
                 if fd != 0 {

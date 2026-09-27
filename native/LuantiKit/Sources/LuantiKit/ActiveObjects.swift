@@ -581,8 +581,11 @@ public final class ActiveObjects {
             o.target = o.pos
             // While attached the child's own rotation is replaced by the
             // attachment rotation relative to the parent (updateAttachments).
-            o.yaw = parent.yaw + o.attachRot.y; o.yawTarget = o.yaw; o.yawOld = o.yaw
-            o.pitch = o.attachRot.x; o.roll = o.attachRot.z
+            // Luanti applies it with setRotationDegrees, which turns the other
+            // way from an object's own rotation, hence the minus signs (a boat's
+            // mob passenger at y = 270 faced backwards).
+            o.yaw = parent.yaw - o.attachRot.y; o.yawTarget = o.yaw; o.yawOld = o.yaw
+            o.pitch = -o.attachRot.x; o.roll = -o.attachRot.z
             objects[id] = o
         }
     }
@@ -591,11 +594,12 @@ public final class ActiveObjects {
     /// World position of something attached to a parent: parent position plus the
     /// local offset rotated by the parent's yaw (radians). Used for both passenger
     /// AOs and the local player riding a vehicle, so a rider and a passenger land
-    /// in the same spot instead of mirrored ones. The sign convention matches the
-    /// entity render frame (Z-mirrored), so keep both callers on this one helper.
+    /// in the same spot instead of mirrored ones. Same turn as the model draw
+    /// (yaw 90 sends local +Z to -X, Luanti's own node space): the reverse put
+    /// a two-seat boat's passenger in front when facing east or west.
     public static func attachedPosition(parent: SIMD3<Float>, yaw: Float, offset: SIMD3<Float>) -> SIMD3<Float> {
         let c = cos(yaw), s = sin(yaw)
-        return parent + SIMD3(offset.x * c + offset.z * s, offset.y, -offset.x * s + offset.z * c)
+        return parent + SIMD3(offset.x * c - offset.z * s, offset.y, offset.x * s + offset.z * c)
     }
 
     public func entity(_ id: Int) -> Entity? { objects[id] }
