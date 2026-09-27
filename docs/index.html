@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VoxelNative — a native Luanti client for Apple Vision Pro</title>
+<title>VoxelNative: a native Luanti client for Apple Vision Pro</title>
 <meta name="description" content="A native Swift + Metal client that speaks the Luanti / Minetest protocol directly, so an Apple Vision Pro renders the world itself, per-eye, instead of streaming a desktop.">
-<meta property="og:title" content="VoxelNative — Luanti on Apple Vision Pro">
-<meta property="og:description" content="A hand-written Swift + Metal client that speaks the Luanti protocol and renders the world per-eye on Apple Vision Pro.">
-<meta property="og:image" content="img/flowers.jpg">
+<meta property="og:title" content="VoxelNative: Luanti on Apple Vision Pro">
+<meta property="og:description" content="A Swift + Metal client that speaks the Luanti protocol and renders the world per-eye on Apple Vision Pro.">
+<meta property="og:image" content="https://bettse.github.io/voxelnative/img/flowers.jpg">
 <style>
   :root {
-    --bg:#111418; --bg2:#171b20; --line:#282e36; --line2:#333b45;
+    --bg:#111418; --line:#282e36; --line2:#333b45;
     --text:#e8eaed; --dim:#a3adb8; --faint:#7c8894;
-    --accent:#e0a24a; --link:#79b8ff;
+    --accent:#9ccc65;   /* the grass green from the screenshots: links, the button, the note rule */
   }
   * { box-sizing:border-box; }
   html { scroll-behavior:smooth; }
@@ -21,36 +21,33 @@
     font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     -webkit-font-smoothing:antialiased;
   }
-  a { color:var(--link); }
+  a { color:var(--accent); }
   code, .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .wrap { max-width:1000px; margin:0 auto; padding:0 22px; }
   .btn { display:inline-block; padding:10px 18px; border-radius:8px; text-decoration:none; font-weight:600; font-size:15px; }
-  .btn.solid { background:var(--text); color:#11141a; }
+  .btn.solid { background:var(--accent); color:#11141a; }
   .btn.line { border:1px solid var(--line2); color:var(--text); }
 
-  /* hero: text left, real screenshot right (asymmetric, no centered template) */
+  /* hero */
   .hero { border-bottom:1px solid var(--line); }
   .hero .wrap { display:grid; grid-template-columns:1.05fr 1fr; gap:40px; align-items:center; padding:70px 22px 56px; }
   .hero h1 { font-size:44px; line-height:1.05; margin:0 0 14px; letter-spacing:-.5px; }
   .hero .kicker { color:var(--faint); font-size:14px; margin:0 0 18px; }
   .hero p { color:var(--dim); font-size:18px; margin:0 0 24px; max-width:36ch; }
-  .hero .buttons a { margin-right:10px; }
+  .hero .buttons { display:flex; flex-wrap:wrap; gap:10px; }
   .hero figure { margin:0; }
   .hero img { width:100%; border-radius:10px; border:1px solid var(--line); display:block; }
   .hero figcaption { color:var(--faint); font-size:12.5px; margin-top:8px; }
   @media (max-width:760px){ .hero .wrap{ grid-template-columns:1fr; gap:26px; padding:44px 22px; } .hero h1{ font-size:34px; } }
 
-  /* honest note about the AI-assisted code, right under the fold */
-  .note { background:var(--bg2); border-left:3px solid var(--accent); border-radius:0 8px 8px 0; padding:14px 18px; margin:26px 0; color:var(--dim); font-size:14.5px; }
-  .note strong { color:var(--text); }
+  /* AI note */
+  .hero .note { border-left:2px solid var(--accent); padding:2px 0 2px 14px; margin:24px 0 0; color:var(--faint); font-size:14px; line-height:1.55; max-width:52ch; }
 
   section { padding:44px 0; border-bottom:1px solid var(--line); }
   h2 { font-size:24px; margin:0 0 14px; letter-spacing:-.3px; }
   p { max-width:70ch; }
-  .lead-dim { color:var(--dim); }
-  ul.list { color:var(--dim); padding-left:20px; }
+  ul.list { padding-left:20px; }
   ul.list li { margin:7px 0; }
-  ul.list b { color:var(--text); font-weight:600; }
 
   video { width:100%; border-radius:10px; border:1px solid var(--line); display:block; background:#000; }
   .cap { color:var(--faint); font-size:13px; margin-top:8px; }
@@ -61,7 +58,7 @@
   .shots figcaption { color:var(--faint); font-size:13px; margin-top:7px; }
 
   pre { background:#0c0f13; border:1px solid var(--line); border-radius:10px; padding:15px 17px; overflow-x:auto; font-size:13.5px; color:#d5dde5; }
-  footer { padding:34px 22px 60px; color:var(--faint); font-size:13.5px; }
+  footer { padding:34px 0 60px; color:var(--faint); font-size:13.5px; }
   footer p { max-width:80ch; }
 </style>
 </head>
@@ -77,24 +74,19 @@
         <a class="btn solid" href="https://testflight.apple.com/join/n6sD7wYX">Join the TestFlight beta</a>
         <a class="btn line" href="https://github.com/bettse/voxelnative">Source on GitHub</a>
       </div>
+      <p class="note">Most of the client code was written with an AI coding assistant, so it may have mistakes or stale comments. Read the code and check anything before you rely on it. Bug reports and fixes are welcome. More detail, including what's missing, is in the <a href="https://github.com/bettse/voxelnative#readme">README</a>.</p>
     </div>
     <figure>
       <img src="img/flowers.jpg" alt="A VoxeLibre flower field with birch and oak trees, hearts, hunger and the experience bar in view">
-      <figcaption>A VoxeLibre flower field, captured in the headset.</figcaption>
+      <figcaption>A VoxeLibre flower field.</figcaption>
     </figure>
   </div>
 </header>
 
-<div class="wrap">
-  <div class="note">
-    <strong>Heads up:</strong> the client code was written largely with an AI coding assistant, so it may have mistakes or stale comments. Read the code and check anything before you rely on it. Bug reports and fixes are welcome. (This page is just a project page; the honest details live in the <a href="https://github.com/bettse/voxelnative#readme">README</a>.)
-  </div>
-</div>
-
 <section id="demo">
   <div class="wrap">
     <h2>Moving around in it</h2>
-    <p class="lead-dim">A short clip captured in the Vision Pro simulator: the client streaming and meshing a real server world as the view pans across it. You can see the hands, the wrist map, the hotbar, and the pointed-node outline.</p>
+    <p>A short clip captured in the Vision Pro simulator: the client streaming and meshing a real server world as the view pans across it. You can see the hands, the wrist map, the hotbar, and the pointed-node outline.</p>
     <video src="video/demo.mp4" poster="video/demo-poster.jpg" autoplay muted loop playsinline controls></video>
     <p class="cap">Recorded from the simulator, so it's a flat mono view. In the headset it's rendered separately for each eye.</p>
   </div>
@@ -103,9 +95,9 @@
 <section id="what">
   <div class="wrap">
     <h2>What it is</h2>
-    <p class="lead-dim">A from-scratch Swift + Metal reimplementation of the Luanti network client. Not the engine ported, not a stream: a new client that talks the same wire protocol.</p>
-    <p class="lead-dim">It speaks the Luanti UDP protocol directly: SRP login, zstd map-block streaming, node and item definitions, media download, entities, formspecs, HUD. An unmodified server sees it as just another client and hands over the whole game. The world is rendered per-eye with Compositor Services, meshed live as blocks stream in, and you walk around, dig, place, and open inventories with the PSVR2 Sense controllers (or a Bluetooth keyboard, with gaze to aim and a pinch to click).</p>
-    <p class="lead-dim">It connects to any Luanti server. I build and test it against <a href="https://git.minetest.land/VoxeLibre/VoxeLibre">VoxeLibre</a> (the Minecraft-ish flagship game), so that's where the polish is, but the protocol layer doesn't care which game you run.</p>
+    <p>A new Luanti network client written in Swift and Metal. It isn't a port of the engine; it talks the same wire protocol.</p>
+    <p>It speaks the Luanti UDP protocol directly: SRP login, zstd map-block streaming, node and item definitions, media download, entities, formspecs, HUD. An unmodified server sees it as just another client and hands over the whole game. The world is rendered per-eye with Compositor Services, meshed live as blocks stream in, and you walk around, dig, place, and open inventories with the PSVR2 Sense controllers (or a Bluetooth keyboard, with gaze to aim and a pinch to click).</p>
+    <p>It connects to any Luanti server. I build and test it against <a href="https://git.minetest.land/VoxeLibre/VoxeLibre">VoxeLibre</a> (a Minecraft-like game for Luanti), so that's where the polish is, but the protocol layer doesn't care which game you run.</p>
   </div>
 </section>
 
@@ -113,13 +105,12 @@
   <div class="wrap">
     <h2>What works right now</h2>
     <ul class="list">
-      <li><b>Live world streaming</b> and meshing: cubes, nodeboxes, plants, meshes (chests, beds), rails, liquids, glass, with day/night sky and fog.</li>
-      <li><b>Per-eye rendering</b> through Compositor Services, with reprojection, not a flat window in space.</li>
-      <li><b>Dig, place, and craft</b>: tool capabilities and wear, chests, furnaces, anvils, and other station formspecs shown as spatial panels you point at.</li>
-      <li><b>PSVR2 Sense controllers</b> for locomotion, look, and interaction (a Bluetooth keyboard with gaze and pinch also works).</li>
-      <li><b>Entities</b>: mobs, dropped items, projectiles, XP orbs, nametags, with animation and bone attachments.</li>
-      <li><b>Positional audio</b> as real 3D sources (HRTF), matching Luanti's OpenAL setup.</li>
-      <li>Plus the smaller stuff: particles, weather, damage feedback, armor, status effects, the experience bar.</li>
+      <li>The world streams in and is meshed live: cubes, nodeboxes, plants, meshes (chests, beds), rails, liquids and glass, with a day/night sky and fog.</li>
+      <li>Per-eye rendering through Compositor Services, with reprojection.</li>
+      <li>Digging, placing and crafting, with tool capabilities and wear. Chests, furnaces, anvils and other stations open as panels you point at.</li>
+      <li>PSVR2 Sense controllers for moving, turning and interacting. A Bluetooth keyboard with gaze and pinch also works.</li>
+      <li>Mobs, dropped items, projectiles, XP orbs and nametags, with animation and bone attachments.</li>
+      <li>Positional audio (HRTF, matching Luanti's OpenAL setup), particles, weather, damage feedback, armor, status effects and the experience bar.</li>
     </ul>
   </div>
 </section>
@@ -127,7 +118,7 @@
 <section id="rough">
   <div class="wrap">
     <h2>Rough edges</h2>
-    <p class="lead-dim">It's a hobby project and a work in progress. Honestly, right now:</p>
+    <p>It's a hobby project and still in progress. Things I know about:</p>
     <ul class="list">
       <li>Some deep-underground nodes still fall back to a placeholder look I haven't chased down.</li>
       <li>No creative pick-block gesture yet; the VR control scheme is still being figured out.</li>
@@ -154,14 +145,14 @@
 <section id="beta">
   <div class="wrap">
     <h2>Try the beta</h2>
-    <p class="lead-dim">The easiest way in is the <a href="https://testflight.apple.com/join/n6sD7wYX">TestFlight public beta</a>: open the link on your Vision Pro and install through the TestFlight app. You'll need PlayStation VR2 Sense controllers or a Bluetooth keyboard, and a Luanti server to join; the app doesn't host worlds itself. Feedback goes through TestFlight's own feedback button.</p>
+    <p>The easiest way in is the <a href="https://testflight.apple.com/join/n6sD7wYX">TestFlight public beta</a>: open the link on your Vision Pro and install through the TestFlight app. You'll need PlayStation VR2 Sense controllers or a Bluetooth keyboard, and a Luanti server to join; the app doesn't host worlds itself. Feedback goes through TestFlight's own feedback button.</p>
   </div>
 </section>
 
 <section id="build">
   <div class="wrap">
     <h2>Build it yourself</h2>
-    <p class="lead-dim">You'll need Xcode and a Luanti server to point it at (a local dev server is fine). Set your own Apple Developer team for a device build.</p>
+    <p>You'll need Xcode and a Luanti server to point it at (a local dev server is fine). Set your own Apple Developer team for a device build.</p>
     <pre>git clone https://github.com/bettse/voxelnative
 cd voxelnative/native
 
