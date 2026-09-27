@@ -1082,6 +1082,15 @@ final class WorldSession {
             self.lastPostedAtlasGen = -1
             self.fullRemesh = true      // new renderer: rebuild + re-post the whole buffer
             self.dirty = true
+            // Same for everything else the renderer holds on the GPU: the model
+            // textures (skins, mob textures, HUD/panel text), the End skybox and
+            // the sun/moon. The handoff's "built" count was the OLD renderer's,
+            // so the catch-up check never fired and a resumed world had no arms,
+            // no mobs and blank menus.
+            self.modelTexPostedCount = -1
+            self.modelTextureHandoff.reportBuilt(0)
+            self.skyboxBuilt = ["(new renderer)"]
+            self.skyBodiesBuilt = []
             self.client.connect(host: Self.host, port: Self.port)
         }
         let t = DispatchSource.makeTimerSource(queue: queue)
