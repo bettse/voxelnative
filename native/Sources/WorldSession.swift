@@ -7732,6 +7732,7 @@ final class WorldSession {
         }
         modelTexLayer[spec] = modelTexCount; modelTexUV[spec] = img.uv
         modelTexData.append(img.px); modelTexNames.append(spec); modelTexCount += 1
+        print("[modeltex] +\(modelTexCount - 1) \(spec.prefix(80))"); fflush(stdout)
         return true
     }
 
@@ -9017,6 +9018,7 @@ final class WorldSession {
         modelTexData.append(px)
         modelTexNames.append(name)
         modelTexCount += 1
+        print("[modeltex] +\(layer) \(name.prefix(80))"); fflush(stdout)   // new slice (reuse doesn't log)
         return layer
     }
 
