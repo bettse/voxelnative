@@ -169,6 +169,14 @@ final class AudioManager: NSObject {
     }
 
     private func startEngine() {
+        // Streamed tracks delete their temp WAV when they finish; one still
+        // playing when the app was killed stays behind. Clear those out.
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        if let names = try? FileManager.default.contentsOfDirectory(atPath: tmp.path) {
+            for n in names where n.hasPrefix("snd-") && n.hasSuffix(".wav") {
+                try? FileManager.default.removeItem(at: tmp.appendingPathComponent(n))
+            }
+        }
         guard !engineStarted else { return }
         engine.attach(env)
         // Luanti: AL_INVERSE_DISTANCE_CLAMPED with reference 1 node, but it
@@ -183,7 +191,7 @@ final class AudioManager: NSObject {
         env.distanceAttenuationParameters.referenceDistance = 3
         env.distanceAttenuationParameters.rolloffFactor = 1
         env.distanceAttenuationParameters.maximumDistance = 1000
-        env.renderingAlgorithm = .HRTFHQ
+        env.renderingAlgorithm = .HRTF
         env.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)
         let stereo = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)
         engine.attach(flat)
@@ -240,13 +248,47 @@ final class AudioManager: NSObject {
 
     /// Decode .ogg -> PCM buffer via a temp WAV (AVAudioFile can't read Ogg).
     /// Positional sources must be mono for the environment node to place them.
-    private func pcmBuffer(_ ogg: Data, mono: Bool) -> AVAudioPCMBuffer? {
+    /// A decoded sound: in memory, or (long music) streamed from its temp WAV,
+    /// which the player deletes when the track ends.
+    private enum Decoded {
+        case buffer(AVAudioPCMBuffer)
+        case file(AVAudioFile, URL)
+        var format: AVAudioFormat {
+            switch self { case .buffer(let b): return b.format; case .file(let f, _): return f.processingFormat }
+        }
+        var seconds: Double {
+            switch self {
+            case .buffer(let b): return b.format.sampleRate > 0 ? Double(b.frameLength) / b.format.sampleRate : 0
+            case .file(let f, _): return f.processingFormat.sampleRate > 0 ? Double(f.length) / f.processingFormat.sampleRate : 0
+            }
+        }
+    }
+
+    /// Long non-positional tracks (music, 20 s and up) stream from disk: a
+    /// 4-minute stereo track decoded to float is ~85 MB. Everything else is read
+    /// into a buffer (and short effects cached).
+    private func decode(_ ogg: Data, mono: Bool, allowStream: Bool) -> Decoded? {
         guard let wav = Vorbis.decodeToWAV(ogg) else { return nil }
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snd-\(UUID().uuidString).wav")
-        defer { try? FileManager.default.removeItem(at: url) }
         do {
             try wav.write(to: url)
             let file = try AVAudioFile(forReading: url)
+            let secs = file.processingFormat.sampleRate > 0 ? Double(file.length) / file.processingFormat.sampleRate : 0
+            if allowStream, !mono, secs >= 20 {
+                print("[audio] streaming \(Int(secs)) s track from disk"); fflush(stdout)
+                return .file(file, url)
+            }
+            defer { try? FileManager.default.removeItem(at: url) }
+            return pcmBuffer(from: file, mono: mono).map { .buffer($0) }
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            print("[audio] wav load failed: \(error)"); fflush(stdout)
+            return nil
+        }
+    }
+
+    private func pcmBuffer(from file: AVAudioFile, mono: Bool) -> AVAudioPCMBuffer? {
+        do {
             let fmt = file.processingFormat
             guard let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(file.length)) else { return nil }
             try file.read(into: buf)
@@ -293,16 +335,17 @@ final class AudioManager: NSObject {
                 return
             }
             let cacheKey = file.isEmpty ? "" : "\(file)|\(positional)"
-            var buf: AVAudioPCMBuffer
+            var sound: Decoded
             if !cacheKey.isEmpty, let cached = self.pcmCache[cacheKey] {
-                buf = cached
+                sound = .buffer(cached)
             } else {
-                guard let decoded = self.pcmBuffer(data, mono: positional) else {
+                guard let decoded = self.decode(data, mono: positional, allowStream: !spec.loop) else {
                     print("[audio] vorbis decode failed id=\(spec.id) name=\(spec.name)"); fflush(stdout)
                     return
                 }
-                buf = decoded
-                let secs = buf.format.sampleRate > 0 ? Double(buf.frameLength) / buf.format.sampleRate : 0
+                sound = decoded
+                let secs = sound.seconds
+                if case .buffer(let buf) = sound {
                 // Short effects only (a 19 s clip is ~7 MB of float PCM), and
                 // capped by bytes as well as count: the count alone let a long
                 // session hold tens of MB of decoded sound.
@@ -315,55 +358,68 @@ final class AudioManager: NSObject {
                     }
                     self.pcmCache[cacheKey] = buf; self.pcmCacheOrder.append(cacheKey); self.pcmCacheBytes += add
                 }
+                }
             }
+            let fmt = sound.format
+            // A dropped streamed track must not leave its temp WAV behind.
+            func dropStream() { if case .file(_, let u) = sound { try? FileManager.default.removeItem(at: u) } }
             // Length-based music classification (Eric): every VoxeLibre sfx is
             // <=9s, while music/jukebox/theme tracks run 66s+. So any long track
             // is musical regardless of name -- this catches mcl_music (diminixed-,
             // Jester-, Herowl-, ... which the name hint missed and leaked past the
             // music mute), jukebox discs, and theme.ogg. Re-decide by duration and
             // re-apply the mute so a muted music channel is actually silent.
-            let seconds = buf.format.sampleRate > 0 ? Double(buf.frameLength) / buf.format.sampleRate : 0
+            let seconds = sound.seconds
             if seconds >= 20, channel != .music {
                 channel = .music
                 vol = VolumeSettings.shared.volume(base: base, channel: .music)
                 if vol <= 0, spec.fade <= 0 {
                     print("[audio] skip long-track muted id=\(spec.id) name=\(spec.name) sec=\(Int(seconds))"); fflush(stdout)
+                    dropStream()
                     return
                 }
             }
-            let src: Source
+            var reused: Source? = nil
             if let pooled = positional ? self.idle3D.popLast() : self.idle2D.popLast() {
-                src = pooled
-                src.channel = channel; src.baseVolume = vol
+                pooled.channel = channel; pooled.baseVolume = vol
                 // Re-wire only when the buffer's format differs from what the
                 // chain was last connected with (mono 44.1k for every 3D sfx).
                 // connect() raises an uncatchable NSException on a format the
-                // graph won't take (error -10868 after a session interruption /
-                // route change) -- catch it so a bad sound drops, not the app.
-                if src.format != buf.format {
+                // graph won't take (error -10868): re-wiring a pooled player to a
+                // different channel count hits it, which dropped music and the
+                // level-up sound. Catch it and use a fresh player instead.
+                if pooled.format != fmt {
                     if let err = VNCatchNSException({
-                        self.engine.connect(src.player, to: src.speed, format: buf.format)
-                        self.engine.connect(src.speed, to: positional ? self.env : self.flat, format: buf.format)
+                        self.engine.connect(pooled.player, to: pooled.speed, format: fmt)
+                        self.engine.connect(pooled.speed, to: positional ? self.env : self.flat, format: fmt)
                     }) {
-                        print("[audio] connect failed (pooled), dropped id=\(spec.id) name=\(spec.name): \(err)"); fflush(stdout)
-                        self.safeDetach(src.player, src.speed)
-                        return
+                        print("[audio] pooled player won't take the format (\(err)); using a fresh one for \(spec.name)"); fflush(stdout)
+                        self.safeDetach(pooled.player, pooled.speed)
+                    } else {
+                        pooled.format = fmt
+                        reused = pooled
                     }
-                    src.format = buf.format
+                } else {
+                    reused = pooled
                 }
+            }
+            let src: Source
+            if let r = reused {
+                src = r
             } else {
                 src = Source(positional: positional, channel: channel, baseVolume: vol)
                 self.engine.attach(src.player); self.engine.attach(src.speed)
                 if let err = VNCatchNSException({
-                    self.engine.connect(src.player, to: src.speed, format: buf.format)
-                    self.engine.connect(src.speed, to: positional ? self.env : self.flat, format: buf.format)
+                    self.engine.connect(src.player, to: src.speed, format: fmt)
+                    self.engine.connect(src.speed, to: positional ? self.env : self.flat, format: fmt)
                 }) {
                     print("[audio] connect failed (new), dropped id=\(spec.id) name=\(spec.name): \(err)"); fflush(stdout)
                     self.safeDetach(src.player, src.speed)
+                    dropStream()
                     return
                 }
-                src.format = buf.format
-                if positional { src.player.renderingAlgorithm = .HRTFHQ }
+                src.format = fmt
+                if positional { src.player.renderingAlgorithm = .HRTF }
             }
             src.boost = positional ? max(1, spec.gain) : 1
             if positional, let p = pos { src.truePos = p; self.place(src) }
@@ -372,12 +428,20 @@ final class AudioManager: NSObject {
             let key = ObjectIdentifier(src)
             src.generation += 1
             let gen = src.generation
-            src.player.scheduleBuffer(buf, at: nil, options: spec.loop ? [.loops] : []) { [weak self] in
-                guard !spec.loop else { return }
-                // A stop() also fires this; by then the chain may be back in the
-                // pool and playing something else. Only the play that scheduled
-                // this buffer may finish it.
-                self?.q.async { guard src.generation == gen else { return }; self?.finish(src, key: key) }
+            switch sound {
+            case .buffer(let buf):
+                src.player.scheduleBuffer(buf, at: nil, options: spec.loop ? [.loops] : []) { [weak self] in
+                    guard !spec.loop else { return }
+                    // A stop() also fires this; by then the chain may be back in the
+                    // pool and playing something else. Only the play that scheduled
+                    // this buffer may finish it.
+                    self?.q.async { guard src.generation == gen else { return }; self?.finish(src, key: key) }
+                }
+            case .file(let f, let u):
+                src.player.scheduleFile(f, at: nil) { [weak self] in
+                    try? FileManager.default.removeItem(at: u)
+                    self?.q.async { guard src.generation == gen else { return }; self?.finish(src, key: key) }
+                }
             }
             // AVAudioPlayerNode.play() raises (SIGABRT, uncatchable in Swift) if
             // the engine isn't RUNNING — engineStarted is a once-set flag, but the
@@ -389,6 +453,7 @@ final class AudioManager: NSObject {
                 catch {
                     print("[audio] engine down, dropped id=\(spec.id) name=\(spec.name): \(error)"); fflush(stdout)
                     self.safeDetach(src.player, src.speed)
+                    dropStream()
                     return
                 }
             }
@@ -404,6 +469,7 @@ final class AudioManager: NSObject {
                 }) {
                     print("[audio] stage reconnect failed, dropped id=\(spec.id) name=\(spec.name): \(err)"); fflush(stdout)
                     self.safeDetach(src.player, src.speed)
+                    dropStream()
                     return
                 }
             }

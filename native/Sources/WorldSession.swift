@@ -2610,6 +2610,12 @@ final class WorldSession {
                 print("[audiotest] 3D played (no crash = pass)"); fflush(stdout)
             } else if audioTestPhase == 2, audioTestTimer > 6 {
                 audioTestPhase = 3
+                // A music track: long, so it streams from disk (AudioManager.decode).
+                playSound(SoundSpec(id: 7777, name: "DarkReaven-cube_beat", gain: 0.3, type: 0, pos: .zero, objectId: 0, loop: false, fade: 0, pitch: 1.0, ephemeral: false))
+                print("[audiotest] music played"); fflush(stdout)
+            } else if audioTestPhase == 3, audioTestTimer > 9 {
+                audioTestPhase = 4
+                audio.stop(id: 7777)
                 print("[audiotest] RESULT pass"); fflush(stdout)
             }
         }

@@ -191,7 +191,12 @@ public final class MediaManager {
         var hits: [String] = []
         let t0 = ContinuousClock.now   // not DispatchTime uptime: that reads boot time, which the privacy manifest would have to justify
         for name in toGet where store[name] == nil {
-            if let url = cacheURL(name), let data = try? Data(contentsOf: url) {
+            // Sounds (~57 MB of OGG in VoxeLibre) are memory-mapped from the
+            // cache rather than read in: the OS can drop the pages when it
+            // needs memory and re-read them on demand. Textures are small and
+            // decoded right away, so they're read normally.
+            let mapped = name.hasSuffix(".ogg")
+            if let url = cacheURL(name), let data = try? Data(contentsOf: url, options: mapped ? .alwaysMapped : []) {
                 store[name] = data; requested.insert(name); hits.append(name)
                 pushedLanded(name)
             }
