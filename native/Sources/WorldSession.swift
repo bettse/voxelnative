@@ -255,6 +255,7 @@ final class WorldSession {
     private var noticeText: String? = nil
     private var noticeExpiry: Double = 0          // uptime after which noticeText clears itself (0 = sticky)
     private var pendingButtonForm: (formname: String, button: String)? = nil
+    private var pendingButtonHint: String? = nil   // its "press O" notice, restored after a photo
 
     /// Push the connection phase to the launcher (main actor). Also mirrors a
     /// short problem string for the in-world banner.
@@ -520,6 +521,28 @@ final class WorldSession {
     private var simFallMaxY: Float = 0
     #endif
 
+    /// Ease the bed view in while the bed has us (frozen by mcl_beds, its dialog
+    /// up) and back out on getting up, over about a second.
+    private func stepBedView(dt: Float) {
+        let inBed = wasFrozen && pendingButtonForm?.formname == "mcl_beds_form" && !dead
+        let cur = BedView.shared.tilt, target: Float = inBed ? 1 : 0
+        guard cur != target else { return }
+        var next = cur + (target - cur) * min(1, dt * 3)
+        if abs(target - next) < 0.01 { next = target }
+        BedView.shared.tilt = next
+    }
+
+    // A small MOVE_PLAYER we didn't apply, kept a moment for the bed case.
+    private var skippedMove: (pos: SIMD3<Float>, yaw: Float, pitch: Float, at: Double)?
+    private var wasFrozen = false
+    private func applySkippedMove(_ why: String) {
+        guard let m = skippedMove, AppClock.seconds - m.at < 2 else { return }
+        skippedMove = nil
+        player.setSpawn(m.pos, yaw: -m.yaw, pitch: m.pitch)
+        sneakNode = nil
+        print("[session] applied small move to \(m.pos) (\(why))"); fflush(stdout)
+    }
+
     #if targetEnvironment(simulator)
     /// Sim scenes start on the spawn pad at (0, 121, 0). Two hops, because a
     /// MOVE_PLAYER under 6 nodes is not applied (see onSpawn): a scene that
@@ -646,6 +669,7 @@ final class WorldSession {
             }
             if let n = noticeText { d["notice"] = n }
             if let pf = pendingButtonForm { d["buttonForm"] = pf.formname }
+            d["bedTilt"] = r2(BedView.shared.tilt); d["frozen"] = wasFrozen
             return simJSON(d)
         }
     }
@@ -710,7 +734,14 @@ final class WorldSession {
                 self.sneakNode = nil
             } else {
                 let cur = self.player.snapshot().feet
-                if simd_distance(cur, pos) > 6 {
+                if simd_distance(cur, pos) <= 6 {
+                    // Small: normally left alone (see above). Keep it briefly in
+                    // case it's a bed: mcl_beds moves you onto the bed and freezes
+                    // your movement, and the freeze can land a moment after the
+                    // move. Applied then, or now if already frozen.
+                    self.skippedMove = (pos, yaw, pitch, AppClock.seconds)
+                    if self.player.movementFrozen() { self.applySkippedMove("frozen") }
+                } else if simd_distance(cur, pos) > 6 {
                     let sp = grounded(pos)
                     print("[session] teleport/respawn to \(pos) -> \(sp)"); fflush(stdout)
                     self.player.setSpawn(sp, yaw: -yaw, pitch: pitch)
@@ -888,6 +919,11 @@ final class WorldSession {
             // detect the freeze directly too and let the inventory button (O)
             // submit the known bed form's leave field to get up. Clearing the
             // override (speed restored) ends it.
+            // Lying down / getting up moves you less than 6 nodes, which a
+            // plain MOVE_PLAYER doesn't apply: without this you stayed on the
+            // floor beside the bed and the lowered eye put the view in the ground.
+            let frozen = speed == 0 && jump == 0
+            if frozen != self.wasFrozen { self.wasFrozen = frozen; self.applySkippedMove(frozen ? "lie down" : "get up") }
             if speed == 0, jump == 0 {
                 self.pendingButtonForm = ("mcl_beds_form", "leave")
                 self.noticeText = "Press O to get up"; self.noticeExpiry = 0
@@ -1063,6 +1099,7 @@ final class WorldSession {
     func stop() {
         timer?.cancel(); timer = nil
         screenshotFlag.recording = false   // leaving the world finishes a clip in progress
+        BedView.shared.tilt = 0
         started = false     // main-thread re-entry guard: allow a later start()
         // The rest is session-queue state; set it on the queue (this async is
         // enqueued with no delay, so it runs before any delayed reconnect, and
@@ -1150,6 +1187,7 @@ final class WorldSession {
 
     private func tick(dt: Float) {
         stepSkybox()
+        stepBedView(dt: dt)
         stepSkyBodies()
         // An uncontended unfair lock is ~20 ns; the audio queue only ever
         // appends here when a handled sound actually ends.
@@ -2250,8 +2288,11 @@ final class WorldSession {
             // Headless: nobody presses O. VoxeLibre's death screen is one of these
             // button-only forms, so auto-submit after 2 s or every harness after a
             // death runs (and screenshots) through the red cast.
-            simDeadTimer += dt
-            if simDeadTimer > 2 { press = true; simDeadTimer = 0 }
+            // Not the bed: a vrctl run tests lying in it.
+            if pf.formname != "mcl_beds_form" {
+                simDeadTimer += dt
+                if simDeadTimer > 2 { press = true; simDeadTimer = 0 }
+            }
             #endif
             if press {
                 client.sendPlayerFields(formname: pf.formname, fields: [pf.button: "", "quit": "true"])
@@ -2259,9 +2300,19 @@ final class WorldSession {
                 print("[formspec] submitted \(pf.button) for \(pf.formname)"); fflush(stdout)
             }
             prevInventory = gi.inventory
+            // Photos and clips still work in bed (Eric wanted to show the view).
+            // The shot clears the "press O" hint so it isn't in the picture;
+            // put it back once the photo or clip is done.
+            let hint = noticeText.flatMap { $0.contains("press O") || $0.contains("Press O") ? $0 : nil } ?? pendingButtonHint
+            pendingButtonHint = hint
+            stepPhotoButton(gi.photo, dt: dt)
+            stepPhoto(dt: dt)
+            stepVideoRecording(dt: dt)
+            if photoStage == 0, videoStage == 0, noticeText == nil, pendingButtonForm != nil { noticeText = hint; noticeExpiry = 0 }
             postEntities()
             return
         }
+        pendingButtonHint = nil
         // Kogane (the shoulder companion) gets first look at the input: while its
         // menu is open it swallows movement and interaction, and looking at it +
         // the trigger opens the menu instead of digging.

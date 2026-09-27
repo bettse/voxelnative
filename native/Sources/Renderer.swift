@@ -585,6 +585,14 @@ actor Renderer {
     /// Applied to both the view matrix and the HUD/hands/raycast head so they
     /// stay consistent.
     nonisolated static func simHeadOffset() -> simd_float4x4 {
+        // In bed the view tips back to face the ceiling (Eric's ask): a pitch
+        // about the head, eased in and out by the session (BedView.tilt 0..1).
+        let tilt = BedView.shared.tilt
+        let bed = tilt > 0.001 ? matrix4x4_rotation(radians: tilt * .pi / 2, axis: SIMD3(1, 0, 0)) : matrix_identity_float4x4
+        return simOnlyHeadOffset() * bed
+    }
+
+    nonisolated private static func simOnlyHeadOffset() -> simd_float4x4 {
         #if targetEnvironment(simulator)
         let d = UserDefaults.standard
         // -vrdev.down <deg> is the way to look down: UserDefaults reads a

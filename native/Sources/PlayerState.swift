@@ -93,6 +93,9 @@ final class PlayerState {
     /// speed/jump/gravity, plus the 5.8/5.9 per-mode speed_crouch and speed_walk
     /// (1.0 when the server omits them). Defaults are 1.0, so this is a no-op unless the game
     /// (or a potion) changes them.
+    /// physics_override speed and jump both 0: the server has frozen us (a bed).
+    func movementFrozen() -> Bool { lock.lock(); defer { lock.unlock() }; return _ovSpeed == 0 && _ovJump == 0 }
+
     func setPhysicsOverride(speed: Float, jump: Float, gravity: Float, speedCrouch: Float = 1, speedWalk: Float = 1) {
         lock.lock()
         _ovSpeed = speed; _ovJump = jump; _ovGravity = gravity
@@ -387,5 +390,18 @@ final class PlayerState {
     func snapshot() -> Snapshot {
         lock.lock(); defer { lock.unlock() }
         return Snapshot(feet: _feet, yaw: _yaw, pitch: _pitch, meshRef: _meshRef)
+    }
+}
+
+/// How far the view is tipped back to face the ceiling while lying in a bed
+/// (0 upright, 1 flat on your back). Written by the session, read by the
+/// renderer's head offset.
+final class BedView: @unchecked Sendable {
+    static let shared = BedView()
+    private let lock = NSLock()
+    private var _tilt: Float = 0
+    var tilt: Float {
+        get { lock.lock(); defer { lock.unlock() }; return _tilt }
+        set { lock.lock(); _tilt = newValue; lock.unlock() }
     }
 }
