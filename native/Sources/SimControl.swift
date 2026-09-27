@@ -94,7 +94,7 @@ final class SimControl: @unchecked Sendable {
         touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
         state | slots | widgets | entities  (JSON, answered on the next game tick; entities = mobs within 24 nodes)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
-                 rt lt rgrip lgrip square triangle circle options create l3 r3
+                 rt lt rgrip lgrip square triangle circle cross options create l3 r3
         """
 
     /// One command line -> one reply line. Runs on the listener queue.
@@ -211,6 +211,7 @@ final class SimControl: @unchecked Sendable {
         if k.contains("b") || k.contains("square") { s.hotbarPrev = true }
         if k.contains("n") || k.contains("triangle") { s.hotbarNext = true }
         if k.contains("r3") { s.dismissChat = true }
+        if k.contains("cross") { s.cross = true }
         if let n = (1...9).first(where: { k.contains("\($0)") }) { s.hotbarSlot = n - 1 }
         if yawDelta != 0 { s.lookYaw += yawDelta; yawDelta = 0 }
     }

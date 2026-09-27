@@ -688,6 +688,8 @@ final class WorldSession {
             if let pf = pendingButtonForm { d["buttonForm"] = pf.formname }
             d["bedTilt"] = r2(BedView.shared.tilt); d["frozen"] = wasFrozen
             d["placeHeld"] = client.placeHeld
+            d["dowsing"] = dowsing; d["dowsingUnlocked"] = dowsingUnlocked
+            if let t = dowseTarget { d["dowseTarget"] = [t.x, t.y, t.z] }
             return simJSON(d)
         }
     }
@@ -2308,6 +2310,8 @@ final class WorldSession {
             }
         }
         #endif
+        stepKonami(gi)
+        stepDowsing(&gi, dt: dt)
         // Button-only dialog (bed sleep form): the player is frozen by the
         // server's physics override, so the inventory button (O) submits the
         // dialog's button to get up. Handled before anything else so a sleep
@@ -3278,6 +3282,136 @@ final class WorldSession {
             input.rumble(intensity: 0.45, sharpness: 0.9, leftOnly: true)
             print("[hotbar] twist wield=\(client.wieldIndex)"); fflush(stdout)
         }
+    }
+
+    // MARK: Diamond dowsing
+    // A hidden extra. The Konami code on the controllers (left stick up up
+    // down down left right left right, then Circle, then Cross) turns it on or
+    // off, remembered across launches. While on, holding both grips dowses:
+    // the right controller pulses faster and stronger the closer it points at
+    // the nearest diamond ore in the loaded world (32 nodes), and those grips
+    // don't sprint or place while it's held. It shows ore desktop players
+    // can't see, hence hidden rather than a setting.
+    private enum KonamiToken: Equatable { case up, down, left, right, b, a }
+    private static let konami: [KonamiToken] = [.up, .up, .down, .down, .left, .right, .left, .right, .b, .a]
+    private var konamiInput: [KonamiToken] = []
+    private var konamiLastAt: Double = 0
+    private var konamiStickArmed = true
+    private var konamiPrevB = false, konamiPrevA = false
+    private var konamiInventoryWasOpen = false   // inventory state before the code's Circle
+    private static let dowsingKey = "voxel.dowsing"
+    private var dowsingUnlocked = UserDefaults.standard.bool(forKey: WorldSession.dowsingKey)
+
+    private func stepKonami(_ gi: GameInput.State) {
+        let now = AppClock.seconds
+        func push(_ t: KonamiToken) {
+            if now - konamiLastAt > 3 { konamiInput.removeAll() }   // too slow: start over
+            konamiLastAt = now
+            if t == .b { konamiInventoryWasOpen = inventoryOpen }
+            konamiInput.append(t)
+            if konamiInput.count > Self.konami.count { konamiInput.removeFirst(konamiInput.count - Self.konami.count) }
+            guard konamiInput == Self.konami else { return }
+            konamiInput.removeAll()
+            dowsingUnlocked.toggle()
+            UserDefaults.standard.set(dowsingUnlocked, forKey: Self.dowsingKey)
+            // The code's Circle opened the inventory on its way through; close it.
+            if inventoryOpen && !konamiInventoryWasOpen { toggleInventory() }
+            noticeText = dowsingUnlocked ? "Diamond dowsing on: hold both grips" : "Diamond dowsing off"
+            noticeExpiry = AppClock.seconds + 3
+            input.rumble(intensity: 0.8, sharpness: 0.5, duration: 0.25)
+            print("[dowse] konami -> \(dowsingUnlocked ? "on" : "off")"); fflush(stdout)
+        }
+        // Stick flicks (left stick, or the right stick / arrow keys for left and
+        // right): one token per push past 0.7, re-armed once it's back near centre.
+        let mx = gi.move.x, my = gi.move.y, tx = gi.turn
+        let mag = max(abs(mx), abs(my), abs(tx))
+        if konamiStickArmed, mag > 0.7 {
+            konamiStickArmed = false
+            if abs(my) >= abs(mx) && abs(my) >= abs(tx) { push(my > 0 ? .up : .down) }
+            else { push((abs(mx) >= abs(tx) ? mx : tx) > 0 ? .right : .left) }
+        } else if mag < 0.3 {
+            konamiStickArmed = true
+        }
+        if gi.inventory && !konamiPrevB { push(.b) }
+        if gi.cross && !konamiPrevA { push(.a) }
+        konamiPrevB = gi.inventory; konamiPrevA = gi.cross
+    }
+
+    private var dowsing = false
+    private var dowseTarget: SIMD3<Int>? = nil
+    private var dowseSearchTimer: Float = 0
+    private var dowsePulse: Float = 0          // 0..1 toward the next pulse
+    private var dowseLogTimer: Float = 0
+    private var dowseIds: Set<UInt16> = []
+    private static let dowseRadius = 32
+
+    private func stepDowsing(_ gi: inout GameInput.State, dt: Float) {
+        let want = dowsingUnlocked && gi.place && gi.fast && !inventoryOpen && !koganeMenuOpen && !keyboardOpen && !dead
+        if want != dowsing {
+            dowsing = want
+            dowseTarget = nil; dowseSearchTimer = 0; dowsePulse = 0
+            if want { input.rumble(intensity: 0.3, sharpness: 0.9, rightOnly: true) }
+            print("[dowse] \(want ? "start" : "stop")"); fflush(stdout)
+        }
+        guard dowsing else { return }
+        // The grips are the dowsing rods now: no sprint, no placing.
+        gi.place = false; gi.fast = false
+        dowseSearchTimer -= dt
+        if dowseSearchTimer <= 0 { dowseSearchTimer = 1.5; dowseTarget = nearestDiamond() }
+        let (o, d) = inventoryRay()   // right controller, node space (gaze if none)
+        guard let t = dowseTarget else {
+            // Nothing in range: a faint tick now and then so you know it's working.
+            dowsePulse += dt / 1.5
+            if dowsePulse >= 1 { dowsePulse = 0; input.rumble(intensity: 0.08, sharpness: 0.3, rightOnly: true) }
+            return
+        }
+        let to = SIMD3<Float>(Float(t.x) + 0.5, Float(t.y) + 0.5, Float(t.z) + 0.5) - o
+        let dist = simd_length(to)
+        let align = simd_dot(simd_normalize(d), to / max(dist, 0.001))
+        // Pointing within ~60 degrees starts to count; dead on is fastest.
+        let k = pow(max(0, (align - 0.5) / 0.5), 2)
+        let near = max(0.35, min(1, 1 - dist / Float(Self.dowseRadius + 8)))
+        let rate = 1 + 11 * k                                   // pulses per second
+        dowsePulse += dt * rate
+        if dowsePulse >= 1 {
+            dowsePulse = 0
+            input.rumble(intensity: (0.15 + 0.65 * k) * near, sharpness: 0.4 + 0.5 * k, rightOnly: true)
+        }
+        dowseLogTimer += dt
+        if dowseLogTimer > 1 {
+            dowseLogTimer = 0
+            print("[dowse] target \(t) dist=\(Int(dist)) align=\(String(format: "%.2f", align)) rate=\(String(format: "%.1f", rate))/s"); fflush(stdout)
+        }
+    }
+
+    /// Closest diamond ore (stone or deepslate) within dowseRadius of the eye,
+    /// among loaded blocks. Runs every 1.5 s while dowsing: at most ~125
+    /// mapblocks of 4096 nodes.
+    private func nearestDiamond() -> SIMD3<Int>? {
+        if dowseIds.isEmpty {
+            for n in ["mcl_core:stone_with_diamond", "mcl_deepslate:deepslate_with_diamond"] {
+                if let id = client.nodes.id(for: n) { dowseIds.insert(id) }
+            }
+            if dowseIds.isEmpty { return nil }
+        }
+        let eye = player.origin()
+        let e = SIMD3<Int>(Int(floor(eye.x)), Int(floor(eye.y)), Int(floor(eye.z)))
+        let r = Self.dowseRadius, rb = (r + 15) / 16
+        let eb = SIMD3<Int>(e.x >> 4, e.y >> 4, e.z >> 4)
+        let blocks = client.world.blocks
+        var best: SIMD3<Int>? = nil, bestD2 = Int.max
+        for bx in (eb.x - rb)...(eb.x + rb) { for by in (eb.y - rb)...(eb.y + rb) { for bz in (eb.z - rb)...(eb.z + rb) {
+            guard let b = blocks[SIMD3(bx, by, bz)] else { continue }
+            let p0 = b.param0
+            for i in 0..<p0.count where dowseIds.contains(p0[i]) {
+                // index = x + y*16 + z*256 (WorldMap.index)
+                let n = SIMD3(bx * 16 + (i & 15), by * 16 + ((i >> 4) & 15), bz * 16 + (i >> 8))
+                let dv = n &- e
+                let d2 = dv.x * dv.x + dv.y * dv.y + dv.z * dv.z
+                if d2 <= r * r && d2 < bestD2 { bestD2 = d2; best = n }
+            }
+        } } }
+        return best
     }
 
     // Create button: press time decides photo (tap) vs video (hold).

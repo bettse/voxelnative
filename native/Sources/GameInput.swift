@@ -40,6 +40,7 @@ final class GameInput {
         var inventory = false   // RIGHT O (Button B): toggle the inventory panel
         var koganeMenu = false  // RIGHT Menu (Options) or Esc: open the pause menu
         var dismissChat = false // RIGHT stick click: clear the join/chat lines
+        var cross = false       // RIGHT X (Button A): unassigned; the Konami code's final "A"
         var menuNavY: Float = 0 // EITHER stick Y, for menu navigation
         var menuSelect = false  // EITHER trigger, for menu confirm
         var lookYaw: Float = 0  // MOUSE X: a direct yaw delta (radians) this frame
@@ -92,6 +93,7 @@ final class GameInput {
     // have to check.
     private var hapticEngines: [ObjectIdentifier: CHHapticEngine] = [:]
     private var leftHapticKeys: Set<ObjectIdentifier> = []   // engines on the left Sense
+    private var rightHapticKeys: Set<ObjectIdentifier> = []  // engines on the right Sense
 
     // Mouse movement is delivered ONLY through a callback (no pollable delta), so
     // accumulate deltas off whatever queue fires them and drain once per poll.
@@ -211,6 +213,7 @@ final class GameInput {
         hapticEngines[key] = engine
         let v = (c.vendorName ?? "").lowercased()
         if v.contains("(l)") || v.contains("left") { leftHapticKeys.insert(key) }
+        if v.contains("(r)") || v.contains("right") { rightHapticKeys.insert(key) }
         print("[haptics] engine ready for \(c.vendorName ?? "?") localities=\(localities)"); fflush(stdout)
     }
 
@@ -220,7 +223,7 @@ final class GameInput {
     /// buzz when duration is given.
     /// leftOnly: just the left Sense (a detent under the left thumb), falling
     /// back to every controller when the left one can't be told apart.
-    func rumble(intensity: Float = 0.7, sharpness: Float = 0.5, duration: TimeInterval = 0, leftOnly: Bool = false) {
+    func rumble(intensity: Float = 0.7, sharpness: Float = 0.5, duration: TimeInterval = 0, leftOnly: Bool = false, rightOnly: Bool = false) {
         // Game events fire on the session queue; the engines are made/mutated on
         // main (connect/disconnect), so hop to main to touch them safely.
         DispatchQueue.main.async { [weak self] in
@@ -231,9 +234,10 @@ final class GameInput {
                 ? CHHapticEvent(eventType: .hapticContinuous, parameters: params, relativeTime: 0, duration: duration)
                 : CHHapticEvent(eventType: .hapticTransient, parameters: params, relativeTime: 0)
             guard let pattern = try? CHHapticPattern(events: [event], parameters: []) else { return }
-            let engines = leftOnly && !self.leftHapticKeys.isEmpty
-                ? self.hapticEngines.filter { self.leftHapticKeys.contains($0.key) }.map(\.value)
-                : Array(self.hapticEngines.values)
+            let only: Set<ObjectIdentifier>? = leftOnly && !self.leftHapticKeys.isEmpty ? self.leftHapticKeys
+                : rightOnly && !self.rightHapticKeys.isEmpty ? self.rightHapticKeys : nil
+            let engines = only.map { keys in self.hapticEngines.filter { keys.contains($0.key) }.map(\.value) }
+                ?? Array(self.hapticEngines.values)
             for engine in engines {
                 do {
                     let player = try engine.makePlayer(with: pattern)
@@ -336,6 +340,7 @@ final class GameInput {
                 if gp.buttonX.isPressed { s.hotbarPrev = true }   // left square -> prev hotbar
                 if gp.buttonY.isPressed { s.hotbarNext = true }   // left triangle -> next hotbar
                 if gp.buttonB.isPressed { s.inventory = true }    // right O -> inventory
+                if gp.buttonA.isPressed { s.cross = true }        // right X: Konami "A"
                 if gp.rightThumbstickButton?.isPressed == true { s.dismissChat = true }   // right stick click -> clear chat
                 s.menuNavY = abs(ly) >= abs(dz(gp.rightThumbstick.yAxis.value)) ? ly : dz(gp.rightThumbstick.yAxis.value)
                 if gp.leftTrigger.value > 0.5 || gp.rightTrigger.value > 0.5 { s.menuSelect = true }
@@ -384,7 +389,8 @@ final class GameInput {
                 if trigger { s.dig = true }
                 if grip { s.place = true; rightGrip = true }
                 if p.buttons["Button B"]?.isPressed == true { s.inventory = true }    // right O
-                // Right X (Button A) is free: it opened the menu before Options did.
+                // Right X (Button A) has no game action; the Konami code reads it.
+                if p.buttons["Button A"]?.isPressed == true { s.cross = true }
                 if p.buttons["Thumbstick Button"]?.isPressed == true { s.dismissChat = true }   // right stick click -> clear chat
                 // Right Options: the pause menu, and backs out of a panel first (like Esc).
                 if p.buttons["Button Menu"]?.isPressed == true { s.cancel = true; s.koganeMenu = true }
