@@ -878,11 +878,24 @@ public enum WorldMesher {
                     case 12: rot = 1.5 * Float(10 * ((p2 & 0x1F) % 24))
                     default: break
                     }
+                    // Sit on a slightly short block below: farmland is 15/16 tall,
+                    // so crops and melon/pumpkin stems floated 1/16 above it (the
+                    // engine leaves that gap; Minecraft draws crops sunk into it).
+                    // Only gaps up to 1/8, so nothing sinks half a block into a slab.
+                    var sink: Float = 0
+                    if !wallPlant {
+                        let bid = cNodeId(g &+ SIMD3(0, -1, 0))
+                        if ms.k(bid) == .nodebox, let bx = nodes.boxes(bid), let top = bx.map({ $0.max.y }).max() {
+                            let gap = 0.5 - top
+                            if gap > 0.001 && gap <= 0.126 { sink = gap }
+                        }
+                    }
                     for (qi, q) in WorldMesher.plantStyles[style].enumerated() {
                         var o = off
+                        o.y -= sink
                         if randomY {
                             var yrng = PseudoRandom(seed: UInt32(truncatingIfNeeded: qi | g.x << 16 | g.z << 8 | g.y << 24))
-                            o.y = -Float(yrng.draw() % 16) / 16 * 0.125
+                            o.y -= Float(yrng.draw() % 16) / 16 * 0.125
                         }
                         var quad = MesherShapes.plantCard(rotDeg: q.rot + rot, scale: s, height: 1, shift: q.off, topOnly: q.topOnly, offset: o)
                         if wallPlant { quad = quad.map { WorldMesher.wallmountedPlant($0, p2 & 0x07) } }
