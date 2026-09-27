@@ -6839,7 +6839,7 @@ final class WorldSession {
         lastModelVerts = mv.count; lastModelIdx = mi.count   // seed next tick's reserve
         lastOverlayVerts = ov.count; lastOverlayIdx = oi.count
         lastBlendVerts = bv.count; lastBlendIdx = bi.count
-        modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi)
+        modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi, pose: (eye, s.yaw))
         if !doorDebugDone, !client.nodes.allNames().isEmpty {
             doorDebugDone = true
             // Only the wooden door + a fence gate: enough to see box geometry

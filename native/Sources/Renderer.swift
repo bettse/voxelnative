@@ -163,6 +163,8 @@ actor Renderer {
     let liquidPipelineState: MTLRenderPipelineState
     let liquidDepthState: MTLDepthStencilState
     var entityVertexBuffer: MTLBuffer
+    private var framePose = (eye: SIMD3<Float>.zero, yaw: Float(0))   // this frame's eye/yaw (updateGameState)
+    private var modelFix = matrix_identity_float4x4
     var entityIndexBuffer: MTLBuffer
     var entityIndexCount: Int = 0
     // Head-locked HUD billboards, placed per-drawable against the current head.
@@ -1530,6 +1532,7 @@ actor Renderer {
         // matches desktop; every entity/billboard/head conversion mirrors too.
         let mirror = matrix_float4x4(diagonal: SIMD4<Float>(1, 1, -1, 1))
         self.uniforms[0].modelMatrix = mirror * r * t
+        framePose = (eye, s.yaw)   // consumeModelHandoff turns this into modelFix
         self.uniforms[0].daylight = rs.daylight
         #if targetEnvironment(simulator)
         // Sim testing aid: force full daylight so screenshots of the world/UI
@@ -2143,7 +2146,19 @@ actor Renderer {
                 modelBlendIndexCount = bi.count
             }
         }
-        let (gen, v, idx) = appModel.modelHandoff.read()
+        // The model stream (mobs, item-frame maps, drops) was baked on the game
+        // tick against that tick's eye and yaw; a frame can already be drawing a
+        // newer pose, which left them a few cm behind the world while walking
+        // and let a framed map z-fight its frame. Move them onto this frame's
+        // pose: world(now) * world(baked)^-1, in updateGameState's form.
+        let (gen, v, idx, pose) = appModel.modelHandoff.read()
+        func worldXform(_ e: SIMD3<Float>, _ yaw: Float) -> float4x4 {
+            let k = PlayerState.scale
+            return matrix_float4x4(diagonal: SIMD4<Float>(1, 1, -1, 1))
+                * matrix4x4_rotation(radians: -yaw, axis: SIMD3<Float>(0, 1, 0))
+                * matrix4x4_translation(-e.x * k, -e.y * k, -e.z * k)
+        }
+        modelFix = worldXform(framePose.eye, framePose.yaw) * worldXform(pose.eye, pose.yaw).inverse
         if gen == lastModelGen { return }   // producer hasn't posted new geometry; keep the buffers
         lastModelGen = gen
         guard !idx.isEmpty else { modelIndexCount = 0; return }
@@ -2385,6 +2400,8 @@ actor Renderer {
                              vpBuffer: MTLBuffer, vpOffset: Int, cullVP: float4x4, cullAll: Bool,
                              cullVP2: float4x4? = nil, worldOnly: Bool = false) {
         renderEncoder.pushDebugGroup("Draw World")
+        var identity = matrix_identity_float4x4
+        renderEncoder.setVertexBytes(&identity, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
 
         // Winding: the mesher winds faces counter-clockwise with outward
         // normals in node space, but modelMatrix's Z mirror flips handedness, so
@@ -2554,11 +2571,14 @@ actor Renderer {
             renderEncoder.setDepthStencilState(depthState)
             renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
             renderEncoder.setVertexBuffer(modelVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
+            var fix = modelFix
+            renderEncoder.setVertexBytes(&fix, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle,
                                                 indexCount: modelIndexCount,
                                                 indexType: .uint32,
                                                 indexBuffer: modelIndexBuffer,
                                                 indexBufferOffset: 0)
+            renderEncoder.setVertexBytes(&identity, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
         }
         // use_texture_alpha mobs (slimes): blended over what's behind them,
         // depth-tested but not written, like the engine's blended material.
@@ -2567,8 +2587,11 @@ actor Renderer {
             renderEncoder.setDepthStencilState(liquidDepthState)
             renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
             renderEncoder.setVertexBuffer(modelBlendVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
+            var fix = modelFix
+            renderEncoder.setVertexBytes(&fix, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: modelBlendIndexCount,
                                                 indexType: .uint32, indexBuffer: modelBlendIndexBuffer, indexBufferOffset: 0)
+            renderEncoder.setVertexBytes(&identity, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
         }
 
         // The spyglass lens view: world and mobs only. The HUD, hands and panels

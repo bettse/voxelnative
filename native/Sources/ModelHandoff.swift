@@ -22,9 +22,13 @@ final class ModelHandoff {
     // unchanged geometry, and a walking mob doesn't re-upload an open
     // inventory panel's overlay.
     private var gen = 0, ogen = 0, bgen = 0
+    /// The player eye (node coords) and yaw the model/blend streams were baked
+    /// against, so the renderer can move them to its own, newer pose.
+    private var pose = (eye: SIMD3<Float>.zero, yaw: Float(0))
     func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = [],
-              blendVerts: [Float] = [], blendIndices: [UInt32] = []) {
+              blendVerts: [Float] = [], blendIndices: [UInt32] = [], pose: (eye: SIMD3<Float>, yaw: Float)) {
         lock.lock()
+        self.pose = pose
         // Only bump gen when the bytes actually changed, so the 90Hz renderer
         // skips re-uploading identical geometry on idle frames (standing still,
         // no mobs, panel closed). The elementwise compare on the tick thread is
@@ -41,7 +45,7 @@ final class ModelHandoff {
         if !same(blendVerts, bv) || !same(blendIndices, bi) { bv = blendVerts; bi = blendIndices; bgen &+= 1 }
         lock.unlock()
     }
-    func read() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (gen, v, i) }
+    func read() -> (gen: Int, v: [Float], i: [UInt32], pose: (eye: SIMD3<Float>, yaw: Float)) { lock.lock(); defer { lock.unlock() }; return (gen, v, i, pose) }
     func readOverlay() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (ogen, ov, oi) }
     func readBlend() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (bgen, bv, bi) }
 }

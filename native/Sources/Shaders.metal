@@ -195,10 +195,14 @@ vertex ColorInOut liquidVertex(Vertex in [[stage_in]],
 vertex ColorInOut entityVertex(Vertex in [[stage_in]],
                                ushort amp_id [[amplification_id]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]])
+                               constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]],
+                               constant float4x4 & fix [[ buffer(BufferIndexEntityFix) ]])
 {
     ColorInOut out;
-    out.position = viewProjectionArray.viewProjectionMatrix[amp_id] * float4(in.position, 1.0);
+    // fix carries geometry baked on the game tick to this frame's player pose
+    // (identity for everything built per frame): see Renderer.modelFix.
+    float3 p = (fix * float4(in.position, 1.0)).xyz;
+    out.position = viewProjectionArray.viewProjectionMatrix[amp_id] * float4(p, 1.0);
     out.uv = in.uv;
     out.layer = uint(in.params.x + 0.5);
     // A negative tint asks for a plain multiply (item colour on a held grass
@@ -206,7 +210,7 @@ vertex ColorInOut entityVertex(Vertex in [[stage_in]],
     out.shade = in.params.w < 0 ? -in.params.y : in.params.y;
     out.lit = vertexLit(in.params.z, uniforms.daylight);
     out.tint = unpackTint(abs(in.params.w));
-    out.fogDist = length(in.position - uniforms.eyePos.xyz);
+    out.fogDist = length(p - uniforms.eyePos.xyz);
     return out;
 }
 
