@@ -683,6 +683,7 @@ final class WorldSession {
             if let n = noticeText { d["notice"] = n }
             if let pf = pendingButtonForm { d["buttonForm"] = pf.formname }
             d["bedTilt"] = r2(BedView.shared.tilt); d["frozen"] = wasFrozen
+            d["placeHeld"] = client.placeHeld
             return simJSON(d)
         }
     }
@@ -3794,6 +3795,7 @@ final class WorldSession {
     // on a tool or block does nothing. (The panel steals the grip when open, so
     // this can't fire while an inventory/chest is up.)
     private var eatKick: Float = 0
+    private var rmbSuppressed = false   // this grip press used a node; don't report RMB until released
     /// Fall damage the way Luanti's client does it (clientenvironment.cpp
     /// step): on a floor collision, the vertical speed lost beyond a 14 node/s
     /// tolerance is the damage in hp (1 hp per node/s), scaled by the landed
@@ -3849,7 +3851,10 @@ final class WorldSession {
         // get_player_control() -- i.e. these PLAYERPOS bits. Gating the bit to
         // eatables silently disabled all of them. Only the eat
         // re-arm below stays food-only.
-        client.placeHeld = gripHeld
+        // A grip press spent opening a door/chest/button isn't also a hold of
+        // the wielded item: holding a spyglass flashed its zoom on every door.
+        if !gripHeld { rmbSuppressed = false }
+        client.placeHeld = gripHeld && !rmbSuppressed
         let wi = client.wieldIndex
         guard gripHeld, wi >= 0, wi < hotbar.count, let name = hotbar[wi], client.items.isEatable(name) else { return }
         if eatKick <= 0 {
@@ -3941,6 +3946,7 @@ final class WorldSession {
         if !sneak, let fs = client.world.nodeFormspec(hit.under) {
             if client.nodes.isRightclickable(hitId) { client.sendInteract(action: 3, under: hit.under, above: hit.above) }
             formspecContext = hit.under
+            rmbSuppressed = true
             openFormspec(fs, "")
             print("[place] open node formspec \(client.nodes.name(hitId)) at \(hit.under)"); fflush(stdout)
             return false
@@ -3958,6 +3964,7 @@ final class WorldSession {
         if !sneak, client.nodes.isRightclickable(underId) {
             client.sendInteract(action: 3, under: hit.under, above: hit.above)   // use, server runs on_rightclick
             formspecContext = hit.under   // a SHOW_FORMSPEC that follows refers to this node
+            rmbSuppressed = true
             print("[place] use \(client.nodes.name(underId)) at \(hit.under) (no place)"); fflush(stdout)
             return false
         }
