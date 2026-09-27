@@ -164,6 +164,15 @@ final class AppModel {
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             self?.session.start()
         }
+        // Focus changes, timestamped, so a world the system closed can be lined
+        // up with what the player was doing (it resigns active before it closes).
+        for (name, label) in [(UIApplication.willResignActiveNotification, "will resign active"),
+                              (UIApplication.didBecomeActiveNotification, "became active"),
+                              (UIApplication.didEnterBackgroundNotification, "entered background")] {
+            nc.addObserver(forName: name, object: nil, queue: .main) { _ in
+                print("[app] \(label) at=\(WorldSession.clockTime())"); fflush(stdout)
+            }
+        }
         // Log heat and memory changes as they happen (see WorldSession.healthNote).
         nc.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { _ in
             print("[health] thermal changed \(WorldSession.healthNote()) at=\(WorldSession.clockTime())"); fflush(stdout)
