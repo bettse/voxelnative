@@ -5568,7 +5568,7 @@ final class WorldSession {
     // against a nominal 1920x1080 screen mapped onto a +-0.42 x +-0.32 rad
     // window 1.2 m ahead. Statbars and the XP pair have their own paths.
     private var hudTextLayers: [Int: (layer: Int, text: String, aspect: Float)] = [:]
-    private var hudTextBlocks: [Int: (layer: Int, text: String, aspect: Float, lines: Int, lineToCap: Float)] = [:]
+    private var hudTextBlocks: [Int: (layers: [Int], text: String, aspect: Float, lines: Int, lineToCap: Float)] = [:]
     private var hudElementsLogged = false          // sim: one-shot dump of the server's HUD elements
     private static let hudScreen = SIMD2<Float>(1920, 1080)
     // Horizontal half-angle kept under the peripheral stat columns (hearts /
@@ -5600,20 +5600,23 @@ final class WorldSession {
     }
 
     /// Like hudTextLayer, but for server HUD *text elements*: multi-line and
-    /// sized by line metrics (renderTextBlock). Separate cache; same layer cap.
-    private func hudTextBlockLayer(id: Int, text: String) -> (layer: Int, aspect: Float, lines: Int, lineToCap: Float)? {
-        if let cur = hudTextBlocks[id], cur.text == text { return (cur.layer, cur.aspect, cur.lines, cur.lineToCap) }
+    /// sized by line metrics (renderTextBlockTiles). Separate cache; same layer cap.
+    /// The text comes back as several square tiles, left to right (see
+    /// renderTextBlockTiles); draw them as adjacent strips.
+    private func hudTextBlockLayer(id: Int, text: String) -> (layers: [Int], aspect: Float, lines: Int, lineToCap: Float)? {
+        if let cur = hudTextBlocks[id], cur.text == text { return (cur.layers, cur.aspect, cur.lines, cur.lineToCap) }
         let clean = ItemRegistry.stripEscapes(text)
-        guard let r = Self.renderTextBlock(clean, canvas: ModelTextureHandoff.size) else { return nil }
-        if let cur = hudTextBlocks[id] {
-            updateModelLayer(cur.layer, r.px)
-            hudTextBlocks[id] = (cur.layer, text, r.aspect, r.lines, r.lineToCap)
-            return (cur.layer, r.aspect, r.lines, r.lineToCap)
+        guard let r = Self.renderTextBlockTiles(clean, canvas: ModelTextureHandoff.size) else { return nil }
+        var layers = hudTextBlocks[id]?.layers ?? []
+        let used = hudTextLayers.count + hudTextBlocks.values.reduce(0) { $0 + $1.layers.count }
+        guard used - layers.count + r.tiles.count <= 96 else { return nil }
+        while layers.count > r.tiles.count { freeModelLayers.append(layers.removeLast()) }
+        for (i, px) in r.tiles.enumerated() {
+            if i < layers.count { updateModelLayer(layers[i], px) }
+            else { layers.append(registerRGBALayer("#hudblock\(id).\(i)", px)) }
         }
-        guard hudTextLayers.count + hudTextBlocks.count < 96 else { return nil }
-        let l = registerRGBALayer("#hudblock\(id)", r.px)
-        hudTextBlocks[id] = (l, text, r.aspect, r.lines, r.lineToCap); modelTexturesDirty = true
-        return (l, r.aspect, r.lines, r.lineToCap)
+        hudTextBlocks[id] = (layers, text, r.aspect, r.lines, r.lineToCap); modelTexturesDirty = true
+        return (layers, r.aspect, r.lines, r.lineToCap)
     }
 
     /// Per-element mutable text layer (timers change every second, so a
@@ -5911,10 +5914,16 @@ final class WorldSession {
                 }
                 // align.x: 0 centred on pos, 1 starts at pos, -1 ends at pos.
                 let cpx = anchor + SIMD2(e.align.x * tw / 2, e.align.y * th / 2)
-                let c = at(cpx)
                 noteAwardRect(e.name, center: cpx, size: SIMD2(tw, th))
-                appendOverlayQuadUV(center: c, right: hr, up: hu, hw: tw / 2 * kx * D, hh: th / 2 * ky * D,
-                                    layer: t.layer, uv: SIMD2(1, 1), tint: Self.hudTint(e.number), v: &v, idx: &idx)
+                // One strip per tile, left to right across the text's width. Each
+                // strip spans its own two edges through at(), which spreads with
+                // tan(): sizing strips linearly left gaps between them off-centre.
+                let sw = tw / Float(t.layers.count)
+                for (i, l) in t.layers.enumerated() {
+                    let el = at(cpx + SIMD2(Float(i) * sw - tw / 2, 0)), er = at(cpx + SIMD2(Float(i + 1) * sw - tw / 2, 0))
+                    appendOverlayQuadUV(center: (el + er) / 2, right: hr, up: hu, hw: simd_length(er - el) / 2, hh: th / 2 * ky * D,
+                                        layer: l, uv: SIMD2(1, 1), tint: Self.hudTint(e.number), v: &v, idx: &idx)
+                }
                 drawn += 1
             case 0, 5:                                           // image / image_waypoint
                 guard !e.text.isEmpty, let img = hudImage(e.text) else { continue }
@@ -7361,7 +7370,8 @@ final class WorldSession {
         // block, no spin) checks the non-drop item entities.
         let drops: [(item: String, name: String, size: Float)] = [
             ("mcl_core:dirt", "__builtin:item", 0.4), ("mcl_tools:pick_diamond", "__builtin:item", 0.4),
-            ("mcl_core:gravel", "__builtin:falling_node", 0.667)]
+            ("mcl_core:gravel", "__builtin:falling_node", 0.667), ("mcl_heads:skeleton", "__builtin:item", 0.4),
+            ("mcl_core:cobble", "__builtin:item", 0.4)]
         var dropIds: [Int] = []
         for (j, d) in drops.enumerated() {
             let itemStr = d.item
@@ -8430,7 +8440,11 @@ final class WorldSession {
     /// block. Returns the block aspect (width/height), the row count, and
     /// lineToCap = line height / cap height, so a caller that sizes text by cap
     /// height can scale the quad to keep capitals where they were.
-    static func renderTextBlock(_ text: String, canvas: Int) -> (px: [UInt8], aspect: Float, lines: Int, lineToCap: Float)? {
+    /// Multi-line text split across up to 8 square tiles, left to right, so a
+    /// long line keeps its resolution: a 55-character action bar squeezed into
+    /// one 256px square got about 4 px of width per letter, and the letters
+    /// smeared into each other ("You can only sleep at night...").
+    static func renderTextBlockTiles(_ text: String, canvas: Int) -> (tiles: [[UInt8]], aspect: Float, lines: Int, lineToCap: Float)? {
         let rows = text.split(separator: "\n", omittingEmptySubsequences: false)
             .prefix(16).map { String($0.prefix(80)) }
         guard rows.contains(where: { !$0.isEmpty }) else { return nil }
@@ -8444,29 +8458,37 @@ final class WorldSession {
         let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1), black = CGColor(red: 0, green: 0, blue: 0, alpha: 1)
         let widths = rows.map { CGFloat(CTLineGetTypographicBounds(line($0, white), nil, nil, nil)) }
         let w = max(1, widths.max() ?? 1), h = lineH * CGFloat(rows.count)
+        // Enough tiles that each covers about a square of text, at most 8.
+        let n = max(1, min(8, Int(ceil(w / h / 1.2))))
+        let tileW = w / CGFloat(n)
         let cs = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
-                                  bytesPerRow: canvas * 4, space: cs,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        ctx.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
-        let margin = CGFloat(canvas) * 0.06
-        let sx = (CGFloat(canvas) - 2 * margin) / w, sy = (CGFloat(canvas) - 2 * margin) / h
         let o = max(1.0, ref * 0.05)
-        for (i, row) in rows.enumerated() where !row.isEmpty {
-            let x = (w - widths[i]) / 2, y = h - CGFloat(i + 1) * lineH + desc   // CG origin is bottom-left
-            for (c, offs) in [(black, [(-o, -o), (-o, 0), (-o, o), (0, -o), (0, o), (o, -o), (o, 0), (o, o)]), (white, [(0, 0)])] {
-                let l = line(row, c)
-                for (dx, dy) in offs {
-                    ctx.saveGState(); ctx.scaleBy(x: sx, y: sy)
-                    ctx.textPosition = CGPoint(x: margin / sx + x + dx, y: margin / sy + y + dy)
-                    CTLineDraw(l, ctx); ctx.restoreGState()
+        let vMargin = CGFloat(canvas) * 0.06
+        let sx = CGFloat(canvas) / tileW, sy = (CGFloat(canvas) - 2 * vMargin) / h
+        var tiles: [[UInt8]] = []
+        for t in 0..<n {
+            guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
+                                      bytesPerRow: canvas * 4, space: cs,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+            ctx.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
+            let x0 = CGFloat(t) * tileW   // this tile's left edge in text space
+            for (i, row) in rows.enumerated() where !row.isEmpty {
+                let x = (w - widths[i]) / 2, y = h - CGFloat(i + 1) * lineH + desc   // CG origin is bottom-left
+                for (c, offs) in [(black, [(-o, -o), (-o, 0), (-o, o), (0, -o), (0, o), (o, -o), (o, 0), (o, o)]), (white, [(0, 0)])] {
+                    let l = line(row, c)
+                    for (dx, dy) in offs {
+                        ctx.saveGState(); ctx.scaleBy(x: sx, y: sy)
+                        ctx.textPosition = CGPoint(x: x - x0 + dx, y: vMargin / sy + y + dy)
+                        CTLineDraw(l, ctx); ctx.restoreGState()
+                    }
                 }
             }
+            guard let base = ctx.data else { return nil }
+            var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
+            px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
+            tiles.append(px)
         }
-        guard let base = ctx.data else { return nil }
-        var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
-        px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
-        return (px, Float(w / h), rows.count, Float(lineH / capH))
+        return (tiles, Float(w / h), rows.count, Float(lineH / capH))
     }
 
     /// Word-wrapped multi-line text at a CONSTANT glyph height, for chat:
