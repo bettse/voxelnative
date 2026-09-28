@@ -7302,6 +7302,12 @@ final class WorldSession {
                        textures: ["mobs_mc_empty.png", "mobs_mc_zombie.png"], cbMaxY: 1.89, yaw: 90),
             SimMobSpec(name: "Witch", mesh: "vl_witch.b3d",
                        textures: ["vl_witch.png"], cbMaxY: 1.94, yaw: 270, size: SIMD3(2.2, 2.2, 2.2)),
+            // Seven textures for seven mesh buffers: the body, then the pumpkin's
+            // six faces. Buffer order picks them, not the b3d brush ids.
+            SimMobSpec(name: "Snow Golem", mesh: "mobs_mc_snowman.b3d",
+                       textures: ["mobs_mc_snowman.png", "farming_pumpkin_side.png", "farming_pumpkin_top.png",
+                                  "farming_pumpkin_face.png", "farming_pumpkin_side.png", "farming_pumpkin_side.png",
+                                  "farming_pumpkin_top.png"], cbMaxY: 1.89, yaw: 180, size: SIMD3(3, 3, 3)),
             // A pitched arrow: its shaft should tilt off horizontal. The
             // mobs above all have pitch 0, so they must look identical with this.
             SimMobSpec(name: "Arrow", mesh: "mcl_bows_arrow.obj",
@@ -7711,20 +7717,20 @@ final class WorldSession {
         guard ext.x > 1e-4, ext.y > 1e-4 else { return }
         let scale = min(hw * 2 / ext.x, hh * 2 / ext.y) * 0.92
         let mid = (lo + hi) * 0.5
-        // Which texture each triangle uses: textures[] is indexed by the mesh's
-        // material (brush), like an entity's textures; blank slots draw nothing.
+        // Which texture each triangle uses: surface i takes textures[i], like an
+        // entity's (see Self.surfaceTextures); blank slots draw nothing.
         var triLayer = [Int: (layer: Int, uv: SIMD2<Float>)]()
-        var brushOfIndex = [Int](repeating: -1, count: mesh.indices.count)
+        var surfOfIndex = [Int](repeating: -1, count: mesh.indices.count)
         var start = 0
-        for surf in mesh.surfaces {
-            for i in 0..<surf.indices.count where start + i < brushOfIndex.count { brushOfIndex[start + i] = surf.brush }
+        let specs = Self.surfaceTextures(mesh, fm.textures)
+        for (si, surf) in mesh.surfaces.enumerated() {
+            for i in 0..<surf.indices.count where start + i < surfOfIndex.count { surfOfIndex[start + i] = si }
             start += surf.indices.count
-            let spec = surf.brush >= 0 && surf.brush < fm.textures.count ? fm.textures[surf.brush] : (fm.textures.first ?? "")
-            if !Self.isBlankSpec(spec), let h = hudImage(spec) { triLayer[surf.brush] = (h.layer, h.uv) }
+            if !Self.isBlankSpec(specs[si]), let h = hudImage(specs[si]) { triLayer[si] = (h.layer, h.uv) }
         }
         for t in posed.tris {
             let t = Int(t)
-            guard let tex = triLayer[brushOfIndex[t]] else { continue }
+            guard let tex = triLayer[surfOfIndex[t]] else { continue }
             let vb = UInt32(v.count / 9)
             let a = posed.pos[Int(mesh.indices[t])], b = posed.pos[Int(mesh.indices[t + 1])], c = posed.pos[Int(mesh.indices[t + 2])]
             // Simple facing shade so the blocky limbs read as 3D.
@@ -7739,6 +7745,19 @@ final class WorldSession {
             }
             idx.append(contentsOf: [vb, vb + 1, vb + 2])
         }
+    }
+
+    /// The texture for each surface (mesh buffer) of an entity model, the way
+    /// GenericCAO does it: buffer i takes textures[i] (Irrlicht's texture slot
+    /// is the buffer index for .b3d and .obj), and a buffer past the end of the
+    /// list reuses the previous buffer's. We used the b3d brush id, which the
+    /// snow golem's six pumpkin faces don't match, so its head wore the body skin.
+    static func surfaceTextures(_ mesh: B3DLoader.Mesh, _ textures: [String]) -> [String] {
+        var out: [String] = []
+        for i in mesh.surfaces.indices {
+            out.append(i < textures.count ? textures[i] : (out.last ?? textures.first ?? ""))
+        }
+        return out
     }
 
     private func model(for name: String) -> B3DLoader.Mesh? {
@@ -7936,9 +7955,9 @@ final class WorldSession {
         // not-yet-downloaded skin is dropped entirely (no geometry emitted).
         var draw: [(surface: B3DLoader.Surface, layer: Int, uv: SIMD2<Float>)] = []
         var droppedSpecs: [String] = []
-        for surf in mesh.surfaces {
-            let base = surf.brush >= 0 && surf.brush < e.textures.count
-                     ? e.textures[surf.brush] : (e.textures.first ?? "")
+        let specs = Self.surfaceTextures(mesh, e.textures)
+        for (si, surf) in mesh.surfaces.enumerated() {
+            let base = specs[si]
             if Self.isBlankSpec(base) { continue }
             // Append the live texture-mod (burning/damage/status colorize).
             // Compose the modified layer on demand; until it's ready, draw the
