@@ -2278,6 +2278,12 @@ actor Renderer {
                     blit.copy(from: old, sourceSlice: 0, sourceLevel: 0, to: tex, destinationSlice: 0, destinationLevel: 0,
                               sliceCount: keep, levelCount: 1)
                     blit.endEncoding(); cb.commit()
+                    // Wait for it: the patches below write slices with the CPU at
+                    // once, and a blit still in flight landed after them, putting
+                    // back the old picture. A count badge that reused a freed
+                    // item-name tile showed "Blo"/"ck" instead of its number.
+                    // Rebuilds are rare (every 64 new layers), so the wait is too.
+                    cb.waitUntilCompleted()
                 }
                 for i in keep..<min(texs.count, desc.arrayLength) { upload(tex, i) }
                 modelTextureArray = tex
