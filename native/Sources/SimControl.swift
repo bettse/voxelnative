@@ -182,7 +182,8 @@ final class SimControl: @unchecked Sendable {
         if k.contains("esc") { s.escape = true; s.cancel = true; if !textEntry { s.koganeMenu = true } }
         if k.contains("enter") { s.enterPrimary = true; s.menuSelect = true }
         if k.contains("shift-enter") { s.enterSecondary = true; s.menuSelect = true }
-        if textEntry { return }   // same as the keyboard: typing doesn't drive the game
+        // The controller trigger still presses keys on the spatial keyboard.
+        if textEntry { if k.contains("rt") { s.dig = true; s.menuSelect = true }; return }   // typing doesn't drive the game
         if let l = sticks["l"] {
             if l.x != 0 { s.move.x = l.x }
             if l.y != 0 { s.move.y = l.y; s.menuNavY = l.y }

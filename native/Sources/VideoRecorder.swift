@@ -92,7 +92,9 @@ final class VideoRecorder {
                 // The sim can't answer the Photos prompt headless; keep a copy to inspect.
                 let keep = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.copyItem(at: url, to: keep)
-                #endif
+                try? FileManager.default.removeItem(at: url)
+                done(true, false)   // no Photos prompt in the sim (see Renderer.savePhoto)
+                #else
                 PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
                     guard status == .authorized || status == .limited else { done(false, true); return }
                     PHPhotoLibrary.shared().performChanges({
@@ -103,6 +105,7 @@ final class VideoRecorder {
                         done(ok, false)
                     }
                 }
+                #endif
             }
         }
     }

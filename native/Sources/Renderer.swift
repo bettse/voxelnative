@@ -2030,7 +2030,11 @@ actor Renderer {
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("photo-\(Int(Date().timeIntervalSince1970)).png")
         try? (data as Data).write(to: url)
         print("[photo] wrote \(url.lastPathComponent)"); fflush(stdout)
-        #endif
+        // No Photos prompt in the sim: nobody can answer it, and it sat in the
+        // middle of every later screenshot.
+        Task { @MainActor in self.appModel.session.photoSaved(ok: true, denied: false) }
+        return
+        #else
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
                 print("[photo] no Photos permission (\(status.rawValue))"); fflush(stdout)
@@ -2044,6 +2048,7 @@ actor Renderer {
                 Task { @MainActor in self.appModel.session.photoSaved(ok: ok, denied: false) }
             }
         }
+        #endif
     }
 
     /// The photo target (the layer's color format) -> 8-bit sRGB CGImage. The
