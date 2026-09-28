@@ -339,6 +339,7 @@ final class WorldSession {
     private var audioResolveLogged = Set<String>()       // sound names already logged by [audio] resolve
     private var lastHotbarLog = ""
     private var loggedMobNames = Set<String>()           // [mob] identity line, once per entity name
+    private var simBounceNode: SIMD3<Int>?                // -vrdev.bounceTest: the local slime block
     private var simDropResult = ""                       // -vrdev.dropTest: RESULT line, printed after cleanup
     private var simChatQueue: [String] = []               // per-scene scratch: commands/items still to process (chat-rate paced)
     private var awardBox: (lo: SIMD2<Float>, hi: SIMD2<Float>)? = nil   // this frame's toast background (nominal px), to fit its text
@@ -1466,12 +1467,20 @@ final class WorldSession {
                 let under = SIMD3(Int(floor(f.x)), Int(floor(f.y - 0.1)), Int(floor(f.z)))
                 if let slime = client.nodes.id(for: "mcl_core:slimeblock") {
                     client.world.setNode(under, param0: slime, param2: 0); markNodeDirty(under)
+                    simBounceNode = under
                     player.setPhysics(feet: f + SIMD3(0, 8, 0), vy: 0, grounded: false)
                     simScratchInt = 0   // reused as "max vy seen after the landing"
                     print("[bouncetest] slime at \(under) (groups=\(client.nodes.groups(slime))), lifted 8"); fflush(stdout)
                     simDigPhase = 1; simDigTimer = 0
                 } else { print("[bouncetest] no slimeblock def"); fflush(stdout); simDigPhase = 99 }
             case 1:
+                // The slime lives only in our copy of the world: a mapblock the
+                // server re-sends mid-fall turned it back into the pad block, and
+                // the landing didn't bounce (a flake in the full suite). Hold it.
+                if let slime = client.nodes.id(for: "mcl_core:slimeblock"), let u = simBounceNode,
+                   client.world.nodeId(u) != slime {
+                    client.world.setNode(u, param0: slime, param2: 0); markNodeDirty(u)
+                }
                 let ph = player.physics()
                 if ph.vy > 0.5 && simDigTimer > 0.3 { simScratchInt = max(simScratchInt, Int(ph.vy * 100)) }
                 if simDigTimer > 4 {
