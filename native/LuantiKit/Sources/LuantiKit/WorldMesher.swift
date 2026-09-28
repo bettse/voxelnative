@@ -714,8 +714,9 @@ public enum WorldMesher {
             // engine's applyFacesShading -- flat shade 1.0 made them look pasted
             // on. light_source meshes keep 1.0 (they self-illuminate).
             let lit = ms.lit(id)
+            let overlays = ms.ov(id)   // tiles_overlay: a lit campfire's glowing logs
             var nrm = [SIMD3<Float>](repeating: .zero, count: m.positions.count)
-            if !lit {
+            if !lit || overlays != nil {
                 var i = 0
                 while i + 2 < m.indices.count {
                     let a = Int(m.indices[i]), bx = Int(m.indices[i+1]), c = Int(m.indices[i+2]); i += 3
@@ -742,6 +743,30 @@ public enum WorldMesher {
                 // that side; self-lit meshes (lanterns) keep their flat light.
                 let vl = lit ? light : octantLight(b, SIMD3(lx, ly, lz))
                 pushVert(&ov, px, py, pz, t.x, t.y, layer, shade + waveShift, vl, tint)
+            }
+            defer {
+                // Overlay tile per surface, drawn over it a hair outside along
+                // the vertex normal, like the cube overlays (drawMeshNode draws
+                // the overlay layer on the same buffers).
+                if let overlays {
+                    for (j, surf) in m.surfaces.enumerated() {
+                        let name = overlays[min(j, 5)]
+                        guard !name.isEmpty, let ol = atlas.tileLayer(name) else { continue }
+                        var remap: [UInt32: UInt32] = [:]
+                        for i in surf.indices {
+                            if let r = remap[i] { oi.append(r); continue }
+                            var n = nrm[Int(i)] == .zero ? SIMD3<Float>(0, 1, 0) : simd_normalize(nrm[Int(i)])
+                            if facedir != 0 { n = WorldMesher.rotateFacedir(n, facedir) }
+                            if deg != 0 { n = SIMD3(n.x * cs - n.z * sn, n.y, n.x * sn + n.z * cs) }
+                            let lift = n * (0.003 * scale)
+                            let src = Int(vbase + i) * 9
+                            let r = UInt32(ov.count / 9)
+                            ov.append(ov[src] + lift.x); ov.append(ov[src + 1] + lift.y); ov.append(ov[src + 2] + lift.z)
+                            for f in 3..<9 { ov.append(f == 5 ? Float(ol) : ov[src + f]) }
+                            remap[i] = r; oi.append(r)
+                        }
+                    }
+                }
             }
             guard multi else { for i in m.indices { oi.append(vbase + i) }; return }
             // Other tiles: re-emit the vertices a surface uses with its layer.

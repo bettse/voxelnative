@@ -61,4 +61,33 @@ final class OverlayTileTests: XCTestCase {
         }
         XCTAssertEqual(overlayQuads, 4)
     }
+
+    func testMeshNodeGetsItsOverlayTileLikeALitCampfire() throws {
+        // A mesh node with tiles_overlay (the lit campfire's glowing logs):
+        // every triangle is drawn again with the overlay layer, lifted outward.
+        let obj = "v -0.5 -0.5 -0.5\nv 0.5 -0.5 -0.5\nv 0.5 0.5 -0.5\nv -0.5 0.5 -0.5\nf 1 2 3 4"
+        let model = try XCTUnwrap(OBJLoader.load(Data(obj.utf8)))
+        let blob = NodeFixtures.node(name: "test:campfire_lit", drawtype: 16, dugSound: "", mesh: "fire.obj",
+                                     tiles: Array(repeating: ("fire.png", false), count: 6),
+                                     overlays: Array(repeating: "logs.png", count: 6)) { w in w.u8(6).u8(0) }
+        let reg = NodeRegistry()
+        reg.parseNodeDef(NodeFixtures.nodedefPayload([(1, blob)]))
+        let id = reg.id(for: "test:campfire_lit")!
+        let media = MediaManager(send: { _, _ in })
+        for n in ["fire.png", "logs.png"] { media.storeForTesting(n, png(1, 2, 3)) }
+        let atlas = TextureAtlas()
+        atlas.build(nodes: reg, media: media, extraTiles: reg.overlayTilesSnapshot())
+        let logs = try XCTUnwrap(atlas.tileLayer("logs.png"))
+
+        let map = WorldMap()
+        map.setNode(SIMD3(8, 8, 8), param0: id)
+        let o = WorldMesher.build(map, atlas: atlas, nodes: reg, models: [id: model]).opaque
+        let verts = o.vertices.count / 9
+        XCTAssertEqual(verts, 8, "4 model vertices + 4 overlay copies")
+        XCTAssertEqual(o.cutout.count, 12, "two triangles each")
+        let overlay = (0..<verts).filter { Int32(o.vertices[$0 * 9 + 5]) == logs }
+        XCTAssertEqual(overlay.count, 4)
+        // The quad winds toward +Z (its outward side): the overlay sits a hair out that way.
+        for v in overlay { XCTAssertGreaterThan(o.vertices[v * 9 + 2], 8.0) }
+    }
 }
