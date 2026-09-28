@@ -200,6 +200,8 @@ public final class ActiveObjects {
     /// node shapes the player collides with, so mobs rest on chests, slabs and
     /// stairs too; isSolidNode (full cubes only) is the fallback.
     public var floorTop: ((_ lo: SIMD3<Float>, _ hi: SIMD3<Float>) -> Float?)?
+    /// True if a solid collision box overlaps this box (walls, doors).
+    public var boxBlocked: ((_ lo: SIMD3<Float>, _ hi: SIMD3<Float>) -> Bool)?
 
     private func v3f(_ r: PacketReader) -> SIMD3<Float> { SIMD3(r.f32(), r.f32(), r.f32()) }
 
@@ -505,8 +507,28 @@ public final class ActiveObjects {
             let rate = 0.8 / max(0.02, o.animTime)
             let a = min(1, dt * rate)
             if o.attachParent == 0 {
+                let before = o.target
                 o.target += o.vel * dt + o.acc * (0.5 * dt * dt)
                 o.vel += o.acc * dt
+                // Walls: between server updates a mob walking at a closed door
+                // slid into it on its last velocity, then snapped back when the
+                // next update landed. Like GenericCAO's collision for physical
+                // objects, cancel the horizontal step into a solid box, per axis
+                // so it can still slide along a wall. The body is tested from
+                // about a block up, leaving the one-block step-ups to the server.
+                if o.physical, let blocked = boxBlocked, o.target.x != before.x || o.target.z != before.z {
+                    let height = o.cbMax.y - o.cbMin.y
+                    let inset: Float = 0.02
+                    func hits(_ x: Float, _ z: Float) -> Bool {
+                        let feet = o.target.y + o.cbMin.y
+                        return blocked(SIMD3(x + o.cbMin.x + inset, feet + min(1.05, height * 0.6), z + o.cbMin.z + inset),
+                                       SIMD3(x + o.cbMax.x - inset, feet + height - inset, z + o.cbMax.z - inset))
+                    }
+                    if !hits(before.x, before.z) {
+                        if hits(o.target.x, before.z) { o.target.x = before.x; o.vel.x = 0 }
+                        if hits(o.target.x, o.target.z) { o.target.z = before.z; o.vel.z = 0 }
+                    }
+                }
                 // Floor clamp: if the collisionbox bottom has entered a solid
                 // node while moving down, sit on that node's top and stop.
                 if o.physical, o.vel.y <= 0, let floor = floorTop {

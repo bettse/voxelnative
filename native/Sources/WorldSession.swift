@@ -894,6 +894,7 @@ final class WorldSession {
             #endif
         }
         client.objects.floorTop = { [weak self] lo, hi in self?.entityFloorTop(lo: lo, hi: hi) }
+        client.objects.boxBlocked = { [weak self] lo, hi in self?.anySolidBox(around: AABB(lo: lo, hi: hi)) ?? false }
         client.onSky = { [weak self] s in
             #if targetEnvironment(simulator)
             // -vrdev.fakeSkybox: mcl_weather re-sends the overworld sky every
@@ -5470,16 +5471,18 @@ final class WorldSession {
         let uvs = Self.quadUVsBL
         switch icon {
         case .cube(let faces):
-            // 2.5D iso decal: each face keeps its iso screen shape but sits at a
-            // constant depth, drawn sides then top so the top wins the overlap;
-            // real per-vertex depth made the near faces occlude the top.
-            let h = size * 0.5
+            // A real 3D cube standing out of the slot: iso() +z points at the
+            // viewer, which is -oToward, and the lift puts the cube's back on
+            // the slot's face. Flattened to one depth per face it read as a
+            // picture sunk into the slot in the headset. The three faces drawn
+            // are the ones facing the viewer, so they never overlap.
+            let h = size * 0.5, front = center - oToward * (h * 0.9)
             for f in faces {
                 let vb = UInt32(v.count / 9)
                 let c = Self.cubeIconCorners[f.corners]
                 for k in 0..<4 {
                     let r = iso(c[k] * h)
-                    push(center + r.x * oRight + r.y * oUp + f.dep * oToward, uvs[k].0, uvs[k].1, Float(f.layer), f.shade)
+                    push(front + r.x * oRight + r.y * oUp - r.z * oToward, uvs[k].0, uvs[k].1, Float(f.layer), f.shade)
                 }
                 pushQuad(&idx, vb)
             }
@@ -5518,13 +5521,15 @@ final class WorldSession {
             }
             let planes = planeZ.sorted { $0.value.sum / $0.value.n < $1.value.sum / $1.value.n }.map(\.key)
             let planeRank = Dictionary(uniqueKeysWithValues: planes.enumerated().map { ($1, $0) })
-            for tri in tris {
-                let dep = -0.010 - 0.004 * Float(planeRank[tri.key] ?? 0) / Float(max(1, planes.count - 1))
+            for tri in tris.sorted(by: { (planeRank[$0.key] ?? 0) < (planeRank[$1.key] ?? 0) }) {
+                // Real depth like the cube (see there), lifted onto the slot face,
+                // drawn far plane to near for the overlay's painter order.
                 let vb = UInt32(v.count / 9)
                 for k in 0..<3 {
                     let vi = Int(ix[tri.i + k])
                     let r = iso(local(vi) * s)
-                    push(center + r.x * oRight + r.y * oUp + dep * oToward, model.uvs[vi].x, model.uvs[vi].y, Float(layer), tri.tint)
+                    push(center - oToward * (size * 0.45) + r.x * oRight + r.y * oUp - r.z * oToward,
+                         model.uvs[vi].x, model.uvs[vi].y, Float(layer), tri.tint)
                 }
                 idx.append(vb); idx.append(vb + 1); idx.append(vb + 2)
             }
