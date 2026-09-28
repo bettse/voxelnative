@@ -14,6 +14,25 @@ typedef struct
     float4 params   [[attribute(VertexAttributeParams)]];   // x=layer, y=shade, z=light, w=packed biome tint
 } Vertex;
 
+// World mesh vertex, packed to 24 bytes at upload (MeshHandoff.packWorld)
+// from the mesher's 9 floats: the block meshes were the biggest thing in
+// the game's memory, and the headset was running out.
+typedef struct
+{
+    float3 position [[attribute(0)]];
+    float2 uv       [[attribute(1)]];   // half2
+    ushort layer    [[attribute(2)]];
+    float shade     [[attribute(3)]];   // half; shade + 2*waving class, lava negative
+    uchar4 lightTint [[attribute(4)]];  // light byte, then tint r, g, b
+} WorldVertex;
+
+// The mesher's float4 params (layer, shade, light, packed tint) back from a
+// WorldVertex, so the world shaders read exactly what they used to.
+static inline float4 worldParams(WorldVertex in) {
+    return float4(float(in.layer), in.shade, float(in.lightTint.x),
+                  float(in.lightTint.y) + float(in.lightTint.z) * 256.0 + float(in.lightTint.w) * 65536.0);
+}
+
 typedef struct
 {
     float4 position [[position]];
@@ -116,24 +135,25 @@ static inline float smoothTriangleWave(float x)
     return tri * tri * (3.0 - 2.0 * tri);
 }
 
-vertex ColorInOut vertexShader(Vertex in [[stage_in]],
+vertex ColorInOut vertexShader(WorldVertex win [[stage_in]],
                                ushort amp_id [[amplification_id]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                                constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]])
 {
     ColorInOut out;
-    float4 position = float4(in.position, 1.0);
+    const float4 params = worldParams(win);
+    float4 position = float4(win.position, 1.0);
     // nodedef waving, packed by the mesher as shade + 2*class. The
     // engine's nodes shader: plants (1) sway only their top vertices (uv.y
     // near 0), leaves (2) wobble the whole node on all three axes, both as
     // smooth triangle waves keyed on position so neighbours are out of phase.
     // Amplitudes are the engine's (0.08 / 0.05 node); periods are shortened
     // from its 100 s animationTimer cycle to read at VR eye height.
-    float wave = floor(in.params.y / 2.0);
-    float shade = in.params.y - wave * 2.0;
+    float wave = floor(params.y / 2.0);
+    float shade = params.y - wave * 2.0;
     float t = uniforms.sunDir.w;
     if (wave == 1.0) {
-        if (in.uv.y < 0.05) {
+        if (win.uv.y < 0.05) {
             position.x += (smoothTriangleWave(t * 0.35 + position.x * 0.1 + position.z * 0.1) * 2.0 - 1.0) * 0.08;
             position.y -= (smoothTriangleWave(t * 0.14 - position.x * 0.5 - position.z * 0.5) * 2.0 - 1.0) * 0.04;
         }
@@ -148,11 +168,11 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
     }
     float4 wp = uniforms.modelMatrix * position;
     out.position = viewProjectionArray.viewProjectionMatrix[amp_id] * wp;
-    out.uv = in.uv;
-    out.layer = uint(in.params.x + 0.5);
+    out.uv = win.uv;
+    out.layer = uint(params.x + 0.5);
     out.shade = shade;
-    out.lit = vertexLit(in.params.z, uniforms.daylight);
-    out.tint = unpackTint(in.params.w);
+    out.lit = vertexLit(params.z, uniforms.daylight);
+    out.tint = unpackTint(params.w);
     out.fogDist = length(wp.xyz - uniforms.eyePos.xyz);
     return out;
 }
@@ -161,19 +181,20 @@ vertex ColorInOut vertexShader(Vertex in [[stage_in]],
 // isn't dead flat. Each (x,z) column bobs by a small sine of position+time, so a
 // column's top and bottom shift together (side faces stay intact) while adjacent
 // columns bob out of phase -> a rolling surface. sunDir.w carries elapsed time.
-vertex ColorInOut liquidVertex(Vertex in [[stage_in]],
+vertex ColorInOut liquidVertex(WorldVertex win [[stage_in]],
                                ushort amp_id [[amplification_id]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                                constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]])
 {
     ColorInOut out;
-    float4 position = float4(in.position, 1.0);
+    const float4 params = worldParams(win);
+    float4 position = float4(win.position, 1.0);
     float t = uniforms.sunDir.w;
     // Lava (negative shade sentinel) waves slower and shallower than water.
     // Stained glass / blended nodeboxes share this stream but are flagged with
     // shade + 2 (params.y >= 1.5); they're solid, so don't wave them.
-    bool lava = in.params.y < 0.0;
-    bool blended = in.params.y >= 1.5;
+    bool lava = params.y < 0.0;
+    bool blended = params.y >= 1.5;
     if (!blended) {
         float amp = lava ? 0.015 : 0.03;
         float spd = lava ? 0.6 : 1.3;
@@ -182,11 +203,11 @@ vertex ColorInOut liquidVertex(Vertex in [[stage_in]],
     }
     float4 wp = uniforms.modelMatrix * position;
     out.position = viewProjectionArray.viewProjectionMatrix[amp_id] * wp;
-    out.uv = in.uv;
-    out.layer = uint(in.params.x + 0.5);
-    out.shade = in.params.y;
-    out.lit = vertexLit(in.params.z, uniforms.daylight);
-    out.tint = unpackTint(in.params.w);
+    out.uv = win.uv;
+    out.layer = uint(params.x + 0.5);
+    out.shade = params.y;
+    out.lit = vertexLit(params.z, uniforms.daylight);
+    out.tint = unpackTint(params.w);
     out.fogDist = length(wp.xyz - uniforms.eyePos.xyz);
     return out;
 }

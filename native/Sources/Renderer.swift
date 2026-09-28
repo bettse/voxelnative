@@ -373,14 +373,15 @@ actor Renderer {
         uniforms = UnsafeMutableRawPointer(dynamicUniformBuffer.contents()).bindMemory(to: Uniforms.self, capacity: 1)
 
         let mtlVertexDescriptor = Self.buildMetalVertexDescriptor()
+        let worldVertexDescriptor = Self.buildWorldVertexDescriptor()
 
         do {
             pipelineState = try Self.buildRenderPipeline(device: device,
                                                          layerRenderer: layerRenderer,
-                                                         mtlVertexDescriptor: mtlVertexDescriptor)
+                                                         mtlVertexDescriptor: worldVertexDescriptor)
             worldOpaquePipelineState = try Self.buildRenderPipeline(device: device,
                                                          layerRenderer: layerRenderer,
-                                                         mtlVertexDescriptor: mtlVertexDescriptor,
+                                                         mtlVertexDescriptor: worldVertexDescriptor,
                                                          fragment: "fragmentShaderOpaque")
         } catch {
             fatalError("Unable to compile render pipeline state.  Error info: \(error)")
@@ -416,7 +417,7 @@ actor Renderer {
 
         do {
             liquidPipelineState = try Self.buildLiquidPipeline(device: device, layerRenderer: layerRenderer,
-                                                               mtlVertexDescriptor: mtlVertexDescriptor)
+                                                               mtlVertexDescriptor: worldVertexDescriptor)
         } catch { fatalError("Unable to compile liquid pipeline: \(error)") }
         let liqDepth = MTLDepthStencilDescriptor()
         liqDepth.depthCompareFunction = .greater   // reverse-Z, test against opaque
@@ -1366,6 +1367,23 @@ actor Renderer {
         mtlVertexDescriptor.layouts[BufferIndex.meshPositions.rawValue].stepFunction = MTLVertexStepFunction.perVertex
 
         return mtlVertexDescriptor
+    }
+
+    /// The world meshes' packed 24-byte vertex (WorldVertex in Shaders.metal,
+    /// written by MeshHandoff.packWorld): position float3, uv half2, layer
+    /// ushort, shade half, light + tint uchar4. Entities, HUD and hands keep
+    /// the 36-byte layout above.
+    static func buildWorldVertexDescriptor() -> MTLVertexDescriptor {
+        let d = MTLVertexDescriptor()
+        let b = BufferIndex.meshPositions.rawValue
+        let fields: [(MTLVertexFormat, Int)] = [(.float3, 0), (.half2, 12), (.ushort, 16), (.half, 18), (.uchar4, 20)]
+        for (i, f) in fields.enumerated() {
+            d.attributes[i].format = f.0; d.attributes[i].offset = f.1; d.attributes[i].bufferIndex = b
+        }
+        d.layouts[b].stride = MeshHandoff.worldVertexStride
+        d.layouts[b].stepRate = 1
+        d.layouts[b].stepFunction = .perVertex
+        return d
     }
 
     static func buildRenderPipeline(device: MTLDevice,

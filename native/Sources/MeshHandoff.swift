@@ -56,9 +56,41 @@ final class MeshHandoff {
     private var pending = Delta()
     private var hasPending = false
 
+    /// Bytes per world vertex on the GPU (WorldVertex in Shaders.metal).
+    static let worldVertexStride = 24
+
+    /// The mesher's 9-float vertices (x,y,z, u,v, layer, shade, light, tint)
+    /// packed to 24 bytes each: position float3, uv half2, layer UInt16, shade
+    /// half, then light and the tint's r,g,b as bytes. A third less than the
+    /// 36 we uploaded, and the world meshes were the biggest thing in memory.
+    static func packWorld(_ f: [Float]) -> [UInt8] {
+        let n = f.count / 9
+        var out = [UInt8](repeating: 0, count: n * worldVertexStride)
+        out.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            for i in 0..<n {
+                let s = i * 9, d = base + i * worldVertexStride
+                d.storeBytes(of: f[s], toByteOffset: 0, as: Float.self)
+                d.storeBytes(of: f[s + 1], toByteOffset: 4, as: Float.self)
+                d.storeBytes(of: f[s + 2], toByteOffset: 8, as: Float.self)
+                d.storeBytes(of: Float16(f[s + 3]), toByteOffset: 12, as: Float16.self)
+                d.storeBytes(of: Float16(f[s + 4]), toByteOffset: 14, as: Float16.self)
+                d.storeBytes(of: UInt16(clamping: Int(f[s + 5].rounded())), toByteOffset: 16, as: UInt16.self)
+                d.storeBytes(of: Float16(f[s + 6]), toByteOffset: 18, as: Float16.self)
+                d.storeBytes(of: UInt8(clamping: Int(f[s + 7].rounded())), toByteOffset: 20, as: UInt8.self)
+                let t = max(0, min(16777215, Int(f[s + 8].rounded())))
+                d.storeBytes(of: UInt8(t & 0xFF), toByteOffset: 21, as: UInt8.self)
+                d.storeBytes(of: UInt8((t >> 8) & 0xFF), toByteOffset: 22, as: UInt8.self)
+                d.storeBytes(of: UInt8((t >> 16) & 0xFF), toByteOffset: 23, as: UInt8.self)
+            }
+        }
+        return out
+    }
+
     private func makeMesh(_ device: MTLDevice, _ verts: [Float], _ indices: [UInt32]) -> GPUMesh? {
         guard !indices.isEmpty, !verts.isEmpty else { return nil }
-        guard let vb = device.makeBuffer(bytes: verts, length: verts.count * 4, options: [.storageModeShared]),
+        let packed = Self.packWorld(verts)
+        guard let vb = device.makeBuffer(bytes: packed, length: packed.count, options: [.storageModeShared]),
               let ib = device.makeBuffer(bytes: indices, length: indices.count * 4, options: [.storageModeShared])
         else { return nil }
         return GPUMesh(vertices: vb, indices: ib, indexCount: indices.count)
@@ -148,7 +180,7 @@ final class MeshHandoff {
         var anyOpaque = false
         for (bp, r) in changed {
             let ov: MTLBuffer? = r.ov.isEmpty ? nil
-                : device.makeBuffer(bytes: r.ov, length: r.ov.count * 4, options: [.storageModeShared])
+                : Self.packWorld(r.ov).withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [.storageModeShared]) }
             let nv = r.ov.count / 9
             let solid = idxBuf(r.solid, vertexCount: nv), cutout = idxBuf(r.cutout, vertexCount: nv)
             if solid != nil || cutout != nil { anyOpaque = true }
