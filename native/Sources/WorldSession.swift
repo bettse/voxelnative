@@ -3111,7 +3111,7 @@ final class WorldSession {
         posLogTimer += Double(dt)
         if posLogTimer >= 5 { posLogTimer = 0
             let gts = groundTop.map { String($0) } ?? "nil"
-            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime()) view=\(client.wantedRange) \(Self.healthNote())"); fflush(stdout) }
+            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime()) view=\(client.wantedRange) mapblocks=\(client.world.blocks.count) \(Self.healthNote())"); fflush(stdout) }
         // Underground the engine slides the sky and fog toward the "indoors"
         // colour scaled by how much sunlight the camera can see
         // (Sky::update, getBackgroundBrightness). Cheap stand-in: the day-bank

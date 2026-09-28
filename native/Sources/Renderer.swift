@@ -230,6 +230,36 @@ actor Renderer {
     // SET_SKY "skybox" cube (the End). A 1x1 black cube stays bound when
     // there is none so skyFragment always has a texture at its slot.
     var skyboxTexture: MTLTexture?
+
+    /// Every 10 s, where the GPU memory goes. The system has been running out
+    /// of memory mid-play (highwater jetsam kills gamecontrollerd and our
+    /// compositor helper, which closes the view), so the log says what's big.
+    private var lastMemLog: CFTimeInterval = 0
+    private func logMemoryIfDue() {
+        let now = CACurrentMediaTime()
+        guard now - lastMemLog > 10 else { return }
+        lastMemLog = now
+        func mb(_ b: Int) -> Int { b / (1024 * 1024) }
+        // Sizes from lengths and dimensions: allocatedSize reads 0 in the sim.
+        func tex(_ t: MTLTexture?) -> Int {
+            guard let t else { return 0 }
+            var total = 0, w = t.width, h = t.height
+            for _ in 0..<t.mipmapLevelCount { total += w * h * 4; w = max(1, w / 2); h = max(1, h / 2) }
+            return total * t.arrayLength * (t.textureType == .typeCube ? 6 : 1)
+        }
+        var mesh = 0, liquid = 0
+        for (_, b) in worldBlocks {
+            mesh += (b.opaqueVerts?.length ?? 0) + (b.solid?.buffer.length ?? 0) + (b.cutout?.buffer.length ?? 0)
+            if let l = b.liquid { liquid += l.vertices.length + l.indices.length }
+        }
+        let atlas = tex(textureArray)
+        let model = tex(modelTextureArray)
+        let sky = tex(skyboxTexture)
+        let ents = entityVertexBuffer.length + modelVertexBuffer.length + modelBlendVertexBuffer.length
+        print("[mem] gpu=\(mb(device.currentAllocatedSize))MB meshes=\(mb(mesh))MB/\(worldBlocks.count) blocks liquid=\(mb(liquid))MB " +
+              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)) " +
+              "sky=\(mb(sky))MB ents=\(mb(ents))MB \(WorldSession.healthNote())"); fflush(stdout)
+    }
     // Sun (layer 0) and moon (layer 1) textures, SkyboxHandoff.bodySize square.
     // Always allocated so skyFragment has something at its slot; skyBodyFlags
     // says which layers hold a real texture.
@@ -2394,6 +2424,7 @@ actor Renderer {
                    capture: wantShot && i == 0, video: wantVideo && i == 0)
         }
         perf.add("encode", pe0, perf.now())
+        logMemoryIfDue()
         perf.endIteration(note: "blocks=\(worldBlocks.count) visible=\(visibleBlocks.count) tris=\(idxSolid / 3)/\(idxCutout / 3)/\(idxLiquid / 3) billboards=\(entityIndexCount / 6)")
 
         committedFrameIndex += 1
