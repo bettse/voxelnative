@@ -919,6 +919,7 @@ final class WorldSession {
         client.onMovePlayerRel = { [weak self] d in self?.player.addPosition(d) }        // piston/elevator nudge
         client.onMovement = { [weak self] walk, fast, crouch, jump, gravity in
             self?.player.setMovement(walk: walk, fast: fast, crouch: crouch, jump: jump, gravity: gravity)
+            self?.serverGravity = gravity
             print("[move] server params walk=\(walk) fast=\(fast) jump=\(jump) gravity=\(gravity) climb=\(self?.client.speedClimb ?? 0)"); fflush(stdout)
         }
         client.onLiquidMovement = { [weak self] fluidity, smooth, sink in
@@ -6878,6 +6879,7 @@ final class WorldSession {
                            layer: tag.layer, tint: Self.packTint(r, g, b), v: &ov, idx: &oi)
             }
         }
+        appendAimMarker(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         // The pause menu goes after the XP level, server HUD and nametags: the
         // overlay has no depth test, so later quads paint over earlier ones and
         // the level digits used to sit on top of the menu panel (device shot).
@@ -9112,6 +9114,82 @@ final class WorldSession {
 
     /// Draw the Kogane companion: a round golden shikigami with a face, on a
     /// transparent square canvas, for the model-texture array.
+    // Bow / crossbow aim marker: a ring where the arrow would land, from
+    // VoxeLibre's launch (mcl_bows: player pos + 1.5 up, along the look
+    // direction; bow speed 40 * charge over 0.5 s, at least 4; loaded crossbow
+    // 68) and vl_projectile's flight (movement_gravity, no drag in air),
+    // stepped and raycast against walkable nodes.
+    private var aimRingLayer = -1
+    private var serverGravity: Float = 9.81   // movement_gravity (TOCLIENT_MOVEMENT), arrows fall by it
+    private var bowDrawStart: Double? = nil
+    private func appendAimMarker(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
+                                 v: inout [Float], idx: inout [UInt32]) {
+        let w = client.wieldIndex
+        guard !inventoryOpen, !dead, w >= 0, w < hotbar.count, let item = hotbar[w] else { bowDrawStart = nil; return }
+        let name = ItemRegistry.baseName(item)
+        let speed: Float
+        if name.hasPrefix("mcl_bows:crossbow") {
+            guard name.contains("loaded") else { bowDrawStart = nil; return }
+            speed = 68
+        } else if name.hasPrefix("mcl_bows:bow") {
+            // bow_0 / bow_1 while drawing, bow_2 fully drawn; the plain bow shows
+            // where a full draw would land.
+            if name == "mcl_bows:bow_0" || name == "mcl_bows:bow_1" {
+                let now = AppClock.seconds
+                if bowDrawStart == nil { bowDrawStart = now }
+                speed = max(4, 40 * Float(min(1, (now - (bowDrawStart ?? now)) / 0.5)))
+            } else { bowDrawStart = nil; speed = 40 }
+        } else { bowDrawStart = nil; return }
+        if aimRingLayer < 0 {
+            guard let px = Self.renderAimRingRGBA(canvas: ModelTextureHandoff.size) else { return }
+            aimRingLayer = registerRGBALayer("#aimring", px); modelTexturesDirty = true
+        }
+        let g = serverGravity > 0 ? serverGravity : 9.81
+        var p = player.snapshot().feet + SIMD3(0, 1.5, 0)
+        var vel = simd_normalize(player.aim()) * speed
+        let dt: Float = 0.03
+        var hitPos: SIMD3<Float>? = nil
+        for _ in 0..<200 {   // 6 s of flight
+            let next = p + vel * dt + SIMD3(0, -0.5 * g * dt * dt, 0)
+            let seg = next - p, len = simd_length(seg)
+            if len > 1e-5, let hit = client.world.raycast(origin: p, dir: seg, maxDist: len,
+                                                          pointable: { [phys] id in phys.isWalkable(id) },
+                                                          boxes: { [weak self] n, id in self?.pointBoxes(n, id) }) {
+                hitPos = p + seg / len * hit.dist
+                break
+            }
+            p = next; vel.y -= g * dt
+        }
+        guard let hp = hitPos else { return }
+        let hx = frameHeadXform
+        let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
+        let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
+        let scale = PlayerState.scale
+        let rx = (hp.x - eye.x) * scale, ry = (hp.y - eye.y) * scale, rz = (hp.z - eye.z) * scale
+        let op = SIMD3<Float>(rx * cy - rz * sy, ry, -(rx * sy + rz * cy))
+        let hh = max(0.02, simd_length(op) * 0.02)   // about the same size on screen at any distance
+        appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: aimRingLayer, tint: 16777215, v: &v, idx: &idx)
+    }
+
+    /// A white ring with a dark outline, for the aim marker.
+    static func renderAimRingRGBA(canvas: Int) -> [UInt8]? {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
+                                  bytesPerRow: canvas * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let c = CGFloat(canvas)
+        ctx.clear(CGRect(x: 0, y: 0, width: c, height: c))
+        let r = CGRect(x: c * 0.18, y: c * 0.18, width: c * 0.64, height: c * 0.64)
+        ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.9)); ctx.setLineWidth(c * 0.16); ctx.strokeEllipse(in: r)
+        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.setLineWidth(c * 0.08); ctx.strokeEllipse(in: r)
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fillEllipse(in: CGRect(x: c * 0.46, y: c * 0.46, width: c * 0.08, height: c * 0.08))
+        guard let base = ctx.data else { return nil }
+        var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
+        px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
+        return px
+    }
+
     static func renderKoganeRGBA(canvas: Int, closed: Bool = false) -> [UInt8]? {
         let cs = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
