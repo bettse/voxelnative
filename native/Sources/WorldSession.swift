@@ -3136,6 +3136,7 @@ final class WorldSession {
         if simChordHold { act.dig = true; act.place = true }
         if simTapPlace { act.place = true; simTapPlace = false }
         #endif
+        stepMetaFormspec()
         if inventoryOpen { handleInventoryInput(gi); act.dig = false; act.place = false; holdDigUntilRelease = true }   // trigger/grip belong to the panel
         else { (invPrevPrimary, invPrevSecondary) = panelClicks(gi) }
         // A trigger press that closed a panel or the menu (sign "Done", "Exit
@@ -4131,6 +4132,7 @@ final class WorldSession {
             formspecContext = hit.under
             rmbSuppressed = true
             openFormspec(fs, "")
+            metaFormspecShown = fs
             print("[place] open node formspec \(client.nodes.name(hitId)) at \(hit.under)"); fflush(stdout)
             return false
         }
@@ -4243,6 +4245,20 @@ final class WorldSession {
     private var invHeld: (loc: String, list: String, index: Int, count: Int)? = nil   // count 0 = whole stack
     private var formspecOpen = false
     private var formspecName = ""                     // the SHOW_FORMSPEC formname (e.g. "mcl_chests:chest_x_y_z")
+    /// A node form opened from metadata follows that metadata while open, like
+    /// desktop's NodeMetadataFormSource: a furnace rewrites meta.formspec every
+    /// second with the flame and arrow progress, and without this the panel
+    /// kept showing the cold furnace it opened with.
+    private func stepMetaFormspec() {
+        guard formspecOpen, formspecName.isEmpty, let shown = metaFormspecShown, let ctx = formspecContext,
+              let now = client.world.nodeFormspec(ctx), now != shown else { return }
+        metaFormspecShown = now
+        openFormspec(now, "", refresh: true)
+    }
+
+    /// The node-metadata formspec on screen (opened from the node, not sent by
+    /// the server), so a change to it redraws the panel: see stepMetaFormspec.
+    private var metaFormspecShown: String? = nil
     private var formspecContext: SIMD3<Int>? = nil   // node whose metadata a formspec's current_name/context refers to
     /// The open form is the player's own INVENTORY_FORMSPEC (formname ""): it
     /// closes with player fields, not node fields, and a re-sent inventory
@@ -4409,6 +4425,7 @@ final class WorldSession {
     }
 
     private func closeFormspec() {
+        metaFormspecShown = nil
         invScale = 1   // the hand-built inventory grid uses the base size
         // A crafting-table form shows the player's `craft` grid. Return its input
         // items to the main inventory on close so nothing is stranded in the grid
@@ -4556,7 +4573,10 @@ final class WorldSession {
 
     /// TOCLIENT_SHOW_FORMSPEC handler: an empty spec closes; otherwise parse the
     /// list[] elements and open the spatial panel over them.
-    private func openFormspec(_ rawSpec0: String, _ name: String, inventory: Bool = false) {
+    /// `refresh`: the same open node form re-laid-out because its metadata
+    /// changed (a furnace's flame and arrow); keeps the picked-up stack and
+    /// hover, and doesn't log (it fires about once a second).
+    private func openFormspec(_ rawSpec0: String, _ name: String, inventory: Bool = false, refresh: Bool = false) {
         // An empty spec is a close request, but only for its own form: the
         // engine quits the open menu only when the formname is empty or matches
         // it, so a mod clearing its dialog can't shut a chest you have open.
@@ -4564,6 +4584,7 @@ final class WorldSession {
             if name.isEmpty || name == formspecName { closeFormspec() }
             return
         }
+        if !refresh { metaFormspecShown = nil }   // the node-open path sets it after this
         let panelWasOpen = formspecOpen && invFrame != nil
         formspecIsInventory = inventory
         // The server's per-player formspec prepend carries the global stone
@@ -4574,7 +4595,7 @@ final class WorldSession {
         // slot/label/background coords the server sent -- needed to pin the
         // chest-panel misalignment and stray label fragment. Truncated so
         // a huge creative form doesn't flood the log.
-        print("[formspec] raw '\(name)' prepend=\(client.formspecPrepend.count)b spec=\(rawSpec0.prefix(700))"); fflush(stdout)
+        if !refresh { print("[formspec] raw '\(name)' prepend=\(client.formspecPrepend.count)b spec=\(rawSpec0.prefix(700))"); fflush(stdout) }
         // Bake container[]/container_end[] offsets into element positions so the
         // parsers below stay container-unaware (enchanting table rows).
         let spec = Formspec.flattenContainers(rawSpec)
@@ -4660,13 +4681,14 @@ final class WorldSession {
         }
         formspecName = name              // remembered so close sends the named-form quit
         formspecOpen = true; inventoryOpen = true
-        invHeld = nil; invHover = nil; invCursor = nil
+        if !refresh { invHeld = nil; invHover = nil; invCursor = nil }
         setPanelScale(spec, legacy: legacy)
         // Keep the panel where it is when this form replaces or re-sends one
         // that's already open (see openInfoFormspec); only a fresh open anchors
         // ahead of the player.
         if panelWasOpen { layoutInventory() } else { openInventoryPanel() }
         refreshInventoryTiles()
+        guard !refresh else { return }
         print("[formspec] open '\(name)' lists=\(lists.map { "\($0.loc)/\($0.list)" })"); fflush(stdout)
         logInventoryContents(lists)
         logIconResolution(lists)
