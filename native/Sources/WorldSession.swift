@@ -6697,6 +6697,13 @@ final class WorldSession {
                              : (e.visual == "cube" ? (e.textures.last ?? "") : "")
                     if spec.isEmpty || Self.isBlankSpec(spec) { faces.append((-1, SIMD2(1, 1))); continue }
                     if modelTexLayer[spec] == nil, assignModelTexture(spec) { modelTexturesDirty = true }
+                    // The live texture mod too, like the mesh path: primed TNT
+                    // flashes by adding ^mcl_tnt_blink.png every half second.
+                    if !e.textureMod.isEmpty {
+                        let modded = spec + e.textureMod
+                        if modelTexLayer[modded] == nil, assignModelTexture(modded) { modelTexturesDirty = true }
+                        if let l = modelTexLayer[modded] { faces.append((l, modelTexUV[modded] ?? SIMD2(1, 1))); continue }
+                    }
                     if let l = modelTexLayer[spec] { faces.append((l, modelTexUV[spec] ?? SIMD2(1, 1))) }
                     else { faces.append((-1, SIMD2(1, 1))) }
                 }
@@ -7371,7 +7378,7 @@ final class WorldSession {
         let drops: [(item: String, name: String, size: Float)] = [
             ("mcl_core:dirt", "__builtin:item", 0.4), ("mcl_tools:pick_diamond", "__builtin:item", 0.4),
             ("mcl_core:gravel", "__builtin:falling_node", 0.667), ("mcl_heads:skeleton", "__builtin:item", 0.4),
-            ("mcl_core:cobble", "__builtin:item", 0.4)]
+            ("mcl_core:cobble", "__builtin:item", 0.4), ("mcl_core:diorite", "__builtin:item", 0.4)]
         var dropIds: [Int] = []
         for (j, d) in drops.enumerated() {
             let itemStr = d.item
