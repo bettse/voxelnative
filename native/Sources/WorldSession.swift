@@ -713,6 +713,7 @@ final class WorldSession {
         self.screenshotFlag = screenshotFlag
         self.player = player
         client.wantedRange = ViewSettings.shared.blocks   // view-distance slider
+        print("[view] distance \(ViewSettings.shared.blocks) blocks at session start"); fflush(stdout)
         #if targetEnvironment(simulator)
         SimControl.shared.start()
         #endif
@@ -1062,6 +1063,7 @@ final class WorldSession {
         queue.async { [weak self] in
             self?.mobRenderDist = min(96, Float(blocks * 16))
             self?.client.wantedRange = blocks
+            print("[view] distance \(blocks) blocks (live)"); fflush(stdout)
         }
     }
 
@@ -3100,7 +3102,7 @@ final class WorldSession {
         posLogTimer += Double(dt)
         if posLogTimer >= 5 { posLogTimer = 0
             let gts = groundTop.map { String($0) } ?? "nil"
-            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime()) \(Self.healthNote())"); fflush(stdout) }
+            print("[session] pos \(s.feet) groundTop=\(gts) grounded=\(gnd) vy=\(vy) inLiquid=\(inLiquid) at=\(Self.clockTime()) view=\(client.wantedRange) \(Self.healthNote())"); fflush(stdout) }
         // Underground the engine slides the sky and fog toward the "indoors"
         // colour scaled by how much sunlight the camera can see
         // (Sky::update, getBackgroundBrightness). Cheap stand-in: the day-bank
