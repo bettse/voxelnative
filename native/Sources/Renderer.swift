@@ -163,6 +163,7 @@ actor Renderer {
     let liquidPipelineState: MTLRenderPipelineState
     let liquidDepthState: MTLDepthStencilState
     var entityVertexBuffer: MTLBuffer
+    private var lastFrameStart: CFTimeInterval = 0   // hitch log: gap between frames
     private var framePose = (eye: SIMD3<Float>.zero, yaw: Float(0))   // this frame's eye/yaw (updateGameState)
     private var modelFix = matrix_identity_float4x4
     var entityIndexBuffer: MTLBuffer
@@ -474,6 +475,14 @@ actor Renderer {
         }
         if let accProvider { consumeAccessoryUpdates(accProvider) }
         arSessionRunning = true
+        // Log the session's own events (a provider stopping, authorization
+        // changes): the system has been closing the view mid-play, and a
+        // tracking loss would show up here first.
+        Task {
+            for await ev in arSession.events {
+                print("[arkit] \(ev) at=\(WorldSession.clockTime())"); fflush(stdout)
+            }
+        }
         // Controllers can turn on after launch; re-enumerate accessories then.
         NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] _ in
             Task { await self?.rebuildAccessories() }
@@ -2302,26 +2311,46 @@ actor Renderer {
 
         frame.startUpdate()
         let pf0 = perf.now()
+        // Hitch log: which update step ran long. The system has been closing
+        // the immersive view mid-play with no crash, heat or memory cause; a
+        // stalled frame is one suspect, so name the slow step when it happens.
+        var steps: [(String, Double)] = []
+        var tLast = CACurrentMediaTime()
+        @inline(__always) func mark(_ n: String) { let t = CACurrentMediaTime(); steps.append((n, t - tLast)); tLast = t }
+        let gap = lastFrameStart > 0 ? tLast - lastFrameStart : 0
+        lastFrameStart = tLast
 
         // Perform frame independent work
 
         self.updateDynamicBufferState(frameIndex: frame.frameIndex)
         // Once; buildHandHud + render read the memo.
         self.resolveHandPoses(frameIndex: frame.frameIndex, at: frame.predictTiming()?.presentationTime.timeInterval)
+        mark("poses")
 
         self.updateGameState()
+        mark("state")
 
         self.consumeHandoff()
+        mark("mesh")
         self.stepTileAnimation()   // cycle animated node tiles (lava/fire) this frame
 
 
         self.consumeEntityHandoff()
+        mark("entities")
 
         self.consumeModelTextureHandoff()
+        mark("modeltex")
         self.consumeSkyboxHandoff()
 
         self.consumeModelHandoff()
         self.consumeOverlayHandoff()
+        mark("models")
+        let upd = steps.reduce(0) { $0 + $1.1 }
+        if upd > 0.030 || gap > 0.100 {
+            print("[frame] hitch gap=\(Int(gap * 1000))ms update=\(Int(upd * 1000))ms " +
+                  steps.filter { $0.1 > 0.003 }.map { "\($0.0)=\(Int($0.1 * 1000))" }.joined(separator: " ") +
+                  " at=\(WorldSession.clockTime())"); fflush(stdout)
+        }
 
         #if targetEnvironment(simulator)
         self.simulateHandPoses()
@@ -2364,6 +2393,8 @@ actor Renderer {
         committedFrameIndex += 1
         commandBuffer.addCompletedHandler { cb in
             if let e = cb.error { print("[gpu] command buffer error: \(e)"); fflush(stdout) }
+            let gpu = cb.gpuEndTime - cb.gpuStartTime
+            if gpu > 0.030 { print("[frame] slow gpu \(Int(gpu * 1000))ms at=\(WorldSession.clockTime())"); fflush(stdout) }
         }
 
         commandBuffer.encodeSignalEvent(self.endFrameEvent, value: committedFrameIndex)
