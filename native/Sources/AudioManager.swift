@@ -36,8 +36,8 @@ final class ViewSettings {
         }
         set {
             let v = max(Self.minBlocks, min(Self.maxBlocks, newValue))
-            // Logged with its caller: a setting of 12 came back as 8 and
-            // nothing else writes this key, so the log should say who did.
+            // Logged so a device log shows which distance was in use when the
+            // system closed the view (it happened at both 8 and 12).
             print("[view] saved distance \(v) (was \(blocks))"); fflush(stdout)
             defaults.set(v, forKey: key)
         }
