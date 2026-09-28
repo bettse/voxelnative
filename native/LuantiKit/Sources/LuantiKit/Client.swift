@@ -729,7 +729,14 @@ public final class Client {
         }
         guard clientReadySent else { return }
         posTimer += delta
-        if posTimer >= 0.1 { posTimer = 0; sendPlayerPos() }
+        keyClock += delta
+        let held = heldKeys
+        for bit in [16, 64] where held & bit != 0 && prevHeldKeys & bit == 0 { keyPressedAt[bit] = keyClock }
+        prevHeldKeys = held
+        // Send at once when the keys change, not on the next 0.1 s tick: a
+        // quick sneak click could land between two sends and never reach the
+        // boat, which only dismounts when its step sees control.sneak.
+        if posTimer >= 0.1 || sendKeys != lastSentKeys { posTimer = 0; sendPlayerPos() }
     }
 
     /// TOSERVER_DAMAGE (0x35): fall damage is computed CLIENT-side in Luanti
@@ -2056,7 +2063,22 @@ public final class Client {
     }
 
     private func sendPlayerPos() {
-        conn.sendMessage(Op.toserverPlayerPos, playerPosBlockData(keys: heldKeys))
+        let keys = sendKeys
+        lastSentKeys = keys
+        conn.sendMessage(Op.toserverPlayerPos, playerPosBlockData(keys: keys))
+    }
+
+    // Jump and sneak are often quick taps (boat dismount, horse jump). Keep a
+    // fresh press in the sent keys for at least 0.25 s so a server step (about
+    // 0.09 s) is sure to see it, even if the release follows right behind.
+    private var keyClock: Double = 0
+    private var keyPressedAt: [Int: Double] = [:]
+    private var prevHeldKeys = 0
+    private var lastSentKeys = 0
+    var sendKeys: Int {   // internal for tests
+        var k = heldKeys
+        for (bit, t) in keyPressedAt where keyClock - t < 0.25 { k |= bit }
+        return k
     }
 
     /// TOSERVER_INTERACT, mirroring Client::interact (src/client/client.cpp) and the

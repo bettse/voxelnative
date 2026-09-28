@@ -2826,6 +2826,10 @@ final class WorldSession {
             slipVel = SIMD2(vel.x, vel.z)
         }
         let dx = vel.x * dt, dz = vel.z * dt
+        // Look turns apply riding too: on desktop the mouse still looks around
+        // in a boat (the boat itself steers with left/right, sent as keys).
+        player.integrate(worldVel: .zero, turn: turn, dt: dt)   // stick turn only; movement resolved below
+        if gi.lookYaw != 0 { player.addYaw(gi.lookYaw) }        // mouse-look: a direct per-frame yaw delta
         // Riding: while the local player is attached to a vehicle, mirror
         // the vehicle's position instead of running our own locomotion/gravity
         // (which would leave the camera behind as the boat/horse moves). The
@@ -2839,8 +2843,6 @@ final class WorldSession {
             let feet = ActiveObjects.attachedPosition(parent: parent.pos, yaw: parent.yaw, offset: lp.attachOffset)
             player.setPhysics(feet: feet, vy: 0, grounded: true)
         } else {
-        player.integrate(worldVel: .zero, turn: turn, dt: dt)   // stick turn only; movement resolved below
-        if gi.lookYaw != 0 { player.addYaw(gi.lookYaw) }        // mouse-look: a direct per-frame yaw delta
         if inLiquid {
             // Buoyant vertical model, but sweep BOTH axes through the same
             // collision as land so climbing out of water into a solid can't
