@@ -249,7 +249,7 @@ actor Renderer {
         }
         var mesh = 0, liquid = 0
         for (_, b) in worldBlocks {
-            mesh += (b.opaqueVerts?.length ?? 0) + (b.solid?.buffer.length ?? 0) + (b.cutout?.buffer.length ?? 0)
+            mesh += b.opaqueVerts?.length ?? 0   // vertices and both index streams
             if let l = b.liquid { liquid += l.vertices.length + l.indices.length }
         }
         let atlas = tex(textureArray)
@@ -2597,7 +2597,7 @@ actor Renderer {
                 guard let v = b.opaqueVerts, let s = b.solid else { continue }
                 renderEncoder.setVertexBuffer(v, offset: 0, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: s.count,
-                                                    indexType: s.type, indexBuffer: s.buffer, indexBufferOffset: 0)
+                                                    indexType: s.type, indexBuffer: s.buffer, indexBufferOffset: s.offset)
                 idxSolid += s.count
             }
             // Cutout pass: leaves/plants/nodeboxes through the alpha-discard
@@ -2610,7 +2610,7 @@ actor Renderer {
                 guard let v = b.opaqueVerts, let c = b.cutout else { continue }
                 renderEncoder.setVertexBuffer(v, offset: 0, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: c.count,
-                                                    indexType: c.type, indexBuffer: c.buffer, indexBufferOffset: 0)
+                                                    indexType: c.type, indexBuffer: c.buffer, indexBufferOffset: c.offset)
                 idxCutout += c.count
             }
         }
@@ -2952,9 +2952,7 @@ actor Renderer {
             var world: [any MTLAllocation] = []
             world.reserveCapacity(worldBlocks.count * 4)
             for (_, b) in worldBlocks {
-                if let v = b.opaqueVerts { world.append(v) }
-                if let s = b.solid { world.append(s.buffer) }
-                if let c = b.cutout { world.append(c.buffer) }
+                if let v = b.opaqueVerts { world.append(v) }   // holds the index streams too
                 if let l = b.liquid { world.append(l.vertices); world.append(l.indices) }
             }
             worldRes.addAllocations(world)

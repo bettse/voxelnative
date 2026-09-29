@@ -14,15 +14,19 @@ import LuantiKit
 /// call per block per pass.
 final class MeshHandoff {
     struct GPUMesh { let vertices: MTLBuffer; let indices: MTLBuffer; let indexCount: Int }
-    // One block's GPU geometry: a shared opaque vertex buffer with solid+cutout
-    // index streams, plus an optional liquid mesh. Any field may be nil
-    // (an all-air or all-solid-interior block has no faces of that kind).
+    typealias IndexRange = (buffer: MTLBuffer, offset: Int, count: Int, type: MTLIndexType)
+    // One block's GPU geometry: the opaque vertices with the solid and cutout
+    // index streams packed after them in the SAME buffer, plus an optional
+    // liquid mesh. Any field may be nil (an all-air or all-solid-interior block
+    // has no faces of that kind). One buffer per block instead of three: a
+    // headset trace showed ~2,600 small Metal buffers holding 87 MB of driver
+    // memory for 46 MB of meshes.
     struct BlockGPU {
         let opaqueVerts: MTLBuffer?
         // 16-bit indices when the block has <= 65536 vertices (nearly always):
         // half the index bytes the GPU reads every frame.
-        let solid: (buffer: MTLBuffer, count: Int, type: MTLIndexType)?
-        let cutout: (buffer: MTLBuffer, count: Int, type: MTLIndexType)?
+        let solid: IndexRange?
+        let cutout: IndexRange?
         let liquid: GPUMesh?
     }
     // One block's raw geometry as the mesher produced it (CPU side); built into
@@ -165,27 +169,37 @@ final class MeshHandoff {
     func postDelta(changed: [SIMD3<Int>: BlockRaw], removed: [SIMD3<Int>], reset: Bool,
                    atlasLayers: [[UInt8]]? = nil, animated: [TextureAtlas.AnimLayer] = []) -> Bool {
         guard let device = device else { return false }
-        func idxBuf(_ a: [UInt32], vertexCount: Int) -> (buffer: MTLBuffer, count: Int, type: MTLIndexType)? {
-            guard !a.isEmpty else { return nil }
-            if vertexCount <= 65536 {
-                let small = a.map { UInt16(truncatingIfNeeded: $0) }
-                guard let b = device.makeBuffer(bytes: small, length: small.count * 2, options: [.storageModeShared]) else { return nil }
-                return (b, a.count, .uint16)
-            }
-            guard let b = device.makeBuffer(bytes: a, length: a.count * 4, options: [.storageModeShared]) else { return nil }
-            return (b, a.count, .uint32)
-        }
         var built: [SIMD3<Int>: BlockGPU] = [:]
         built.reserveCapacity(changed.count)
         var anyOpaque = false
         for (bp, r) in changed {
-            let ov: MTLBuffer? = r.ov.isEmpty ? nil
-                : Self.packWorld(r.ov).withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [.storageModeShared]) }
-            let nv = r.ov.count / 9
-            let solid = idxBuf(r.solid, vertexCount: nv), cutout = idxBuf(r.cutout, vertexCount: nv)
+            let liquid = makeMesh(device, r.lv, r.li)
+            guard !r.ov.isEmpty else {
+                built[bp] = BlockGPU(opaqueVerts: nil, solid: nil, cutout: nil, liquid: liquid); continue
+            }
+            let packed = Self.packWorld(r.ov)
+            let wide = r.ov.count / 9 > 65536
+            let isz = wide ? 4 : 2
+            // Index offsets 4-byte aligned (Metal's rule for index buffer offsets).
+            let solidAt = (packed.count + 3) & ~3
+            let cutoutAt = (solidAt + r.solid.count * isz + 3) & ~3
+            let total = cutoutAt + r.cutout.count * isz
+            guard let buf = device.makeBuffer(length: total, options: [.storageModeShared]) else { continue }
+            let base = buf.contents()
+            packed.withUnsafeBytes { _ = memcpy(base, $0.baseAddress!, $0.count) }
+            func put(_ a: [UInt32], at off: Int) -> IndexRange? {
+                guard !a.isEmpty else { return nil }
+                if wide {
+                    a.withUnsafeBytes { _ = memcpy(base + off, $0.baseAddress!, $0.count) }
+                } else {
+                    let p = (base + off).bindMemory(to: UInt16.self, capacity: a.count)
+                    for (i, v) in a.enumerated() { p[i] = UInt16(truncatingIfNeeded: v) }
+                }
+                return (buf, off, a.count, wide ? .uint32 : .uint16)
+            }
+            let solid = put(r.solid, at: solidAt), cutout = put(r.cutout, at: cutoutAt)
             if solid != nil || cutout != nil { anyOpaque = true }
-            built[bp] = BlockGPU(opaqueVerts: ov, solid: solid, cutout: cutout,
-                                 liquid: makeMesh(device, r.lv, r.li))
+            built[bp] = BlockGPU(opaqueVerts: buf, solid: solid, cutout: cutout, liquid: liquid)
         }
         let a = atlasLayers.flatMap { makeAtlas(device, $0) }
         lock.lock()
