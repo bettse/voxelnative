@@ -43,7 +43,8 @@ final class MeshHandoff {
         var changed: [SIMD3<Int>: BlockGPU] = [:]
         var removed: Set<SIMD3<Int>> = []
         var reset = false
-        var atlas: MTLTexture? = nil
+        var atlas: MTLTexture? = nil      // 16px layers (TextureAtlas.layers)
+        var atlasBig: MTLTexture? = nil   // 64px layers (TextureAtlas.bigLayers)
         var animated: [TextureAtlas.AnimLayer] = []
         var hasOpaque = false   // any changed block carries solid/cutout geometry (world-ready gate)
     }
@@ -111,13 +112,20 @@ final class MeshHandoff {
     // A changed slice is patched while the renderer may still be sampling the
     // old bytes; that's a one-frame tear on a tile that just got its real
     // texture, which beats a full re-upload every generation.
-    private var atlasTex: MTLTexture?
-    private var uploadedLayers: [[UInt8]] = []
+    // One per atlas array: the 16px pixel-art layers and the 64px ones.
+    private final class AtlasArray {
+        let edge: Int, name: String
+        var tex: MTLTexture?
+        var uploadedLayers: [[UInt8]] = []
+        init(edge: Int, name: String) { self.edge = edge; self.name = name }
+    }
+    private let smallAtlas = AtlasArray(edge: TextureAtlas.smallTile, name: "node atlas")
+    private let bigAtlas = AtlasArray(edge: TextureAtlas.tile, name: "big atlas")
     private static let atlasHeadroom = 64
 
-    /// Build (or grow) the node texture array from raw layers (sRGB), on the
+    /// Build (or grow) one node texture array from raw layers (sRGB), on the
     /// mesher thread. Returns the texture to post; nil if nothing to draw.
-    private func makeAtlas(_ device: MTLDevice, _ layersIn: [[UInt8]]) -> MTLTexture? {
+    private func makeAtlas(_ device: MTLDevice, _ layersIn: [[UInt8]], _ arr: AtlasArray) -> MTLTexture? {
         guard !layersIn.isEmpty else { return nil }
         // 2048 slices is the hard cap; a longer array aborts inside Metal.
         // Truncate (later tiles draw as whatever slice the sampler clamps to)
@@ -127,11 +135,10 @@ final class MeshHandoff {
             print("[tex] node atlas has \(layers.count) layers, truncating to \(WorldSession.maxTextureLayers)"); fflush(stdout)
             layers.removeLast(layers.count - WorldSession.maxTextureLayers)
         }
-        // Must match the canvas the atlas bakes into (TextureAtlas.tile).
-        let edge = TextureAtlas.tile, need = edge * edge * 4
+        let edge = arr.edge, need = edge * edge * 4
         var tex: MTLTexture
         var reused = false
-        if let t = atlasTex, t.arrayLength >= layers.count {
+        if let t = arr.tex, t.arrayLength >= layers.count {
             tex = t; reused = true
         } else {
             let d = MTLTextureDescriptor()
@@ -144,20 +151,20 @@ final class MeshHandoff {
             d.usage = .shaderRead
             guard let t = device.makeTexture(descriptor: d) else { return nil }
             tex = t
-            uploadedLayers.removeAll(keepingCapacity: true)
+            arr.uploadedLayers.removeAll(keepingCapacity: true)
         }
         @inline(__always) func sameStorage(_ a: [UInt8], _ b: [UInt8]) -> Bool {
             a.count == b.count && a.withUnsafeBufferPointer { pa in b.withUnsafeBufferPointer { pb in pa.baseAddress == pb.baseAddress } }
         }
         var uploaded = 0
         for (i, px) in layers.enumerated() where px.count == need {
-            if reused, i < uploadedLayers.count, sameStorage(uploadedLayers[i], px) { continue }
+            if reused, i < arr.uploadedLayers.count, sameStorage(arr.uploadedLayers[i], px) { continue }
             TileMips.upload(tex, slice: i, px: px, edge: edge)
             uploaded += 1
         }
-        print("[tex] node atlas \(reused ? "grown" : "created") \(layers.count)/\(tex.arrayLength) slices, uploaded \(uploaded)"); fflush(stdout)
-        atlasTex = tex
-        uploadedLayers = layers
+        print("[tex] \(arr.name) \(reused ? "grown" : "created") \(layers.count)/\(tex.arrayLength) slices, uploaded \(uploaded)"); fflush(stdout)
+        arr.tex = tex
+        arr.uploadedLayers = layers
         return tex
     }
 
@@ -167,7 +174,7 @@ final class MeshHandoff {
     /// only when the atlas grew. Returns false if no device yet (keep dirty).
     @discardableResult
     func postDelta(changed: [SIMD3<Int>: BlockRaw], removed: [SIMD3<Int>], reset: Bool,
-                   atlasLayers: [[UInt8]]? = nil, animated: [TextureAtlas.AnimLayer] = []) -> Bool {
+                   atlasLayers: (small: [[UInt8]], big: [[UInt8]])? = nil, animated: [TextureAtlas.AnimLayer] = []) -> Bool {
         guard let device = device else { return false }
         var built: [SIMD3<Int>: BlockGPU] = [:]
         built.reserveCapacity(changed.count)
@@ -201,13 +208,15 @@ final class MeshHandoff {
             if solid != nil || cutout != nil { anyOpaque = true }
             built[bp] = BlockGPU(opaqueVerts: buf, solid: solid, cutout: cutout, liquid: liquid)
         }
-        let a = atlasLayers.flatMap { makeAtlas(device, $0) }
+        let a = atlasLayers.flatMap { makeAtlas(device, $0.small, smallAtlas) }
+        let ab = atlasLayers.flatMap { makeAtlas(device, $0.big, bigAtlas) }
         lock.lock()
         if reset { pending = Delta(); pending.reset = true }
         for bp in removed { pending.changed[bp] = nil; if !pending.reset { pending.removed.insert(bp) } }
         for (bp, g) in built { pending.changed[bp] = g; pending.removed.remove(bp) }
         if anyOpaque { pending.hasOpaque = true }
         if let a = a { pending.atlas = a; pending.animated = animated }
+        if let ab = ab { pending.atlasBig = ab }
         hasPending = true
         lock.unlock()
         return true

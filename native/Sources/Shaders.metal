@@ -258,13 +258,24 @@ static inline float4 worldLit(half4 c, ColorInOut in, constant Uniforms & unifor
     return float4(applyFog(lit, in.fogDist, uniforms), 1.0);
 }
 
+// The node atlas is two arrays: 16px pixel-art layers, and 64px layers for
+// the few with finer detail (mesh-node sheets, HUD icons), numbered from
+// 32768 (TextureAtlas.bigBit). The model-texture array is bound in `atlas`'s
+// slot for mobs and its indices stay below 32768, so it reads `atlas` too.
+static half4 sampleAtlas(texture2d_array<half> atlas, texture2d_array<half> big,
+                         sampler s, float2 uv, uint layer)
+{
+    return layer >= 32768u ? big.sample(s, uv, layer - 32768u) : atlas.sample(s, uv, layer);
+}
+
 // Cutout world (leaves, plants, nodeboxes): alpha-tests, so it cannot use
 // early-Z. The solid world uses fragmentShaderOpaque below instead.
 fragment float4 fragmentShader(ColorInOut in [[stage_in]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
 {
-    half4 c = atlas.sample(worldSampler, in.uv, in.layer);
+    half4 c = sampleAtlas(atlas, atlasBig, worldSampler, in.uv, in.layer);
     // Alpha cutout: drop transparent texels (leaves, plants) so their gaps show
     // through instead of rendering as a solid block.
     if (c.a < 0.5h) { discard_fragment(); }
@@ -295,10 +306,11 @@ static float3 shadeEntity(half3 rgb, ColorInOut in, constant Uniforms & uniforms
 
 fragment float4 entityFragment(ColorInOut in [[stage_in]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
 {
     constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-    half4 c = atlas.sample(s, in.uv, in.layer);
+    half4 c = sampleAtlas(atlas, atlasBig, s, in.uv, in.layer);
     if (c.a < 0.5h) { discard_fragment(); }
     half3 rgb = c.a > 0.0h ? c.rgb / c.a : c.rgb;
     return float4(shadeEntity(rgb, in, uniforms), 1.0);
@@ -308,10 +320,11 @@ fragment float4 entityFragment(ColorInOut in [[stage_in]],
 // the texture's own alpha is kept and blended instead of cut out at 0.5.
 fragment float4 entityBlendFragment(ColorInOut in [[stage_in]],
                                     constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                                    texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+                                    texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
 {
     constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-    half4 c = atlas.sample(s, in.uv, in.layer);
+    half4 c = sampleAtlas(atlas, atlasBig, s, in.uv, in.layer);
     if (c.a < 0.02h) { discard_fragment(); }
     return float4(shadeEntity(c.rgb / c.a, in, uniforms), float(c.a));
 }
@@ -333,9 +346,10 @@ fragment float4 glassFragment(ColorInOut in [[stage_in]])
 [[early_fragment_tests]]
 fragment float4 fragmentShaderOpaque(ColorInOut in [[stage_in]],
                                      constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                                     texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+                                     texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
 {
-    half4 c = atlas.sample(worldSampler, in.uv, in.layer);
+    half4 c = sampleAtlas(atlas, atlasBig, worldSampler, in.uv, in.layer);
     return worldLit(c, in, uniforms);
 }
 
@@ -346,9 +360,10 @@ fragment float4 fragmentShaderOpaque(ColorInOut in [[stage_in]],
 // depth-test-on / depth-write-off state, so this just authors the colour.
 fragment float4 liquidFragment(ColorInOut in [[stage_in]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]])
+                               texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
 {
-    half4 c = atlas.sample(liquidSampler, in.uv, in.layer);
+    half4 c = sampleAtlas(atlas, atlasBig, liquidSampler, in.uv, in.layer);
     half3 rgb = c.a > 0.0h ? c.rgb / c.a : c.rgb;   // un-premultiply
     rgb *= in.tint;                                 // biome palette tint (white = no change)
     // The mesher flags lava with a negative shade; it glows instead of being

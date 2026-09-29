@@ -17,7 +17,15 @@ public final class TextureAtlas {
     // a corner. Raising this is the single knob for mesh-node resolution.
     public static let tile = 64
 
-    public private(set) var layers: [[UInt8]] = []  // each tile*tile*4 RGBA
+    /// Most layers are 16px pixel art blown up 4x, so they're stored at 16px
+    /// (1/16th the memory) and only layers with real detail at 64px (mesh-node
+    /// sheets, HUD icons) keep the full size. A layer index at or above bigBit
+    /// is `bigBit + i` into bigLayers; below it, an index into layers. The
+    /// shaders make the same split, so an index stays one number everywhere.
+    public static let smallTile = 16
+    public static let bigBit = 32768
+    public private(set) var layers: [[UInt8]] = []     // each smallTile^2*4 RGBA
+    public private(set) var bigLayers: [[UInt8]] = []  // each tile^2*4 RGBA
     /// A node-atlas layer that cycles frames over time (lava/fire/furnace).
     public struct AnimLayer { public let layer: Int; public let frames: [[UInt8]]; public let secPerFrame: Float }
     public private(set) var animatedLayers: [AnimLayer] = []
@@ -65,7 +73,64 @@ public final class TextureAtlas {
 
     public init() {}
 
-    public var layerCount: Int { layers.count }
+    public var layerCount: Int { layers.count + bigLayers.count }
+
+    /// A layer's pixels at the full `tile` size, whichever array it lives in.
+    public func pixels(_ layer: Int) -> [UInt8]? {
+        if layer >= Self.bigBit {
+            let i = layer - Self.bigBit
+            return i < bigLayers.count ? bigLayers[i] : nil
+        }
+        guard layer >= 0, layer < layers.count else { return nil }
+        return Self.upscale(layers[layer])
+    }
+
+    /// The 16px layer a 64px one is a 4x nearest blow-up of, or nil when it has
+    /// finer detail than that.
+    static func compact(_ px: [UInt8]) -> [UInt8]? {
+        let t = tile, st = smallTile, k = t / st
+        guard px.count == t * t * 4 else { return nil }
+        var out = [UInt8](repeating: 0, count: st * st * 4)
+        for sy in 0..<st { for sx in 0..<st {
+            let o = ((sy * k) * t + sx * k) * 4
+            for dy in 0..<k { for dx in 0..<k {
+                let q = (((sy * k + dy) * t) + sx * k + dx) * 4
+                if px[q] != px[o] || px[q+1] != px[o+1] || px[q+2] != px[o+2] || px[q+3] != px[o+3] { return nil }
+            } }
+            let d = (sy * st + sx) * 4
+            out[d] = px[o]; out[d+1] = px[o+1]; out[d+2] = px[o+2]; out[d+3] = px[o+3]
+        } }
+        return out
+    }
+
+    /// Every 4th pixel of a 64px image: an animation frame for a layer that
+    /// was stored small (its frames are the same pixel art).
+    static func shrink(_ px: [UInt8]) -> [UInt8] {
+        let t = tile, st = smallTile, k = t / st
+        var out = [UInt8](repeating: 0, count: st * st * 4)
+        for sy in 0..<st { for sx in 0..<st {
+            let o = ((sy * k) * t + sx * k) * 4, d = (sy * st + sx) * 4
+            out[d] = px[o]; out[d+1] = px[o+1]; out[d+2] = px[o+2]; out[d+3] = px[o+3]
+        } }
+        return out
+    }
+
+    static func upscale(_ px: [UInt8]) -> [UInt8] {
+        let t = tile, st = smallTile, k = t / st
+        var out = [UInt8](repeating: 0, count: t * t * 4)
+        for y in 0..<t { for x in 0..<t {
+            let o = ((y / k) * st + x / k) * 4, d = (y * t + x) * 4
+            out[d] = px[o]; out[d+1] = px[o+1]; out[d+2] = px[o+2]; out[d+3] = px[o+3]
+        } }
+        return out
+    }
+
+    /// Append a 64px layer, stored small when it's plain pixel art.
+    private func appendLayer(_ px: [UInt8]) -> Int {
+        if let small = Self.compact(px) { layers.append(small); return layers.count - 1 }
+        bigLayers.append(px)
+        return Self.bigBit + bigLayers.count - 1
+    }
 
     /// Carry the previous generation's layers and name->index tables into this
     /// (fresh) atlas before `build()`, so every tile that already had a number
@@ -81,6 +146,7 @@ public final class TextureAtlas {
     /// which the accompanying full remesh covers).
     public func seed(from prev: TextureAtlas, dropping: Set<String> = []) {
         layers = prev.layers
+        bigLayers = prev.bigLayers
         texLayer = prev.texLayer
         for t in dropping { texLayer[t] = nil }
         colorLayer = prev.colorLayer
@@ -162,7 +228,7 @@ public final class TextureAtlas {
                 guard let data = media.store[base],
                       let frames = TextureAtlas.decodePNGFrames(data, size: TextureAtlas.tile), frames.count > 1
                 else { continue }
-                animatedLayers.append(AnimLayer(layer: layer, frames: frames,
+                animatedLayers.append(AnimLayer(layer: layer, frames: layer >= Self.bigBit ? frames : frames.map(Self.shrink),
                                                 secPerFrame: max(0.05, secs / Float(frames.count))))
                 if base.contains("lava") {
                     var s = 0, c = 0, i = 0; let f = frames[0]
@@ -195,7 +261,7 @@ public final class TextureAtlas {
                     }
                 }
                 if frames.count > 1 {
-                    animatedLayers.append(AnimLayer(layer: layer, frames: frames,
+                    animatedLayers.append(AnimLayer(layer: layer, frames: layer >= Self.bigBit ? frames : frames.map(Self.shrink),
                                                     secPerFrame: max(0.05, secs / Float(frames.count))))
                 }
                 // Diagnose the black/speckled lava flow: did the frames
@@ -463,8 +529,11 @@ public final class TextureAtlas {
     // is what the renderer relies on.
     private var keyedLayers: [String: Int] = [:]
     private func rawLayer(_ key: String, _ px: [UInt8]) -> Int {
-        if let s = keyedLayers[key] { layers[s] = px; return s }
-        let l = layers.count; layers.append(px); keyedLayers[key] = l; return l
+        // Always big: these are overwritten in place as media arrives, so one
+        // can't move between the arrays (a flat placeholder, then a real icon).
+        if let s = keyedLayers[key], s >= Self.bigBit { bigLayers[s - Self.bigBit] = px; return s }
+        bigLayers.append(px)
+        let l = Self.bigBit + bigLayers.count - 1; keyedLayers[key] = l; return l
     }
 
     /// The 16 px node-tile evaluator, exposed for tests only.
@@ -473,8 +542,7 @@ public final class TextureAtlas {
     private func layerForTile(_ tile: String, media: MediaManager) -> Int? {
         if let l = texLayer[tile] { return l }
         guard let px = evaluate(tile, media: media) else { return nil }
-        let l = layers.count
-        layers.append(px)
+        let l = appendLayer(px)
         texLayer[tile] = l
         return l
     }
@@ -612,7 +680,7 @@ public final class TextureAtlas {
         let b = UInt8(max(0, min(255, c.z * 255)))
         let key = (UInt32(r) << 16) | (UInt32(g) << 8) | UInt32(b)
         if let l = colorLayer[key] { return l }
-        let n = TextureAtlas.tile * TextureAtlas.tile
+        let n = TextureAtlas.smallTile * TextureAtlas.smallTile
         var px = [UInt8](repeating: 255, count: n * 4)
         for i in 0..<n { px[i*4] = r; px[i*4+1] = g; px[i*4+2] = b; px[i*4+3] = 255 }
         let l = layers.count

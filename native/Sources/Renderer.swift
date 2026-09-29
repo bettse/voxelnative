@@ -159,7 +159,20 @@ actor Renderer {
 
     var rotation: Float = 0
 
-    var textureArray: MTLTexture?
+    var textureArray: MTLTexture?      // 16px node layers
+    var textureArrayBig: MTLTexture?   // 64px node layers (index >= TextureAtlas.bigBit)
+    /// Stands in for textureArrayBig until it exists: the atlas shaders declare
+    /// both arrays and pick one per layer index.
+    lazy var atlasBigPlaceholder: MTLTexture? = {
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm_srgb, width: 1, height: 1, mipmapped: false)
+        d.textureType = .type2DArray; d.arrayLength = 1; d.usage = .shaderRead
+        return device.makeTexture(descriptor: d)
+    }()
+    /// Both node atlas arrays, at the slots every atlas shader reads.
+    private func bindAtlas(_ enc: MTLRenderCommandEncoder) {
+        enc.setFragmentTexture(textureArray, index: TextureIndex.color.rawValue)
+        enc.setFragmentTexture(textureArrayBig ?? atlasBigPlaceholder, index: TextureIndex.colorBig.rawValue)
+    }
     let liquidPipelineState: MTLRenderPipelineState
     let liquidDepthState: MTLDepthStencilState
     var entityVertexBuffer: MTLBuffer
@@ -252,12 +265,12 @@ actor Renderer {
             mesh += b.opaqueVerts?.length ?? 0   // vertices and both index streams
             if let l = b.liquid { liquid += l.vertices.length + l.indices.length }
         }
-        let atlas = tex(textureArray)
+        let atlas = tex(textureArray) + tex(textureArrayBig)
         let model = tex(modelTextureArray)
         let sky = tex(skyboxTexture)
         let ents = entityVertexBuffer.length + modelVertexBuffer.length + modelBlendVertexBuffer.length
         print("[mem] gpu=\(mb(device.currentAllocatedSize))MB meshes=\(mb(mesh))MB/\(worldBlocks.count) blocks liquid=\(mb(liquid))MB " +
-              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)) " +
+              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)+\(textureArrayBig?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)) " +
               "sky=\(mb(sky))MB ents=\(mb(ents))MB \(WorldSession.healthNote())"); fflush(stdout)
     }
     // Sun (layer 0) and moon (layer 1) textures, SkyboxHandoff.bodySize square.
@@ -1713,6 +1726,7 @@ actor Renderer {
         // Swap the node atlas in the SAME frame as the mesh it was built with,
         // so blocks never sample a grown atlas with stale layer indices.
         if let a = d.atlas { textureArray = a; animLayers = d.animated; animLastFrame.removeAll() }
+        if let ab = d.atlasBig { textureArrayBig = ab }
         #if !targetEnvironment(simulator)
         // The block set changed: refresh every in-flight slot's residency set
         // over the next few frames (each on its own frame, never while in use).
@@ -1731,10 +1745,14 @@ actor Renderer {
     private var animLayers: [TextureAtlas.AnimLayer] = []
     private var animLastFrame: [Int: Int] = [:]
     private func stepTileAnimation() {
-        guard !animLayers.isEmpty, let tex = textureArray else { return }
+        guard !animLayers.isEmpty, let small = textureArray else { return }
         let now = AppClock.seconds
-        let edge = TextureAtlas.tile, need = edge * edge * 4
-        for a in animLayers where a.frames.count > 1 && a.layer < tex.arrayLength {
+        for a in animLayers where a.frames.count > 1 {
+            let big = a.layer >= TextureAtlas.bigBit
+            guard let tex = big ? textureArrayBig : small else { continue }
+            let slice = big ? a.layer - TextureAtlas.bigBit : a.layer
+            let edge = big ? TextureAtlas.tile : TextureAtlas.smallTile, need = edge * edge * 4
+            guard slice < tex.arrayLength else { continue }
             let idx = Int(now / Double(a.secPerFrame)) % a.frames.count
             if animLastFrame[a.layer] == idx { continue }
             animLastFrame[a.layer] = idx
@@ -1742,7 +1760,7 @@ actor Renderer {
             guard px.count == need else { continue }
             // Whole mip chain per frame step (a 64x64 box filter, microseconds)
             // so a far lava pool animates instead of freezing on frame 0's mips.
-            TileMips.upload(tex, slice: a.layer, px: px, edge: edge)
+            TileMips.upload(tex, slice: slice, px: px, edge: edge)
         }
     }
 
@@ -2535,7 +2553,7 @@ actor Renderer {
         renderEncoder.setDepthStencilState(depthState)
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(vpBuffer, offset: vpOffset, index: BufferIndex.viewProjection.rawValue)
-        if let tex = textureArray { renderEncoder.setFragmentTexture(tex, index: TextureIndex.color.rawValue) }
+        if textureArray != nil { bindAtlas(renderEncoder) }
 
         // Frustum cull (perf #1): draw only the blocks in view. Test each block's
         // node-space AABB (key*16 .. +16, shifted to mesh space) against the left
@@ -2730,7 +2748,7 @@ actor Renderer {
         if hudIndexCount > 0, textureArray != nil {
             renderEncoder.setRenderPipelineState(entityPipelineState)
             renderEncoder.setDepthStencilState(noDepthState)   // always visible, even against an indoor wall
-            renderEncoder.setFragmentTexture(textureArray, index: TextureIndex.color.rawValue)
+            bindAtlas(renderEncoder)
             renderEncoder.setVertexBuffer(hudVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle,
                                                 indexCount: hudIndexCount,
@@ -2760,7 +2778,7 @@ actor Renderer {
         if handHudIndexCount > 0, textureArray != nil {
             renderEncoder.setRenderPipelineState(entityPipelineState)
             renderEncoder.setDepthStencilState(handHudDepthState)
-            renderEncoder.setFragmentTexture(textureArray, index: TextureIndex.color.rawValue)
+            bindAtlas(renderEncoder)
             renderEncoder.setVertexBuffer(handHudVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: handHudIndexCount,
                                                 indexType: .uint32, indexBuffer: handHudIndexBuffer, indexBufferOffset: 0)
@@ -2929,6 +2947,7 @@ actor Renderer {
         ]
         if #available(visionOS 26.0, *) { perFrame.append(contentsOf: drawable.trackingAreasTextures as [any MTLAllocation]) }
         if let tex = textureArray { perFrame.append(tex) }
+        if let tex = textureArrayBig { perFrame.append(tex) }
         if let mtex = modelTextureArray { perFrame.append(mtex) }
         if capture {
             ensurePhotoTargets()

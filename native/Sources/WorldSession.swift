@@ -5366,8 +5366,7 @@ final class WorldSession {
         // shows a hole.
         if let ai = atlas.tileLayer(tile) ?? NodeRegistry.imageNames(tile).first.flatMap({ atlas.tileLayer($0) }) {
             let i = Int(ai)
-            if i >= 0, i < atlas.layers.count {
-                let src = atlas.layers[i]
+            if let src = atlas.pixels(i) {
                 let t = TextureAtlas.tile, cn = ModelTextureHandoff.size
                 if src.count >= t * t * 4 {
                     var px = [UInt8](repeating: 0, count: cn * cn * 4)
@@ -10443,7 +10442,7 @@ final class WorldSession {
         // that is also a node face tile keeps the count identical but shifts every
         // layer after it, so the renderer kept the old texture while the mesh
         // was rebuilt against the new order (every block drew the wrong tile).
-        let atlasLayers: [[UInt8]]? = atlasGeneration != lastPostedAtlasGen ? atlas.layers : nil
+        let atlasLayers: (small: [[UInt8]], big: [[UInt8]])? = atlasGeneration != lastPostedAtlasGen ? (atlas.layers, atlas.bigLayers) : nil
         if atlasLayers != nil { lastPostedAtlasGen = atlasGeneration }
         // Animated tile frames travel with the atlas; captured on the
         // session queue so the mesher block doesn't touch the atlas cross-thread.

@@ -33,6 +33,7 @@ typedef NS_ENUM(EnumBackingType, VertexAttribute)
 typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
     TextureIndexColor         = 0,
+    TextureIndexColorBig      = 4,   // 64px node atlas layers (see sampleAtlas)
 };
 
 typedef struct
