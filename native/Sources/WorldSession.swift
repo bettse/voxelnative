@@ -4529,7 +4529,9 @@ final class WorldSession {
     /// A tapped field (opens the keyboard) or button (submits) on the panel.
     private func tapWidget(_ w: InvWidget) {
         if let f = w.field {
-            openKeyboard(prefill: f.value) { [weak self] text in self?.submitFormFields([f.name: text]) }
+            // "done" is desktop's Enter, which also sends key_enter_field: the
+            // recipe book only searches on that (or its search button).
+            openKeyboard(prefill: f.value) { [weak self] text in self?.submitFormFields([f.name: text, "key_enter_field": f.name]) }
         } else if let b = w.button {
             submitFormFields([b.name: "true"])
             print("[formspec] tap \(b.name) form='\(formspecName)'"); fflush(stdout)
@@ -6304,6 +6306,13 @@ final class WorldSession {
                 return abs(u - w.u) <= w.hw && abs(v - w.v) <= w.hh
             } ?? false
             if over, !formspecTooltips.isEmpty, let nm = w.button?.name ?? w.field?.name, let tip = formspecTooltips[nm] { tipText = tip }
+            // No tooltip[] for an item_image_button: desktop shows the item's
+            // name anyway, and the recipe book only adds tooltips for group,
+            // cooking and fuel items, so most of its items showed nothing.
+            else if over, let item = w.button?.itemName.split(separator: " ").first, !item.isEmpty {
+                let d = client.items.descriptionColored(for: String(item))
+                if !d.text.isEmpty { tipText = (d.text, d.color) }
+            }
             let plate = fr.center + fr.right * w.u + fr.up * w.v - toward * 0.005
             appendQuad(center: toOrigin(plate), right: oRight, up: oUp, hw: w.hw, hh: w.hh,
                        layer: highlightLayer, tint: over ? Self.packTint(90, 90, 110) : Self.packTint(45, 45, 55), v: &v, idx: &idx)
@@ -6882,10 +6891,11 @@ final class WorldSession {
         // The pause menu goes after the XP level, server HUD and nametags: the
         // overlay has no depth test, so later quads paint over earlier ones and
         // the level digits used to sit on top of the menu panel (device shot).
-        // The keyboard (bug notes) and panels still draw over the menu.
+        // Panels draw over the menu, and the keyboard over both: a panel's text
+        // field (recipe book search) opens it while the panel stays up.
         appendKogane(gaze: aimDir, cosY: cy, sinY: sy, v: &ov, idx: &oi)
-        appendKeyboard(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         appendInventoryPanel(eye: eye, cosY: cy, sinY: sy, billboards: &billboards, v: &ov, idx: &oi)
+        appendKeyboard(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         // Split once here (tick thread) into world billboards + head-locked HUD so
         // the renderer reads two ready-made lists instead of filtering twice/frame.
         var worldB: [EntityInstance] = [], hudB: [EntityInstance] = []
