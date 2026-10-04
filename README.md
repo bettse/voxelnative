@@ -10,6 +10,8 @@ but the protocol layer is game-agnostic and will connect to any Luanti server.
 
 🌐 **Website:** https://bettse.github.io/voxelnative/
 
+[![Join the TestFlight beta](https://img.shields.io/badge/TestFlight-Join_the_beta-0D96F6?style=for-the-badge&logo=apple&logoColor=white)](https://testflight.apple.com/join/n6sD7wYX)
+
 > [!IMPORTANT]
 > **🤖 AI disclaimer.** This project was built largely with the help of an AI
 > coding assistant (an LLM). The code, comments, and this README may contain
