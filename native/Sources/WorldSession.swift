@@ -7089,36 +7089,24 @@ final class WorldSession {
         let frac = max(0, min(1, fraction))
         let hudDist = Self.xpHudDist
         // A flat row across the bottom of view, just above the hearts / hunger
-        // rows. It used to bow (+0.35 rad/rad^2, the ends 1.5 degrees above
-        // the centre) and read as bent next to the level rows (Eric).
-        // Segments are camera-facing billboards along the row;
-        // the green fill covers the left `fraction` of them, with the
-        // straddling segment filled partway.
-        let n = 12
-        let azMin: Float = -0.28, azMax: Float = 0.28
-        let baseElev = xpBarElev(), bowXp: Float = 0
-        let segAz = (azMax - azMin) / Float(n)
-        let segW = 2 * hudDist * tan(segAz * 0.5) * 1.08   // slight overlap kills gaps
-        let height: Float = 0.02 * hudDist
+        // rows: one track quad and one fill quad over its left `fraction`.
+        // It used to be 12 segments on an arc, each at its own depth and
+        // height, and those offsets read as a staircase whenever the head
+        // pitched or rolled (Eric's device shot by a wall).
+        let az: Float = 0.28
         let (fwd, right, up) = stableFrame(gaze, horizFwd: player.bodyForward())
-        for i in 0..<n {
-            let az = azMin + (Float(i) + 0.5) * segAz
-            let e = baseElev + bowXp * az * az
-            let dir = simd_normalize(fwd + right * tan(az) + up * tan(e))
-            let center = origin + dir * hudDist
-            billboards.append(EntityInstance(pos: center - SIMD3(0, height * 0.5, 0),
-                                             width: segW, height: height,
-                                             layer: Float(atlas.xpTrackLayer), light: 255))
-            // Fill fraction of this segment: full left of `frac`, partial across it.
-            let p = max(0, min(1, frac * Float(n) - Float(i)))
-            if p > 0.001 {
-                let fw = segW * p
-                let fdir = simd_normalize(fwd + right * tan(az) + up * tan(e))
-                let fc = origin + fdir * (hudDist - 0.01) - right * ((segW - fw) * 0.5)
-                billboards.append(EntityInstance(pos: fc - SIMD3(0, height * 0.5, 0),
-                                                 width: fw, height: height,
-                                                 layer: Float(atlas.xpFillLayer), light: 255))
-            }
+        let center = origin + simd_normalize(fwd + up * tan(xpBarElev())) * hudDist
+        let width = 2 * hudDist * tan(az)
+        let height: Float = 0.02 * hudDist
+        billboards.append(EntityInstance(pos: center - SIMD3(0, height * 0.5, 0),
+                                         width: width, height: height,
+                                         layer: Float(atlas.xpTrackLayer), light: 255))
+        if frac > 0.001 {
+            let fw = width * frac
+            let fc = center - right * ((width - fw) * 0.5) + simd_normalize(center - origin) * -0.005
+            billboards.append(EntityInstance(pos: fc - SIMD3(0, height * 0.5, 0),
+                                             width: fw, height: height,
+                                             layer: Float(atlas.xpFillLayer), light: 255))
         }
     }
 
