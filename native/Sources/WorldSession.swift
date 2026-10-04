@@ -6585,7 +6585,22 @@ final class WorldSession {
         var info = task_vm_info_data_t(), count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
         let kr = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) } }
         let usedMB = kr == KERN_SUCCESS ? Int(info.phys_footprint / (1024 * 1024)) : -1
-        return "thermal=\(t) memUsed=\(usedMB)MB memFree=\(freeMB)MB"
+        return "thermal=\(t) memUsed=\(usedMB)MB memFree=\(freeMB)MB sysFree=\(systemFreeMB())MB"
+    }
+
+    /// The headset's free + reclaimable memory (free, inactive, purgeable
+    /// pages), not just our allowance: visionOS closes the world when the
+    /// whole system runs short, while os_proc_available_memory still reports
+    /// gigabytes for us. -1 if the host query fails.
+    static func systemFreeMB() -> Int {
+        var vm = vm_statistics64_data_t()
+        var n = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &vm) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(n)) { host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &n) }
+        }
+        guard kr == KERN_SUCCESS else { return -1 }
+        let pages = UInt64(vm.free_count) + UInt64(vm.inactive_count) + UInt64(vm.purgeable_count)
+        return Int(pages * UInt64(vm_kernel_page_size) / (1024 * 1024))
     }
 
     private func postEntities() {
