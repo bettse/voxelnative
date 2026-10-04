@@ -172,6 +172,13 @@ actor Renderer {
     private func bindAtlas(_ enc: MTLRenderCommandEncoder) {
         enc.setFragmentTexture(textureArray, index: TextureIndex.color.rawValue)
         enc.setFragmentTexture(textureArrayBig ?? atlasBigPlaceholder, index: TextureIndex.colorBig.rawValue)
+        Self.noModelMap(enc)
+    }
+    /// mapCount 0: the entity shaders sample the node atlas by layer number.
+    private static func noModelMap(_ enc: MTLRenderCommandEncoder) {
+        var z: UInt32 = 0, m: UInt16 = 0
+        enc.setFragmentBytes(&m, length: 2, index: BufferIndex.modelMap.rawValue)
+        enc.setFragmentBytes(&z, length: 4, index: BufferIndex.modelMap.rawValue + 1)
     }
     let liquidPipelineState: MTLRenderPipelineState
     let liquidDepthState: MTLDepthStencilState
@@ -266,11 +273,11 @@ actor Renderer {
             if let l = b.liquid { liquid += l.vertices.length + l.indices.length }
         }
         let atlas = tex(textureArray) + tex(textureArrayBig)
-        let model = tex(modelTextureArray)
+        let model = tex(modelTextureArray) + tex(appModel.modelTextureHandoff.gpuSmall)
         let sky = tex(skyboxTexture)
         let ents = entityVertexBuffer.length + modelVertexBuffer.length + modelBlendVertexBuffer.length
         print("[mem] gpu=\(mb(device.currentAllocatedSize))MB meshes=\(mb(mesh))MB/\(worldBlocks.count) blocks liquid=\(mb(liquid))MB " +
-              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)+\(textureArrayBig?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)) " +
+              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)+\(textureArrayBig?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)+\(appModel.modelTextureHandoff.gpuSmall?.arrayLength ?? 0)) " +
               "sky=\(mb(sky))MB ents=\(mb(ents))MB \(WorldSession.healthNote())"); fflush(stdout)
     }
     // Sun (layer 0) and moon (layer 1) textures, SkyboxHandoff.bodySize square.
@@ -2302,74 +2309,110 @@ actor Renderer {
     /// Build the full-res mob-skin texture array (one 128x128 layer per skin).
     private func consumeModelTextureHandoff() {
         let upd = appModel.modelTextureHandoff.take()
-        let edge = ModelTextureHandoff.size, need = edge * edge * 4
-        let region = MTLRegionMake2D(0, 0, edge, edge)
-        // The layer count grew. The array is append-only (a layer's identity
-        // never changes; pixel edits arrive as patches), so growing means
-        // uploading ONLY the new slices. Allocate with headroom so the common
-        // grow (a new icon, nametag, skin) fits in place; reallocation -- a
-        // fresh 50-60 MB texture plus re-copying every layer on the render
-        // thread -- now happens once per 64 layers instead of once per layer
-        // (it was ~230 times a session, a multi-ms stall each; perf review #3).
+        let need = ModelTextureHandoff.size * ModelTextureHandoff.size * 4
+        // The layer count grew. Layer numbers are append-only (a layer's
+        // identity never changes; pixel edits arrive as patches), so only the
+        // new layers need uploading. Layers the session already handed over
+        // stay where they are on the GPU (it drops their pixels).
         if let texs = upd.full, !texs.isEmpty {
-            @inline(__always) func upload(_ tex: MTLTexture, _ i: Int) {
-                let mt = texs[i]
-                guard mt.rgba.count == need else { return }
-                mt.rgba.withUnsafeBytes { raw in
-                    guard let base = raw.baseAddress else { return }
-                    tex.replace(region: region, mipmapLevel: 0, slice: i,
-                                withBytes: base, bytesPerRow: edge * 4, bytesPerImage: need)
-                }
-            }
-            if let tex = modelTextureArray, texs.count <= tex.arrayLength, texs.count >= modelArrayLogical {
-                // Fits: only the layers beyond what we already hold are new.
-                for i in modelArrayLogical..<texs.count { upload(tex, i) }
-                modelArrayLogical = texs.count
-                appModel.modelTextureHandoff.reportBuilt(texs.count)   // ack so the producer knows the array actually grew
-                print("[model] grew to \(texs.count) layers (capacity \(tex.arrayLength))"); fflush(stdout)
-            } else {
-                let desc = MTLTextureDescriptor()
-                desc.textureType = .type2DArray
-                desc.pixelFormat = .rgba8Unorm_srgb
-                desc.width = edge; desc.height = edge
-                desc.arrayLength = min(WorldSession.maxTextureLayers, (texs.count + 63) / 64 * 64)   // headroom, under Metal's slice cap
-                desc.usage = .shaderRead
-                // On failure leave the old array + logical count alone: builtCount
-                // stays behind postedCount and the producer re-posts (self-heal).
-                guard let tex = device.makeTexture(descriptor: desc) else { return }
-                // Existing layers are copied GPU to GPU (the session no longer
-                // keeps their pixels); only the new ones come from the post.
-                let keep = min(modelArrayLogical, desc.arrayLength, modelTextureArray?.arrayLength ?? 0)
-                if keep > 0, let old = modelTextureArray, let cb = commandQueue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
-                    blit.copy(from: old, sourceSlice: 0, sourceLevel: 0, to: tex, destinationSlice: 0, destinationLevel: 0,
-                              sliceCount: keep, levelCount: 1)
-                    blit.endEncoding(); cb.commit()
-                    // Wait for it: the patches below write slices with the CPU at
-                    // once, and a blit still in flight landed after them, putting
-                    // back the old picture. A count badge that reused a freed
-                    // item-name tile showed "Blo"/"ck" instead of its number.
-                    // Rebuilds are rare (every 64 new layers), so the wait is too.
-                    cb.waitUntilCompleted()
-                }
-                for i in keep..<min(texs.count, desc.arrayLength) { upload(tex, i) }
-                modelTextureArray = tex
-                modelArrayLogical = texs.count
-                appModel.modelTextureHandoff.reportBuilt(texs.count)
-                print("[model] rebuilt \(texs.count)-layer array (capacity \(desc.arrayLength))"); fflush(stdout)
-            }
+            let h = appModel.modelTextureHandoff
+            if h.gpuMap.count < texs.count { h.gpuMap += [UInt16](repeating: 0, count: texs.count - h.gpuMap.count) }
+            let from = min(modelArrayLogical, texs.count)
+            for i in from..<texs.count where texs[i].rgba.count == need { placeModelLayer(i, texs[i].rgba, fresh: true) }
+            modelArrayLogical = texs.count
+            h.reportBuilt(texs.count)   // ack so the producer knows the array actually grew
+            print("[model] \(texs.count) layers: \(h.bigUsed) full-size, \(h.smallUsed) small (capacity \(modelTextureArray?.arrayLength ?? 0)+\(h.gpuSmall?.arrayLength ?? 0))"); fflush(stdout)
         }
-        // In-place patches: rewrite only the changed layers of the existing array,
-        // no reallocation. This is the common case (chat, HUD timer, counts, XP).
-        // Applied AFTER any full above, so an edit to an existing layer that was
-        // queued alongside a grow still lands.
-        guard let tex = modelTextureArray, !upd.patches.isEmpty else { return }
+        // In-place patches (chat, HUD timer, counts, XP, a reused icon layer),
+        // applied AFTER any full above, so an edit queued alongside a grow lands.
         for p in upd.patches where p.index < modelArrayLogical && p.rgba.count == need {
-            p.rgba.withUnsafeBytes { raw in
-                guard let base = raw.baseAddress else { return }
-                tex.replace(region: region, mipmapLevel: 0, slice: p.index,
-                            withBytes: base, bytesPerRow: edge * 4, bytesPerImage: need)
-            }
+            placeModelLayer(p.index, p.rgba, fresh: false)
         }
+    }
+
+    /// Store one model layer's pixels in the 32px array when they're a blow-up
+    /// of a 32px image (item icons), else the full-size one, moving it between
+    /// the two if a patch changed which it needs. Updates gpuMap.
+    private func placeModelLayer(_ i: Int, _ px: [UInt8], fresh: Bool) {
+        typealias H = ModelTextureHandoff
+        let h = appModel.modelTextureHandoff
+        // Small when it's a blow-up of a 32px image (item icons from the node
+        // atlas) or a small image in the top-left corner of a clear layer
+        // (inventory images placed at their own size).
+        var small = TileMips.compact(px, from: H.size, to: H.smallSize)
+        var cornerFlag = 0
+        if small == nil, let c = TileMips.corner(px, from: H.size, to: H.smallSize) { small = c; cornerFlag = H.cornerBit }
+        let cur = fresh ? nil : Int(h.gpuMap[i])
+        let curSmall = cur.map { $0 >= H.smallBit }
+        let curSmallSlot = cur.map { $0 & (H.cornerBit - 1) }
+        var slot: Int
+        if let small {
+            if curSmall == true { slot = curSmallSlot! }
+            else {
+                if let c = cur { h.bigFree.append(c) }
+                slot = h.smallFree.popLast() ?? { h.smallUsed += 1; return h.smallUsed - 1 }()
+            }
+            guard slot < H.cornerBit, let tex = growModelArray(small: true, slots: slot + 1) else { return }
+            let e = H.smallSize
+            small.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, e, e), mipmapLevel: 0, slice: slot,
+                                                withBytes: $0.baseAddress!, bytesPerRow: e * 4, bytesPerImage: e * e * 4) }
+            h.gpuMap[i] = UInt16(H.smallBit + cornerFlag + slot)
+        } else {
+            if curSmall == false { slot = cur! }
+            else {
+                if let c = curSmallSlot { h.smallFree.append(c) }
+                slot = h.bigFree.popLast() ?? { h.bigUsed += 1; return h.bigUsed - 1 }()
+            }
+            guard let tex = growModelArray(small: false, slots: slot + 1) else { return }
+            let e = H.size
+            px.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, e, e), mipmapLevel: 0, slice: slot,
+                                             withBytes: $0.baseAddress!, bytesPerRow: e * 4, bytesPerImage: e * e * 4) }
+            h.gpuMap[i] = UInt16(slot)
+        }
+    }
+
+    /// The full-size or 32px model array, grown to hold `slots` slices. A grow
+    /// allocates headroom (64 slices) and copies the old slices GPU to GPU, so
+    /// it happens once per 64 new layers, not per layer.
+    private func growModelArray(small: Bool, slots: Int) -> MTLTexture? {
+        let h = appModel.modelTextureHandoff
+        let old = small ? h.gpuSmall : modelTextureArray
+        if let old, old.arrayLength >= slots { return old }
+        guard slots <= WorldSession.maxTextureLayers else { return nil }
+        let e = small ? ModelTextureHandoff.smallSize : ModelTextureHandoff.size
+        let desc = MTLTextureDescriptor()
+        desc.textureType = .type2DArray
+        desc.pixelFormat = .rgba8Unorm_srgb
+        desc.width = e; desc.height = e
+        desc.arrayLength = min(WorldSession.maxTextureLayers, (slots + 63) / 64 * 64)
+        desc.usage = .shaderRead
+        guard let tex = device.makeTexture(descriptor: desc) else { return nil }
+        if let old, let cb = commandQueue.makeCommandBuffer(), let blit = cb.makeBlitCommandEncoder() {
+            blit.copy(from: old, sourceSlice: 0, sourceLevel: 0, to: tex, destinationSlice: 0, destinationLevel: 0,
+                      sliceCount: min(old.arrayLength, desc.arrayLength), levelCount: 1)
+            blit.endEncoding(); cb.commit()
+            // Wait for it: the uploads that follow write slices with the CPU at
+            // once, and a blit still in flight landed after them, putting back
+            // the old picture (a count badge showed "Blo"/"ck" once).
+            cb.waitUntilCompleted()
+        }
+        if small { h.gpuSmall = tex } else { modelTextureArray = tex }
+        return tex
+    }
+
+    /// The model arrays and their layer map, at the slots the entity shaders
+    /// read (the atlas draws pass mapCount 0 instead; see bindAtlas).
+    private func bindModel(_ enc: MTLRenderCommandEncoder, _ big: MTLTexture) {
+        let h = appModel.modelTextureHandoff
+        enc.setFragmentTexture(big, index: TextureIndex.color.rawValue)
+        enc.setFragmentTexture(h.gpuSmall ?? atlasBigPlaceholder, index: TextureIndex.colorBig.rawValue)
+        var n = UInt32(min(h.gpuMap.count, 2048))
+        if n > 0 {
+            h.gpuMap.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: Int(n) * 2, index: BufferIndex.modelMap.rawValue) }
+        } else {
+            var z: UInt16 = 0; enc.setFragmentBytes(&z, length: 2, index: BufferIndex.modelMap.rawValue)
+        }
+        enc.setFragmentBytes(&n, length: 4, index: BufferIndex.modelMap.rawValue + 1)
     }
 
     func renderFrame() {
@@ -2553,7 +2596,7 @@ actor Renderer {
         renderEncoder.setDepthStencilState(depthState)
         renderEncoder.setVertexBuffer(dynamicUniformBuffer, offset: uniformBufferOffset, index: BufferIndex.uniforms.rawValue)
         renderEncoder.setVertexBuffer(vpBuffer, offset: vpOffset, index: BufferIndex.viewProjection.rawValue)
-        if textureArray != nil { bindAtlas(renderEncoder) }
+        if textureArray != nil { bindAtlas(renderEncoder) } else { Self.noModelMap(renderEncoder) }
 
         // Frustum cull (perf #1): draw only the blocks in view. Test each block's
         // node-space AABB (key*16 .. +16, shifted to mesh space) against the left
@@ -2681,7 +2724,7 @@ actor Renderer {
         if modelIndexCount > 0, let mtex = modelTextureArray {
             renderEncoder.setRenderPipelineState(entityPipelineState)
             renderEncoder.setDepthStencilState(depthState)
-            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            bindModel(renderEncoder, mtex)
             renderEncoder.setVertexBuffer(modelVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             var fix = modelFix
             renderEncoder.setVertexBytes(&fix, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
@@ -2697,7 +2740,7 @@ actor Renderer {
         if modelBlendIndexCount > 0, let mtex = modelTextureArray {
             renderEncoder.setRenderPipelineState(entityBlendPipelineState)
             renderEncoder.setDepthStencilState(liquidDepthState)
-            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            bindModel(renderEncoder, mtex)
             renderEncoder.setVertexBuffer(modelBlendVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             var fix = modelFix
             renderEncoder.setVertexBytes(&fix, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
@@ -2788,7 +2831,7 @@ actor Renderer {
         if handHudTextIndexCount > 0, let mtex = modelTextureArray {
             renderEncoder.setRenderPipelineState(entityPipelineState)
             renderEncoder.setDepthStencilState(handHudDepthState)
-            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            bindModel(renderEncoder, mtex)
             renderEncoder.setVertexBuffer(handHudTextVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: handHudTextIndexCount,
                                                 indexType: .uint32, indexBuffer: handHudTextIndexBuffer, indexBufferOffset: 0)
@@ -2798,7 +2841,7 @@ actor Renderer {
         if overlayIndexCount > 0, let mtex = modelTextureArray {
             renderEncoder.setRenderPipelineState(entityPipelineState)
             renderEncoder.setDepthStencilState(noDepthState)
-            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            bindModel(renderEncoder, mtex)
             renderEncoder.setVertexBuffer(overlayVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: overlayIndexCount,
                                                 indexType: .uint32, indexBuffer: overlayIndexBuffer, indexBufferOffset: 0)
@@ -2806,7 +2849,7 @@ actor Renderer {
         if pointerIndexCount > 0, let mtex = modelTextureArray {
             renderEncoder.setRenderPipelineState(entityPipelineState)
             renderEncoder.setDepthStencilState(noDepthState)
-            renderEncoder.setFragmentTexture(mtex, index: TextureIndex.color.rawValue)
+            bindModel(renderEncoder, mtex)
             renderEncoder.setVertexBuffer(pointerVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
             renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: pointerIndexCount,
                                                 indexType: .uint32, indexBuffer: pointerIndexBuffer, indexBufferOffset: 0)
@@ -2949,6 +2992,7 @@ actor Renderer {
         if let tex = textureArray { perFrame.append(tex) }
         if let tex = textureArrayBig { perFrame.append(tex) }
         if let mtex = modelTextureArray { perFrame.append(mtex) }
+        if let s = appModel.modelTextureHandoff.gpuSmall { perFrame.append(s) }
         if capture {
             ensurePhotoTargets()
             perFrame.append(contentsOf: photoTargets?.allocations ?? [])

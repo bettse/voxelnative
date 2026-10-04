@@ -93,6 +93,21 @@ final class ModelTextureHandoff {
     /// its CPU copy of each layer once it's on the GPU. Render thread only.
     var gpuArray: MTLTexture?
     var gpuLogical = 0
+    /// Most layers are 16px item icons blown up to `size`, 1/64th of the
+    /// memory at `smallSize`: the renderer stores a layer that's a blow-up of a
+    /// smallSize image in `gpuSmall` instead, and `gpuMap` says where each
+    /// layer number lives (a gpuArray slot, or smallBit + a gpuSmall slot). A
+    /// session's icons and labels grew gpuArray past 200 MB. Render thread only.
+    static let smallSize = 32
+    static let smallBit = 32768
+    /// With smallBit: the small slot holds the layer's top-left corner (an icon
+    /// placed at its own size, the rest clear), so the shader scales uv by
+    /// size/smallSize. Small slots stay below cornerBit.
+    static let cornerBit = 16384
+    var gpuSmall: MTLTexture?
+    var gpuMap: [UInt16] = []
+    var bigUsed = 0, smallUsed = 0
+    var bigFree: [Int] = [], smallFree: [Int] = []
     var builtCount: Int { lock.lock(); defer { lock.unlock() }; return _builtCount }
 
     /// Queue a full layer set. Patches queued alongside are KEPT, not folded

@@ -257,6 +257,40 @@ final class MeshHandoff {
 enum TileMips {
     static func levelCount(edge: Int) -> Int { Int(log2(Double(edge))) + 1 }
 
+    /// The top-left `to` x `to` corner of a `from` x `from` RGBA image when
+    /// everything outside it is clear (a small icon placed at its own size),
+    /// else nil.
+    static func corner(_ px: [UInt8], from: Int, to: Int) -> [UInt8]? {
+        guard to <= from, px.count == from * from * 4 else { return nil }
+        return px.withUnsafeBytes { raw -> [UInt8]? in
+            let w = raw.bindMemory(to: UInt32.self)
+            for y in 0..<from { for x in (y < to ? to : 0)..<from where w[y * from + x] != 0 { return nil } }
+            var out = [UInt32](repeating: 0, count: to * to)
+            for y in 0..<to { for x in 0..<to { out[y * to + x] = w[y * from + x] } }
+            return out.withUnsafeBytes { Array($0) }
+        }
+    }
+
+    /// The `to` x `to` image a `from` x `from` RGBA image is a nearest blow-up
+    /// of (every k x k cell one colour), or nil when it has finer detail.
+    static func compact(_ px: [UInt8], from: Int, to: Int) -> [UInt8]? {
+        let k = from / to
+        guard k >= 1, px.count == from * from * 4 else { return nil }
+        return px.withUnsafeBytes { raw -> [UInt8]? in
+            let w = raw.bindMemory(to: UInt32.self)
+            var out = [UInt32](repeating: 0, count: to * to)
+            for sy in 0..<to { for sx in 0..<to {
+                let c = w[(sy * k) * from + sx * k]
+                for dy in 0..<k {
+                    let row = (sy * k + dy) * from + sx * k
+                    for dx in 0..<k where w[row + dx] != c { return nil }
+                }
+                out[sy * to + sx] = c
+            } }
+            return out.withUnsafeBytes { Array($0) }
+        }
+    }
+
     /// Levels 1..n for a `edge` x `edge` tile (level 0 is `px` itself).
     /// Premultiplied colour averages correctly with a plain box filter. For
     /// cutout tiles (leaves, plants: some texels above the 0.5 alpha test,

@@ -274,6 +274,23 @@ static half4 sampleAtlas(texture2d_array<half> atlas, texture2d_array<half> big,
     return layer >= 32768u ? big.sample(s, uv, layer - 32768u) : atlas.sample(s, uv, layer);
 }
 
+// Mob, icon and text layers (the model-texture array) are split the same way
+// but by slot, not by number: the renderer moves a layer between a full-size
+// array (bound as `atlas`) and a 32px one (bound as `atlasBig`) as its pixels
+// change, so it passes a layer -> slot map; slots from 32768 are in the 32px
+// array. mapCount is 0 for atlas draws, which sample by layer as above.
+static half4 sampleModel(texture2d_array<half> atlas, texture2d_array<half> big,
+                         constant ushort *map, constant uint &mapCount,
+                         sampler s, float2 uv, uint layer)
+{
+    if (mapCount == 0u) { return sampleAtlas(atlas, big, s, uv, layer); }
+    uint m = layer < mapCount ? uint(map[layer]) : 0u;
+    if (m < 32768u) { return atlas.sample(s, uv, m); }
+    // 16384 flags a layer stored as its top-left 32px corner (256 / 32 = 8).
+    float2 suv = (m & 16384u) != 0u ? uv * 8.0 : uv;
+    return big.sample(s, suv, m & 16383u);
+}
+
 // Cutout world (leaves, plants, nodeboxes): alpha-tests, so it cannot use
 // early-Z. The solid world uses fragmentShaderOpaque below instead.
 fragment float4 fragmentShader(ColorInOut in [[stage_in]],
@@ -313,10 +330,12 @@ static float3 shadeEntity(half3 rgb, ColorInOut in, constant Uniforms & uniforms
 fragment float4 entityFragment(ColorInOut in [[stage_in]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                                texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
-                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]],
+                               constant ushort *modelMap [[ buffer(BufferIndexModelMap) ]],
+                               constant uint &mapCount [[ buffer(BufferIndexModelMap + 1) ]])
 {
     constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-    half4 c = sampleAtlas(atlas, atlasBig, s, in.uv, in.layer);
+    half4 c = sampleModel(atlas, atlasBig, modelMap, mapCount, s, in.uv, in.layer);
     if (c.a < 0.5h) { discard_fragment(); }
     half3 rgb = c.a > 0.0h ? c.rgb / c.a : c.rgb;
     return float4(shadeEntity(rgb, in, uniforms), 1.0);
@@ -327,10 +346,12 @@ fragment float4 entityFragment(ColorInOut in [[stage_in]],
 fragment float4 entityBlendFragment(ColorInOut in [[stage_in]],
                                     constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
                                     texture2d_array<half> atlas [[ texture(TextureIndexColor) ]],
-                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]])
+                               texture2d_array<half> atlasBig [[ texture(TextureIndexColorBig) ]],
+                               constant ushort *modelMap [[ buffer(BufferIndexModelMap) ]],
+                               constant uint &mapCount [[ buffer(BufferIndexModelMap + 1) ]])
 {
     constexpr sampler s(mag_filter::nearest, min_filter::nearest);
-    half4 c = sampleAtlas(atlas, atlasBig, s, in.uv, in.layer);
+    half4 c = sampleModel(atlas, atlasBig, modelMap, mapCount, s, in.uv, in.layer);
     if (c.a < 0.02h) { discard_fragment(); }
     return float4(shadeEntity(c.rgb / c.a, in, uniforms), float(c.a));
 }
