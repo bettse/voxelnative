@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxelNative Controls</title>
+<meta name="description" content="Every PlayStation VR2 Sense controller button and Bluetooth keyboard key in VoxelNative, and what it does.">
+<style>
+  :root {
+    --bg:#111418; --line:#282e36; --panel:#171b20;
+    --text:#e8eaed; --dim:#a3adb8; --faint:#7c8894;
+    --accent:#9ccc65;   /* same grass green as the main page */
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a { color:var(--accent); }
+  .wrap { max-width:1000px; margin:0 auto; padding:0 22px; }
+  .kicker { color:var(--faint); font-size:14px; margin:0 0 10px; }
+  section { padding:40px 0; border-bottom:1px solid var(--line); }
+  h1 { font-size:32px; margin:0 0 10px; letter-spacing:-.4px; }
+  h2 { font-size:22px; margin:0 0 12px; letter-spacing:-.3px; }
+  h3 { font-size:17px; margin:26px 0 10px; color:var(--dim); }
+  p { max-width:70ch; }
+  .note { color:var(--dim); font-size:14.5px; }
+  table { width:100%; border-collapse:collapse; margin:6px 0 4px; font-size:15px; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--faint); font-weight:600; font-size:13px; text-transform:uppercase; letter-spacing:.05em; }
+  td:first-child { white-space:nowrap; width:34%; }
+  kbd {
+    display:inline-block; min-width:1.6em; padding:1px 7px; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:6px; background:var(--panel); font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; text-align:center;
+  }
+  ul.list { padding-left:20px; }
+  ul.list li { margin:7px 0; }
+  footer { padding:34px 0 60px; color:var(--faint); font-size:13.5px; }
+  @media (max-width:640px) {
+    td:first-child { white-space:normal; width:42%; }
+    th, td { padding:8px 6px; }
+  }
+</style>
+</head>
+<body>
+
+<section>
+  <div class="wrap">
+    <p class="kicker"><a href="./">VoxelNative</a></p>
+    <h1>Controls</h1>
+    <p>You look around with your head, like any visionOS app. Everything else comes from a pair of PlayStation VR2 Sense controllers or a Bluetooth keyboard (with your gaze doing the aiming). The keyboard keys follow desktop Luanti's defaults where they can, so desktop habits carry over.</p>
+  </div>
+</section>
+
+<section id="controllers">
+  <div class="wrap">
+    <h2>PlayStation VR2 Sense controllers</h2>
+    <p class="note">Turn both controllers on before launching if you can. A controller paired later still works; it just shows up a moment after it connects.</p>
+
+    <h3>Left hand</h3>
+    <table>
+      <tr><th>Input</th><th>Does</th></tr>
+      <tr><td>Stick</td><td>Walk (forward, back, strafe)</td></tr>
+      <tr><td>Stick click</td><td>Sneak (hold)</td></tr>
+      <tr><td>Trigger</td><td>Jump (hold to swim up or climb)</td></tr>
+      <tr><td>Grip</td><td>Sprint (hold)</td></tr>
+      <tr><td>Square / Triangle</td><td>Previous / next hotbar slot</td></tr>
+      <tr><td>Thumb resting on Square + Triangle, twist your wrist</td><td>Spin through the hotbar (clockwise is next; twist further to go faster, one tick per slot)</td></tr>
+      <tr><td>Create</td><td>Tap for a photo, hold for a short video clip</td></tr>
+    </table>
+
+    <h3>Right hand</h3>
+    <table>
+      <tr><th>Input</th><th>Does</th></tr>
+      <tr><td>Stick left / right</td><td>Turn</td></tr>
+      <tr><td>Stick click</td><td>Clear the join and server messages</td></tr>
+      <tr><td>Trigger</td><td>Dig / attack (hold to keep digging)</td></tr>
+      <tr><td>Grip</td><td>Place / use (hold to eat, or to draw a bow)</td></tr>
+      <tr><td>Trigger + grip together</td><td>Drop the item you're holding</td></tr>
+      <tr><td>Circle</td><td>Open / close your inventory</td></tr>
+      <tr><td>Options</td><td>Pause menu; also backs out of an open panel</td></tr>
+    </table>
+    <p class="note">You aim with your head: the block highlight and what you dig or place follow the centre of your view. With a bow or crossbow in hand, a ring shows where the arrow will land.</p>
+  </div>
+</section>
+
+<section id="panels">
+  <div class="wrap">
+    <h2>Inventory, chests and other panels</h2>
+    <p>Panels (inventory, chests, furnaces, the crafting table, the recipe book) float in front of you. Point at them with the right controller (or your gaze, if it isn't tracked).</p>
+    <table>
+      <tr><th>Input</th><th>Does</th></tr>
+      <tr><td>Right trigger</td><td>Pick up or put down a whole stack, press buttons, open a text field</td></tr>
+      <tr><td>Right grip</td><td>Put down one item, or pick up half a stack</td></tr>
+      <tr><td>Left grip + right trigger</td><td>Quick-move a stack to the other side (desktop's shift-click)</td></tr>
+      <tr><td>Hover</td><td>Shows the item's name</td></tr>
+      <tr><td>Right Circle / Options</td><td>Close the panel</td></tr>
+    </table>
+    <p class="note">Text fields (signs, the recipe book search) open an on-screen keyboard you type on with the trigger. "done" submits, like pressing Enter.</p>
+  </div>
+</section>
+
+<section id="keyboard">
+  <div class="wrap">
+    <h2>Bluetooth keyboard</h2>
+    <p>With a keyboard, your gaze aims: you dig and place whatever you're looking at.</p>
+    <table>
+      <tr><th>Key</th><th>Does</th></tr>
+      <tr><td><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or <kbd>↑</kbd> <kbd>↓</kbd></td><td>Walk and strafe</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Turn</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>Jump</td></tr>
+      <tr><td><kbd>Shift</kbd></td><td>Sneak</td></tr>
+      <tr><td><kbd>E</kbd> or <kbd>Left Ctrl</kbd></td><td>Sprint</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Dig / attack</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Place / use</td></tr>
+      <tr><td><kbd>I</kbd></td><td>Open / close your inventory</td></tr>
+      <tr><td><kbd>Q</kbd> (<kbd>Shift</kbd>+<kbd>Q</kbd>)</td><td>Drop the held stack (just one item)</td></tr>
+      <tr><td><kbd>1</kbd> … <kbd>9</kbd></td><td>Pick a hotbar slot</td></tr>
+      <tr><td><kbd>B</kbd> / <kbd>N</kbd> or <kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next hotbar slot</td></tr>
+      <tr><td><kbd>P</kbd> or <kbd>F12</kbd></td><td>Take a photo</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Pause menu; closes a panel or the on-screen keyboard first</td></tr>
+    </table>
+
+    <h3>In a panel</h3>
+    <table>
+      <tr><th>Key</th><th>Does</th></tr>
+      <tr><td><kbd>Enter</kbd></td><td>Click the slot you're looking at (take or put the whole stack)</td></tr>
+      <tr><td><kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Put one item</td></tr>
+      <tr><td><kbd>E</kbd> / <kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>Quick-move a stack</td></tr>
+    </table>
+    <p class="note">Look-and-pinch also works for clicking: pinch while looking at something, like pressing <kbd>Enter</kbd>. A paired trackpad or mouse doesn't reach an immersive game on visionOS today, so plan on the keyboard or the controllers.</p>
+  </div>
+</section>
+
+<section id="menu">
+  <div class="wrap">
+    <h2>Pause menu</h2>
+    <p>Right Options (or <kbd>Esc</kbd>) opens it. Move with either stick or the arrow keys, pick with a trigger or <kbd>Enter</kbd>.</p>
+    <ul class="list">
+      <li><strong>Resume</strong> closes the menu.</li>
+      <li><strong>Take photo</strong> saves a level 4K shot from where you're looking to your Photos.</li>
+      <li><strong>Exit to menu</strong> leaves the server and goes back to the launcher.</li>
+      <li><strong>Quit game</strong> closes the app.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><a href="./">Home</a> · <a href="https://github.com/bettse/voxelnative">GitHub</a> · <a href="privacy.html">Privacy</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
