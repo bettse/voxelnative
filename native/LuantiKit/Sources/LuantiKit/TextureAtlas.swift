@@ -158,6 +158,9 @@ public final class TextureAtlas {
         faceLayers = prev.faceLayers
         paletteCache = prev.paletteCache
         nodePalette = prev.nodePalette
+        decodeCache = prev.decodeCache
+        animCache = prev.animCache
+        for t in dropping { animCache[t] = nil }
     }
 
     /// The tile name currently at a layer index (reverse lookup), for the
@@ -223,6 +226,9 @@ public final class TextureAtlas {
         for (tileName, layer) in texLayer {
             let base = NodeRegistry.imageNames(tileName).first ?? tileName
             guard let secs = nodes.animSecs(base) else { continue }   // only server-flagged animated tiles
+            // Built on an earlier rebuild: the lava flow alone is 64 frames, and
+            // re-decoding them all was most of each ~40 ms rebuild.
+            if let c = animCache[tileName], c.layer == layer { animatedLayers.append(c); continue }
             if tileName == base {
                 // A plain strip image: decode its vertical frames directly.
                 guard let data = media.store[base],
@@ -280,6 +286,8 @@ public final class TextureAtlas {
                 print("[lavaanim] tile=\(tileName) branch=NONE (not animated: vf=\(TextureAtlas.verticalFrameParts(tileName)?.n ?? -1))"); fflush(stdout)
             }
         }
+        let animByLayer = Dictionary(animatedLayers.map { ($0.layer, $0) }, uniquingKeysWith: { a, _ in a })
+        for (tileName, layer) in texLayer { if let a = animByLayer[layer] { animCache[tileName] = a } }
         // Decode biome palettes (grass/foliage) so the mesher can tint by param2.
         // Reuse the stable faceTiles snapshot (line above) instead of touching the
         // live dict, which a concurrent NODEDEF re-parse could be mutating.
@@ -394,7 +402,7 @@ public final class TextureAtlas {
         let n = TextureAtlas.tile
         func icon(_ name: String) -> [UInt8]? {
             guard let d = media.bytes(name) else { return nil }
-            return TextureAtlas.decodePNG(d, size: n)
+            return decodeCached(name, d, size: n)
         }
         let full = icon("hudbars_icon_health.png")
         let empty = icon("hudbars_bgicon_health.png")
@@ -423,7 +431,7 @@ public final class TextureAtlas {
     /// follow the statbar's current icon like vl_hudbars does on desktop.
     private func buildStatusIconLayers(media: MediaManager) {
         let n = TextureAtlas.tile
-        func icon(_ name: String) -> [UInt8]? { media.bytes(name).flatMap { TextureAtlas.decodePNG($0, size: n) } }
+        func icon(_ name: String) -> [UInt8]? { media.bytes(name).flatMap { decodeCached(name, $0, size: n) } }
         for (names, bgName) in [(TextureAtlas.healthStatusIcons, "hudbars_bgicon_health.png"),
                                 (TextureAtlas.hungerStatusIcons, "hbhunger_bgicon.png")] {
             let bg = icon(bgName) ?? [UInt8](repeating: 0, count: n * n * 4)
@@ -447,7 +455,7 @@ public final class TextureAtlas {
         let n = TextureAtlas.tile
         func icon(_ name: String) -> [UInt8]? {
             guard let d = media.bytes(name) else { return nil }
-            return TextureAtlas.decodePNG(d, size: n)
+            return decodeCached(name, d, size: n)
         }
         let full = icon("hbhunger_icon.png")
         let empty = icon("hbhunger_bgicon.png")
@@ -474,7 +482,7 @@ public final class TextureAtlas {
         let n = TextureAtlas.tile
         func icon(_ name: String) -> [UInt8]? {
             guard let d = media.bytes(name) else { return nil }
-            return TextureAtlas.decodePNG(d, size: n)
+            return decodeCached(name, d, size: n)
         }
         let full = icon("hudbars_icon_breath.png")
         let empty = icon("hudbars_bgicon_breath.png")
@@ -501,7 +509,7 @@ public final class TextureAtlas {
         let n = TextureAtlas.tile
         func icon(_ name: String) -> [UInt8]? {
             guard let d = media.bytes(name) else { return nil }
-            return TextureAtlas.decodePNG(d, size: n)
+            return decodeCached(name, d, size: n)
         }
         let full = icon("hbarmor_icon.png")
         let empty = icon("hbarmor_bgicon.png")
@@ -528,10 +536,25 @@ public final class TextureAtlas {
     // which used to leak ~18 layers per rebuild. The index stays stable, which
     // is what the renderer relies on.
     private var keyedLayers: [String: Int] = [:]
+    /// Decoded PNGs by name and size, kept across rebuilds (seed): the HUD
+    /// icons were decoded again on every rebuild. Keyed with the bytes, so a
+    /// re-pushed file decodes fresh.
+    private var decodeCache: [String: (data: Data, px: [UInt8]?)] = [:]
+    private func decodeCached(_ name: String, _ data: Data, size: Int) -> [UInt8]? {
+        let key = "\(name)#\(size)"
+        if let c = decodeCache[key], c.data == data { return c.px }
+        let px = TextureAtlas.decodePNG(data, size: size)
+        decodeCache[key] = (data, px)
+        return px
+    }
+    /// Animated tiles' frames by tile name, kept across rebuilds (seed).
+    private var animCache: [String: AnimLayer] = [:]
     private func rawLayer(_ key: String, _ px: [UInt8]) -> Int {
         // Always big: these are overwritten in place as media arrives, so one
         // can't move between the arrays (a flat placeholder, then a real icon).
-        if let s = keyedLayers[key], s >= Self.bigBit { bigLayers[s - Self.bigBit] = px; return s }
+        // Unchanged pixels keep the old array, so the GPU upload (which diffs by
+        // storage) skips it instead of re-sending every HUD layer each rebuild.
+        if let s = keyedLayers[key], s >= Self.bigBit { if bigLayers[s - Self.bigBit] != px { bigLayers[s - Self.bigBit] = px }; return s }
         bigLayers.append(px)
         let l = Self.bigBit + bigLayers.count - 1; keyedLayers[key] = l; return l
     }
@@ -587,7 +610,7 @@ public final class TextureAtlas {
             return evaluate(String(token.dropFirst().dropLast()), media: media)
         }
         guard token.lowercased().hasSuffix(".png"), let data = media.bytes(token) else { return nil }
-        return TextureAtlas.decodePNG(data, size: TextureAtlas.tile)
+        return decodeCached(token, data, size: TextureAtlas.tile)
     }
 
     /// Split on `sep` only at the top nesting level (respecting () and []).
