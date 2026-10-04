@@ -8183,28 +8183,53 @@ final class WorldSession {
             modelRemap = [Int32](repeating: 0, count: mesh.positions.count)
             modelRemapSeen = [Int32](repeating: 0, count: mesh.positions.count)
         }
+        // The whole chain (mesh scale, roll, pitch, yaw, world scale, the Z
+        // mirror) is linear, so fold it into one matrix per mob: per vertex it
+        // was two helper calls and nine bounds-checked appends, ~1 ms a tick
+        // for a few dozen mobs.
+        func chain(_ m: SIMD3<Float>) -> SIMD3<Float> {
+            let lp = WorldMesher.tiltLocal(WorldMesher.pitchLocal(m * ms, roll), pitch)
+            return SIMD3(lp.x * ca - lp.z * sa, lp.y, -(lp.x * sa + lp.z * ca)) * scale
+        }
+        let xf = simd_float3x3(chain(SIMD3(1, 0, 0)), chain(SIMD3(0, 1, 0)), chain(SIMD3(0, 0, 1)))
+        let off = SIMD3<Float>(op.x, op.y, -op.z)
         for d in draw {
-            let uv = d.uv
+            let uv = d.uv, layerF = Float(d.layer)
             modelRemapGen += 1; let gen = modelRemapGen
             let vb = UInt32(v.count / 9)
-            var local: UInt32 = 0
-            for i in d.surface.indices {
-                let ik = Int(i)
-                if modelRemapSeen[ik] != gen {
-                    modelRemapSeen[ik] = gen; modelRemap[ik] = Int32(local); local += 1
-                    let m = positions[ik]
-                    let lp = WorldMesher.tiltLocal(WorldMesher.pitchLocal(m * ms, roll), pitch)
-                    let lx = lp.x, ly = lp.y, lz = lp.z
-                    let wx = lx * ca - lz * sa, wz = lx * sa + lz * ca
-                    let t = mesh.uvs[ik]
-                    // Element-wise appends: an array literal here allocated a
-                    // throwaway [Float] per vertex, thousands/frame across mobs.
-                    v.append(op.x + wx * scale); v.append(op.y + ly * scale); v.append(-(op.z + wz * scale))
-                    v.append(t.x * uv.x); v.append(t.y * uv.y); v.append(Float(d.layer))
-                    v.append(1.0); v.append(light); v.append(tint)
+            let n = d.surface.indices.count
+            // Room for the worst case (every index a new vertex), trimmed after.
+            let v0 = v.count, i0 = idx.count
+            v.append(contentsOf: repeatElement(0, count: n * 9))
+            idx.append(contentsOf: repeatElement(0, count: n))
+            var local = 0
+            v.withUnsafeMutableBufferPointer { vp in
+                idx.withUnsafeMutableBufferPointer { ip in
+                    modelRemap.withUnsafeMutableBufferPointer { remap in
+                        modelRemapSeen.withUnsafeMutableBufferPointer { seen in
+                            positions.withUnsafeBufferPointer { pos in
+                                mesh.uvs.withUnsafeBufferPointer { uvs in
+                                    var w = v0, k = i0
+                                    for i in d.surface.indices {
+                                        let ik = Int(i)
+                                        if seen[ik] != gen {
+                                            seen[ik] = gen; remap[ik] = Int32(local); local += 1
+                                            let p = xf * pos[ik] + off
+                                            let t = uvs[ik]
+                                            vp[w] = p.x; vp[w + 1] = p.y; vp[w + 2] = p.z
+                                            vp[w + 3] = t.x * uv.x; vp[w + 4] = t.y * uv.y; vp[w + 5] = layerF
+                                            vp[w + 6] = 1.0; vp[w + 7] = light; vp[w + 8] = tint
+                                            w += 9
+                                        }
+                                        ip[k] = vb + UInt32(remap[ik]); k += 1
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-                idx.append(vb + UInt32(modelRemap[ik]))
             }
+            v.removeLast((n - local) * 9)
         }
         return true
     }
