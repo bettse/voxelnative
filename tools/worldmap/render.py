@@ -23,6 +23,11 @@ CLUTTER = ("fallen_tree", "geode", "mineshaft", "boulder", "lavapool", "water_la
            "cocoon", "fossil", "dripstone", "spike", "pile", "rock")
 meta_all = json.load(open(f"{world}/worldmap_pois.json"))
 meta, pois = meta_all["meta"], meta_all["pois"]
+# A seeded position (strongholds) that also got placed shows up twice: keep
+# the placed one.
+placed = [p for p in pois if not p["kind"].endswith(" (seeded)")]
+pois = placed + [p for p in pois if p["kind"].endswith(" (seeded)") and not any(
+    q["kind"] == p["kind"][:-9] and abs(q["x"] - p["x"]) <= 32 and abs(q["z"] - p["z"]) <= 32 for q in placed)]
 cx, cz, R, step = meta["cx"], meta["cz"], meta["radius"], meta["step"]
 water = meta.get("water_level", 0)
 
