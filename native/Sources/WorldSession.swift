@@ -5423,6 +5423,9 @@ final class WorldSession {
     private enum NodeIcon {
         case cube([(shade: Float, dep: Float, corners: Int, layer: Int)])   // corners: index into cubeIconCorners
         case mesh(file: String, layer: Int, mid: SIMD3<Float>, scale: Float)
+        // A nodebox (pressure plate, carpet, button) with no inventory image:
+        // its boxes, in node units, and the layers of the three faces drawn.
+        case boxes([NodeRegistry.Box], left: Int, right: Int, top: Int)
     }
     private var nodeIconCache: [String: NodeIcon?] = [:]
     /// The three camera-facing faces at yaw 45 + pitch 30, unit half-size:
@@ -5461,6 +5464,14 @@ final class WorldSession {
             for p in model.positions { lo = simd_min(lo, p); hi = simd_max(hi, p) }
             let ext = max(hi.x - lo.x, max(hi.y - lo.y, hi.z - lo.z))
             out = .mesh(file: file, layer: layer, mid: (lo + hi) * 0.5, scale: ext > 1e-4 ? 1 / ext : 1)
+        case .nodebox:
+            // Desktop draws these from the boxes too: without it a pressure
+            // plate (no inventory_image) showed an empty recipe-book cell.
+            guard let boxes = client.nodes.boxes(id), !boxes.isEmpty else { return nil }
+            let top = client.nodes.faceTile(id, 0)
+            func layer(_ fi: Int) -> Int? { (client.nodes.faceTile(id, fi) ?? top).flatMap(iconLayerForTile) }
+            guard let t = layer(0), let l = layer(5), let r = layer(2) else { return nil }
+            out = .boxes(boxes, left: l, right: r, top: t)
         default:
             break
         }
@@ -5501,6 +5512,37 @@ final class WorldSession {
                     push(front + r.x * oRight + r.y * oUp - r.z * oToward, uvs[k].0, uvs[k].1, Float(f.layer), f.shade)
                 }
                 pushQuad(&idx, vb)
+            }
+            return true
+        case .boxes(let boxes, let left, let right, let top):
+            // Each box's three viewer-facing faces, the same faces and shades
+            // as the cube, at the box's real size so a plate reads as a plate.
+            // A face samples the part of its tile the box covers, as Luanti's
+            // nodebox texturing does. Far boxes first: the panel has no depth test.
+            let h = size * 0.5, front = center - oToward * (h * 0.9)
+            let order = boxes.sorted { iso(($0.min + $0.max)).z < iso(($1.min + $1.max)).z }
+            for b in order {
+                let lo = b.min, hi = b.max
+                // Corners bottom-left, bottom-right, top-right, top-left as seen
+                // (cubeIconCorners), with the texture span (u along the first
+                // varying axis, v from the face's top edge down).
+                let faces: [([SIMD3<Float>], (Float, Float), (Float, Float), Int, Float)] = [
+                    ([SIMD3(lo.x, lo.y, lo.z), SIMD3(lo.x, lo.y, hi.z), SIMD3(lo.x, hi.y, hi.z), SIMD3(lo.x, hi.y, lo.z)],
+                     (lo.z, hi.z), (lo.y, hi.y), left, Self.packTint(184, 184, 184)),
+                    ([SIMD3(lo.x, lo.y, hi.z), SIMD3(hi.x, lo.y, hi.z), SIMD3(hi.x, hi.y, hi.z), SIMD3(lo.x, hi.y, hi.z)],
+                     (lo.x, hi.x), (lo.y, hi.y), right, Self.packTint(140, 140, 140)),
+                    ([SIMD3(lo.x, hi.y, lo.z), SIMD3(lo.x, hi.y, hi.z), SIMD3(hi.x, hi.y, hi.z), SIMD3(hi.x, hi.y, lo.z)],
+                     (lo.z, hi.z), (lo.x, hi.x), top, Self.packTint(255, 255, 255))]
+                for (c, us, vs, layer, tint) in faces {
+                    let vb = UInt32(v.count / 9)
+                    for k in 0..<4 {
+                        let r = iso(c[k] * 2 * h)
+                        let u = us.0 + 0.5 + uvs[k].0 * (us.1 - us.0)
+                        let w = 0.5 - vs.1 + uvs[k].1 * (vs.1 - vs.0)
+                        push(front + r.x * oRight + r.y * oUp - r.z * oToward, u, w, Float(layer), tint)
+                    }
+                    pushQuad(&idx, vb)
+                }
             }
             return true
         case .mesh(let file, let layer, let mid, let scale):
