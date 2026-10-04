@@ -140,6 +140,8 @@ final class AudioManager: NSObject {
     private static let pcmCacheMax = 160           // entries, and...
     private static let pcmCacheByteMax = 16 << 20  // ...16 MB of decoded PCM, whichever comes first
     private var pcmCacheBytes = 0
+    /// For the [mem] log (read off the audio queue; a slightly stale count is fine).
+    var memoryNote: String { "pcm=\(String(format: "%.1f", Double(pcmCacheBytes) / 1048576))MB/\(pcmCache.count) sources=\(sources.count)" }
     private static func pcmBytes(_ b: AVAudioPCMBuffer) -> Int { Int(b.frameLength) * Int(b.format.channelCount) * 4 }
     // Idle player->varispeed chains kept attached and wired to their stage, so
     // a play is a scheduleBuffer + play() instead of attach x2 / connect x2 /

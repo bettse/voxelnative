@@ -521,7 +521,7 @@ final class WorldSession {
         print("[mem] cpu heap=\(mb(Int(heap.size_in_use)))MB media=\(mb(media.inMemory))MB(+\(mb(media.mapped)) mapped) " +
               "mapblocks=\(mb(nBlocks * WorldMap.NODES_PER_BLOCK * 4))MB/\(nBlocks) atlasCPU=\(mb(atlasB.layers))MB " +
               "atlasCaches=\(mb(atlasB.caches))MB modelCPU=\(mb(modelCPU))MB/\(modelTexData.count) " +
-              "objects=\(client.objects.count) skinCache=\(skinCache.count) \(Self.healthNote())"); fflush(stdout)
+              "objects=\(client.objects.count) skinCache=\(skinCache.count) \(audio.memoryNote) \(Self.healthNote())"); fflush(stdout)
     }
     private var statusAsked = false // /status sent on join; logged as [world] status
 
