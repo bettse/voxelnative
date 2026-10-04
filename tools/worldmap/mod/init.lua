@@ -127,6 +127,48 @@ local function scan()
 	minetest.request_shutdown("worldmap done", false, 0)
 end
 
+-- Villages aren't built during generation: mcl_villages drops a structblock
+-- at a candidate chunk's minp and builds when an LBM sees that block load,
+-- which takes a player nearby. Find the structblocks and forceload each one
+-- briefly so the normal build runs (and place_schematics records it).
+local function chunk_minps()
+	local cs = 80   -- chunksize 5 x 16, offset by -32 like the engine's mapchunks
+	local out = {}
+	local function first(v) return math.floor((v + 32) / cs) * cs - 32 end
+	for x = first(cx - R), cx + R - 1, cs do
+		for z = first(cz - R), cz + R - 1, cs do
+			for y = first(ymin), ymax, cs do
+				if y + cs - 1 >= 0 then out[#out + 1] = {x = x, y = y, z = z} end
+			end
+		end
+	end
+	return out
+end
+
+local function build_villages(done)
+	if not minetest.registered_nodes["mcl_villages:structblock"] then return done() end
+	local sites = {}
+	for _, p in ipairs(chunk_minps()) do
+		local vm = VoxelManip()
+		vm:read_from_map(p, p)
+		if vm:get_node_at(p).name == "mcl_villages:structblock" then sites[#sites + 1] = p end
+	end
+	minetest.log("action", "[worldmap] " .. #sites .. " village sites to try")
+	local i = 0
+	local function next_site()
+		i = i + 1
+		if i > #sites then return done() end
+		local p = sites[i]
+		minetest.forceload_block(p, true)
+		-- The LBM emerges the chunk again and builds; give it time, then move on.
+		minetest.after(4, function()
+			minetest.forceload_free_block(p, true)
+			next_site()
+		end)
+	end
+	next_site()
+end
+
 minetest.register_on_mods_loaded(function()
 	minetest.after(1, function()
 		local p1 = {x = cx - R, y = ymin, z = cz - R}
@@ -139,7 +181,7 @@ minetest.register_on_mods_loaded(function()
 				last = os.time()
 				minetest.log("action", "[worldmap] " .. remaining .. " blocks left (" .. (os.time() - t0) .. "s)")
 			end
-			if remaining == 0 then minetest.after(0, scan) end
+			if remaining == 0 then minetest.after(0, function() build_villages(scan) end) end
 		end)
 	end)
 end)

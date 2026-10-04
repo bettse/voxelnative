@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Render tools/worldmap's dump (worldmap_columns.csv + worldmap_pois.json in a
-world dir) to a PNG: biomes coloured, hill-shaded from the surface height,
-water and snow from the actual surface node, structures marked and labelled,
-with a legend. Usage: render.py WORLD_DIR OUT.png"""
+world dir). OUT.html: a self-contained interactive viewer (viewer.html with
+the data embedded: pan/zoom, hover readout, biome/height modes, landmark
+filters). OUT.png: a static picture, biomes coloured and hill-shaded,
+structures labelled, with a legend. Usage: render.py WORLD_DIR OUT.(html|png)"""
+import base64
+import os
+import struct
 import colorsys
 import csv
 import hashlib
@@ -10,8 +14,6 @@ import json
 import math
 import sys
 from collections import Counter
-
-from PIL import Image, ImageDraw, ImageFont
 
 world, out_png = sys.argv[1], sys.argv[2]
 show_all = "--all" in sys.argv[3:]
@@ -59,6 +61,51 @@ with open(f"{world}/worldmap_columns.csv") as f:
         biomes[row["biome"]] += 1
 
 n = (2 * R) // step
+# VoxeLibre names the stronghold "end_shrine" (its portal room).
+KIND_COL = {"village": (255, 220, 40), "end_shrine": (230, 60, 60), "strongholds": (230, 60, 60)}
+
+
+def write_html(path):
+    """Columns as little-endian arrays indexed i * n + j (i along x, j along z),
+    base64'd into viewer.html, so the file works served from anywhere."""
+    biome_names = sorted(biomes)
+    bidx = {b: k for k, b in enumerate(biome_names)}
+    node_names, nidx = [], {}
+    hgt, dep, bio, nod = [], bytearray(), bytearray(), []
+    for i in range(n):
+        for j in range(n):
+            c = cols.get((cx - R + i * step, cz - R + j * step))
+            y, node, biome, floor = c if c else (0, "air", "", 0)
+            if node not in nidx:
+                nidx[node] = len(node_names); node_names.append(node)
+            hgt.append(max(-32768, min(32767, y))); dep.append(max(0, min(255, y - floor)))
+            bio.append(bidx.get(biome, 0)); nod.append(nidx[node])
+    enc = lambda b: base64.b64encode(bytes(b)).decode()
+    poi_list = [dict(kind=p["kind"].replace(" (seeded)", ""), x=p["x"], y=p["y"], z=p["z"]) for p in pois
+                if cx - R <= p["x"] < cx + R and cz - R <= p["z"] < cz + R and p["y"] > -1000]
+    data = dict(
+        seed=meta["seed"], mgName=meta["mg_name"], gameVersion=meta.get("game_version", ""),
+        cx=cx, cz=cz, radius=R, step=step, n=n, water=water,
+        height=enc(struct.pack(f"<{len(hgt)}h", *hgt)), depth=enc(dep), biome=enc(bio),
+        node=enc(struct.pack(f"<{len(nod)}H", *nod)),
+        nodes=node_names, waterNodes=[k for k, nm in enumerate(node_names) if "water" in nm],
+        biomes=biome_names, biomeColors=[list(biome_colour(b)) for b in biome_names],
+        pois=poi_list, clutter=list(CLUTTER),
+        kindColors={k: "rgb(%d,%d,%d)" % v for k, v in KIND_COL.items()},
+    )
+    tmpl = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "viewer.html")).read()
+    html = tmpl.replace("/*DATA*/null", json.dumps(data, separators=(",", ":")))
+    html = html.replace("<title>World Map</title>", f"<title>World Map {meta['seed']}</title>")
+    open(path, "w").write(html)
+    print(f"wrote {path} ({n}x{n} samples, {len(poi_list)} placements, {len(biome_names)} biomes, {len(html) // 1024} KB)")
+
+
+if out_png.endswith(".html"):
+    write_html(out_png)
+    sys.exit(0)
+
+from PIL import Image, ImageDraw, ImageFont
+
 scale = max(1, 1024 // n)
 W = n * scale
 LEG = 300
@@ -112,7 +159,6 @@ def to_img(x, z):
     return ((x - (cx - R)) / step * scale, (n - 1 - (z - (cz - R)) / step) * scale)
 
 
-KIND_COL = {"village": (255, 220, 40), "stronghold": (230, 60, 60)}
 # Overworld only (the End and Nether sit thousands of nodes down), inside the map.
 inside = [p for p in pois if cx - R <= p["x"] < cx + R and cz - R <= p["z"] < cz + R and p["y"] > -1000
           and (show_all or not any(k in p["kind"] for k in CLUTTER))]

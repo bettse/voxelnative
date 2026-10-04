@@ -12,17 +12,20 @@
 #
 # Usage: tools/worldmap/worldmap.sh --seed N [--meta map_meta.txt]
 #          [--from-world DIR] [--center X,Z] [--radius R] [--step S]
-#          [--out DIR] [--port P] [--all]   (--all: label terrain features too)
+#          [--out DIR] [--port P] [--png] [--all]
+# Writes worldmap-SEED.html, a self-contained viewer (serve it or open it).
+# --png writes a static picture instead; --all labels terrain features too.
 set -e
 HERE=${0:A:h}
 LUANTI=/Applications/luanti.app/Contents/MacOS/luanti
-SEED="" META="" FROM="" RENDER_ARGS="" CX=0 CZ=0 RADIUS=384 STEP=2 PORT=30123 OUT=""
+SEED="" META="" FROM="" RENDER_ARGS="" FORMAT=html CX=0 CZ=0 RADIUS=384 STEP=2 PORT=30123 OUT=""
 while (( $# )); do
   case $1 in
     --seed) SEED=$2; shift 2 ;;
     --meta) META=$2; shift 2 ;;
     --from-world) FROM=$2; META=${META:-$2/map_meta.txt}; shift 2 ;;
     --all) RENDER_ARGS=--all; shift ;;
+    --png) FORMAT=png; shift ;;
     --center) CX=${2%,*}; CZ=${2#*,}; shift 2 ;;
     --radius) RADIUS=$2; shift 2 ;;
     --step) STEP=$2; shift 2 ;;
@@ -68,4 +71,4 @@ while kill -0 $PID 2>/dev/null; do
   sleep 2
 done
 [[ -f $WORLD/worldmap_done ]] || { echo "server exited without a map; see $OUT/server.log"; tail -5 "$OUT/server.log"; exit 1; }
-python3 "$HERE/render.py" "$WORLD" "$OUT/worldmap-$SEED.png" $RENDER_ARGS
+python3 "$HERE/render.py" "$WORLD" "$OUT/worldmap-$SEED.$FORMAT" $RENDER_ARGS

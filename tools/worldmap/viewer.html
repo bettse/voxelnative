@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>World Map</title>
+<style>
+:root {
+  --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #dddcd6;
+  --accent: #2f6fdb; --chip: #eeede8; --mapbg: #d9d7cf;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17171a; --panel: #212125; --ink: #ececef; --muted: #9a9aa2; --line: #34343a;
+    --accent: #6ea0ff; --chip: #2b2b30; --mapbg: #0f0f12;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17171a; --panel: #212125; --ink: #ececef; --muted: #9a9aa2; --line: #34343a;
+  --accent: #6ea0ff; --chip: #2b2b30; --mapbg: #0f0f12;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+.app { display: grid; grid-template-columns: 1fr 320px; height: 100vh; }
+#stage { position: relative; overflow: hidden; background: var(--mapbg); cursor: grab; touch-action: none; }
+#stage.dragging { cursor: grabbing; }
+canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+#readout { position: absolute; left: 12px; bottom: 12px; padding: 8px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums; pointer-events: none; min-width: 220px; }
+#readout b { font-weight: 600; }
+#toolbar { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 10px; font: inherit; cursor: pointer; }
+.btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px 16px 24px; }
+h1 { font-size: 16px; margin: 0 0 2px; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
+.facts { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+input[type=search] { width: 100%; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); font: inherit; }
+.kinds label, .biomes div { display: flex; align-items: center; gap: 8px; padding: 3px 0; cursor: pointer; }
+.sw { width: 12px; height: 12px; border-radius: 3px; flex: none; border: 1px solid rgba(0,0,0,.25); }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; border: 1px solid rgba(0,0,0,.4); }
+.count { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.biomes div.dim { opacity: .35; }
+.list { margin: 0; padding: 0; list-style: none; }
+.list li { display: flex; justify-content: space-between; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+.list li:hover { background: var(--chip); }
+.list .xy { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row { display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+  aside { border-left: 0; border-top: 1px solid var(--line); padding: 12px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="stage">
+    <canvas id="map"></canvas>
+    <canvas id="overlay"></canvas>
+    <div id="toolbar">
+      <button class="btn" id="mode-biome" aria-pressed="true">Biomes</button>
+      <button class="btn" id="mode-height" aria-pressed="false">Height</button>
+      <button class="btn" id="shade" aria-pressed="true">Shading</button>
+      <button class="btn" id="labels" aria-pressed="true">Labels</button>
+      <button class="btn" id="home">Reset view</button>
+    </div>
+    <div id="readout">Hover the map</div>
+  </div>
+  <aside>
+    <h1>World map</h1>
+    <div class="facts" id="facts"></div>
+    <h2>Landmarks</h2>
+    <input type="search" id="q" placeholder="Filter by name or coordinates">
+    <div class="row" style="margin:8px 0 4px">
+      <button class="btn" id="kinds-all">All</button>
+      <button class="btn" id="kinds-landmarks">Landmarks only</button>
+      <button class="btn" id="kinds-none">None</button>
+    </div>
+    <div class="kinds" id="kinds"></div>
+    <ul class="list" id="list"></ul>
+    <h2>Biomes</h2>
+    <div class="biomes" id="biomes"></div>
+  </aside>
+</div>
+<script>
+const D = /*DATA*/null;
+
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const n = D.n, step = D.step, x0 = D.cx - D.radius, z0 = D.cz - D.radius;
+const H = new Int16Array(b64(D.height).buffer);
+const DEPTH = b64(D.depth);
+const BI = b64(D.biome);
+const NI = new Uint16Array(b64(D.node).buffer);
+const isWater = new Uint8Array(D.nodes.length); D.waterNodes.forEach(k => isWater[k] = 1);
+const water = i => isWater[NI[i]] === 1;
+
+// Base images: one per colour mode, at one pixel per sample.
+let maxH = -32768;   // a loop, not Math.max(...H): spreading a million samples overflows the stack
+for (let i = 0; i < H.length; i++) if (H[i] > maxH) maxH = H[i];
+function hcol(h) {   // height ramp: lowland green -> brown -> grey -> white
+  const t = Math.max(0, Math.min(1, (h - D.water) / Math.max(1, maxH - D.water)));
+  const stops = [[0, [86, 140, 70]], [.35, [160, 150, 90]], [.65, [130, 110, 90]], [.85, [150, 150, 150]], [1, [245, 245, 245]]];
+  for (let k = 1; k < stops.length; k++) if (t <= stops[k][0]) {
+    const [a, ca] = stops[k - 1], [b, cb] = stops[k], f = (t - a) / (b - a);
+    return ca.map((v, j) => v + (cb[j] - v) * f);
+  }
+  return stops[stops.length - 1][1];
+}
+function buildImage(mode, shade, highlight) {
+  const c = document.createElement("canvas"); c.width = c.height = n;
+  const ctx = c.getContext("2d"), img = ctx.createImageData(n, n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const k = i * n + j, node = D.nodes[NI[k]];
+    let col;
+    if (water(k)) {
+      const t = Math.min(1, DEPTH[k] / 30);
+      col = [90 - 60 * t, 150 - 90 * t, 220 - 90 * t];
+    } else if (/snow|ice/.test(node)) col = [235, 240, 248];
+    else if (/lava/.test(node)) col = [230, 90, 20];
+    else col = mode === "height" ? hcol(H[k]) : D.biomeColors[BI[k]];
+    if (shade && !water(k) && i > 0 && j < n - 1) {
+      const d = ((H[k] - H[k - n]) - (H[k] - H[k + 1])) / step;
+      const f = Math.max(0.6, Math.min(1.35, 1 + d * 0.25));
+      col = col.map(v => v * f);
+    }
+    if (highlight != null && BI[k] !== highlight) col = col.map(v => v * 0.35 + 40);
+    const p = ((n - 1 - j) * n + i) * 4;   // north (+z) at the top
+    img.data[p] = col[0]; img.data[p + 1] = col[1]; img.data[p + 2] = col[2]; img.data[p + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+
+// View: world coordinate at the stage centre and pixels per node.
+const stage = document.getElementById("stage"), map = document.getElementById("map"), ov = document.getElementById("overlay");
+const mctx = map.getContext("2d"), octx = ov.getContext("2d");
+const state = { mode: "biome", shade: true, labels: true, highlight: null, cx: D.cx, cz: D.cz, ppn: 1 };
+let base = buildImage(state.mode, state.shade, null);
+const dpr = () => window.devicePixelRatio || 1;
+function fit() { state.cx = D.cx; state.cz = D.cz; state.ppn = Math.min(stage.clientWidth, stage.clientHeight) / (2 * D.radius); }
+function toScreen(x, z) { return [stage.clientWidth / 2 + (x - state.cx) * state.ppn, stage.clientHeight / 2 - (z - state.cz) * state.ppn]; }
+function toWorld(sx, sy) { return [state.cx + (sx - stage.clientWidth / 2) / state.ppn, state.cz - (sy - stage.clientHeight / 2) / state.ppn]; }
+
+// Landmarks.
+const KIND_COLORS = D.kindColors;
+const kinds = [...new Set(D.pois.map(p => p.kind))].sort();
+const shown = new Set(kinds.filter(k => !D.clutter.some(c => k.includes(c))));
+const kindLabel = k => k === "end_shrine" ? "stronghold (end shrine)" : k.replace(/_/g, " ");
+const kindColor = k => KIND_COLORS[k] || `hsl(${[...k].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) % 360} 70% 60%)`;
+function visiblePois() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  return D.pois.filter(p => shown.has(p.kind) && (!q || `${p.kind} ${p.x},${p.z} ${p.x} ${p.z}`.toLowerCase().includes(q)));
+}
+
+function draw() {
+  for (const c of [map, ov]) {
+    c.width = stage.clientWidth * dpr(); c.height = stage.clientHeight * dpr();
+  }
+  mctx.setTransform(dpr(), 0, 0, dpr(), 0, 0);
+  mctx.imageSmoothingEnabled = false;
+  const [sx, sy] = toScreen(x0, z0 + 2 * D.radius);
+  mctx.drawImage(base, sx, sy, 2 * D.radius * state.ppn, 2 * D.radius * state.ppn);
+  octx.setTransform(dpr(), 0, 0, dpr(), 0, 0);
+  octx.clearRect(0, 0, ov.width, ov.height);
+  octx.font = "12px -apple-system, Helvetica, Arial, sans-serif";
+  octx.lineJoin = "round";
+  const vis = visiblePois();
+  for (const p of vis) {
+    const [x, y] = toScreen(p.x, p.z);
+    if (x < -50 || y < -50 || x > stage.clientWidth + 50 || y > stage.clientHeight + 50) continue;
+    octx.beginPath(); octx.arc(x, y, 5, 0, Math.PI * 2);
+    octx.fillStyle = kindColor(p.kind); octx.fill();
+    octx.lineWidth = 1.5; octx.strokeStyle = "#000"; octx.stroke();
+    // Labels only once there's room: zoomed far out they pile into a smear.
+    if (state.labels && (state.ppn >= 0.6 || vis.length < 80)) {
+      const t = kindLabel(p.kind);
+      octx.lineWidth = 3; octx.strokeStyle = "rgba(0,0,0,.75)"; octx.strokeText(t, x + 8, y + 4);
+      octx.fillStyle = "#fff"; octx.fillText(t, x + 8, y + 4);
+    }
+  }
+  // Centre cross.
+  const [ox, oy] = toScreen(D.cx, D.cz);
+  octx.strokeStyle = "#fff"; octx.lineWidth = 1.5;
+  octx.beginPath(); octx.moveTo(ox - 7, oy); octx.lineTo(ox + 7, oy); octx.moveTo(ox, oy - 7); octx.lineTo(ox, oy + 7); octx.stroke();
+}
+
+// Sidebar.
+document.getElementById("facts").innerHTML =
+  `Seed <b>${D.seed}</b><br>Mapgen ${D.mgName} · VoxeLibre ${D.gameVersion || "?"}<br>` +
+  `${2 * D.radius}×${2 * D.radius} nodes around ${D.cx}, ${D.cz} · every ${step} node${step > 1 ? "s" : ""}`;
+function renderKinds() {
+  const counts = {}; D.pois.forEach(p => counts[p.kind] = (counts[p.kind] || 0) + 1);
+  const el = document.getElementById("kinds"); el.innerHTML = "";
+  for (const k of kinds) {
+    const lab = document.createElement("label");
+    lab.innerHTML = `<input type="checkbox" ${shown.has(k) ? "checked" : ""}><span class="dot" style="background:${kindColor(k)}"></span>${kindLabel(k)}<span class="count">${counts[k]}</span>`;
+    lab.querySelector("input").onchange = e => { e.target.checked ? shown.add(k) : shown.delete(k); refresh(); };
+    el.appendChild(lab);
+  }
+}
+function renderList() {
+  const el = document.getElementById("list"); el.innerHTML = "";
+  for (const p of visiblePois().slice(0, 400)) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${kindLabel(p.kind)}</span><span class="xy">${p.x}, ${p.y}, ${p.z}</span>`;
+    li.onclick = () => { state.cx = p.x; state.cz = p.z; state.ppn = Math.max(state.ppn, 3); draw(); };
+    el.appendChild(li);
+  }
+}
+function renderBiomes() {
+  const el = document.getElementById("biomes"); el.innerHTML = "";
+  const counts = new Array(D.biomes.length).fill(0); BI.forEach(b => counts[b]++);
+  counts.map((c, i) => [c, i]).sort((a, b) => b[0] - a[0]).forEach(([c, i]) => {
+    if (!c) return;
+    const d = document.createElement("div");
+    if (state.highlight != null && state.highlight !== i) d.className = "dim";
+    const [r, g, b] = D.biomeColors[i];
+    d.innerHTML = `<span class="sw" style="background:rgb(${r},${g},${b})"></span>${D.biomes[i] || "(none)"}<span class="count">${(100 * c / BI.length).toFixed(1)}%</span>`;
+    d.title = "Click to highlight";
+    d.onclick = () => { state.highlight = state.highlight === i ? null : i; rebuild(); renderBiomes(); };
+    el.appendChild(d);
+  });
+}
+function refresh() { renderList(); draw(); }
+function rebuild() { base = buildImage(state.mode, state.shade, state.highlight); draw(); }
+
+// Controls.
+const press = (id, on) => document.getElementById(id).setAttribute("aria-pressed", on);
+document.getElementById("mode-biome").onclick = () => { state.mode = "biome"; press("mode-biome", true); press("mode-height", false); rebuild(); };
+document.getElementById("mode-height").onclick = () => { state.mode = "height"; press("mode-biome", false); press("mode-height", true); rebuild(); };
+document.getElementById("shade").onclick = () => { state.shade = !state.shade; press("shade", state.shade); rebuild(); };
+document.getElementById("labels").onclick = () => { state.labels = !state.labels; press("labels", state.labels); draw(); };
+document.getElementById("home").onclick = () => { fit(); draw(); };
+document.getElementById("q").oninput = refresh;
+document.getElementById("kinds-all").onclick = () => { kinds.forEach(k => shown.add(k)); renderKinds(); refresh(); };
+document.getElementById("kinds-none").onclick = () => { shown.clear(); renderKinds(); refresh(); };
+document.getElementById("kinds-landmarks").onclick = () => {
+  shown.clear(); kinds.filter(k => !D.clutter.some(c => k.includes(c))).forEach(k => shown.add(k)); renderKinds(); refresh();
+};
+
+// Pan (drag), zoom (wheel / pinch), hover readout.
+let drag = null; const pointers = new Map();
+stage.addEventListener("pointerdown", e => {
+  stage.setPointerCapture(e.pointerId); pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  drag = { x: e.clientX, y: e.clientY, cx: state.cx, cz: state.cz }; stage.classList.add("dragging");
+});
+stage.addEventListener("pointerup", e => { pointers.delete(e.pointerId); if (!pointers.size) { drag = null; stage.classList.remove("dragging"); } });
+stage.addEventListener("pointercancel", e => { pointers.delete(e.pointerId); drag = null; });
+function zoomAt(sx, sy, f) {
+  const [wx, wz] = toWorld(sx, sy);
+  state.ppn = Math.max(0.05, Math.min(40, state.ppn * f));
+  state.cx = wx - (sx - stage.clientWidth / 2) / state.ppn; state.cz = wz + (sy - stage.clientHeight / 2) / state.ppn;
+  draw();
+}
+stage.addEventListener("wheel", e => {
+  e.preventDefault(); const r = stage.getBoundingClientRect();
+  zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015));
+}, { passive: false });
+let pinch = null;
+stage.addEventListener("pointermove", e => {
+  const r = stage.getBoundingClientRect();
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, [e.clientX, e.clientY]);
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()], d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+    if (pinch) zoomAt((a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top, d / pinch);
+    pinch = d; return;
+  }
+  pinch = null;
+  if (drag) {
+    state.cx = drag.cx - (e.clientX - drag.x) / state.ppn; state.cz = drag.cz + (e.clientY - drag.y) / state.ppn;
+    draw();
+  }
+  const [wx, wz] = toWorld(e.clientX - r.left, e.clientY - r.top);
+  const i = Math.round((wx - x0) / step), j = Math.round((wz - z0) / step);
+  const ro = document.getElementById("readout");
+  if (i < 0 || j < 0 || i >= n || j >= n) { ro.textContent = `x ${Math.round(wx)}, z ${Math.round(wz)} (outside the map)`; return; }
+  const k = i * n + j;
+  const near = visiblePois().find(p => { const [px, py] = toScreen(p.x, p.z); return Math.hypot(px - (e.clientX - r.left), py - (e.clientY - r.top)) < 8; });
+  ro.innerHTML = `<b>x ${x0 + i * step}, z ${z0 + j * step}</b> · height ${H[k]}${water(k) ? ` (water, ${DEPTH[k]} deep)` : ""}<br>` +
+    `${D.biomes[BI[k]] || "(no biome)"} · ${D.nodes[NI[k]].replace(/^[^:]*:/, "")}` +
+    (near ? `<br><b>${kindLabel(near.kind)}</b> at ${near.x}, ${near.y}, ${near.z}` : "");
+});
+window.addEventListener("resize", draw);
+
+renderKinds(); renderList(); renderBiomes(); fit(); draw();
+</script>
+</body>
+</html>
