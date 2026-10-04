@@ -153,7 +153,8 @@ const kindLabel = k => k === "end_shrine" ? "stronghold (end shrine)" : k.replac
 const kindColor = k => KIND_COLORS[k] || `hsl(${[...k].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) % 360} 70% 60%)`;
 function visiblePois() {
   const q = document.getElementById("q").value.trim().toLowerCase();
-  return D.pois.filter(p => shown.has(p.kind) && (!q || `${p.kind} ${p.x},${p.z} ${p.x} ${p.z}`.toLowerCase().includes(q)));
+  // Match the shown name too: strongholds are "end_shrine" underneath.
+  return D.pois.filter(p => shown.has(p.kind) && (!q || `${p.kind} ${kindLabel(p.kind)} ${p.x},${p.z} ${p.x} ${p.z}`.toLowerCase().includes(q)));
 }
 
 function draw() {
