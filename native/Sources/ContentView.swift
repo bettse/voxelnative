@@ -367,7 +367,39 @@ struct ContentView: View {
         appModel.worldReady = false
         appModel.connPhase = .connecting
         connecting = true
-        Task { await openWorld() }
+        Task { await loginThenOpenWorld() }
+    }
+
+    /// Connect from the launcher and open the world only once the server has
+    /// accepted the login, so a dead server or a wrong password stays here with
+    /// the reason instead of dropping the player into an empty immersive space.
+    /// 30 s covers the reconnects a relaunch needs while the server still holds
+    /// our name from an unclean exit (~30 s).
+    static let loginTimeout: TimeInterval = 30
+    private func loginThenOpenWorld() async {
+        appModel.observeLifecycle()
+        appModel.startSession()
+        let deadline = Date().addingTimeInterval(Self.loginTimeout)
+        while true {
+            switch appModel.connPhase {
+            case .streaming, .playing:
+                await openWorld(); return
+            case .failed:
+                appModel.session.stop(); connecting = false; return
+            default:
+                if Date() >= deadline {
+                    print("[launcher] login timed out after \(Int(Self.loginTimeout))s"); fflush(stdout)
+                    appModel.session.stop()
+                    // After the stop settles: a reconnect phase the session queue
+                    // already posted would otherwise land on top of this.
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    appModel.connPhase = .failed("couldn't reach the server")
+                    connecting = false
+                    return
+                }
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
     }
     /// Launch a favorite directly: load it into the editor (so state stays in
     /// sync and a return to the launcher shows it) and connect in one action, so

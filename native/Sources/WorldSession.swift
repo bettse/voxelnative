@@ -501,6 +501,7 @@ final class WorldSession {
 
     private let input = GameInput()
     private var worldReadyLogged = false
+    private var seedAsked = false   // /seed sent on join; its reply is logged as [seed]
     private var skyBrightnessSmooth: Float = 1   // day-bank light at the head, 0..1, eased (cave fog)
     /// sky.cpp getWickedTimeOfDay: night takes 0.415 of the cycle.
     static func wickedTimeOfDay(_ t: Float) -> Float {
@@ -888,10 +889,17 @@ final class WorldSession {
         // not shown or kept: no chat in the app means no user-generated content
         // to moderate (App Store 1.2). The sim still logs it, because the test
         // scenes drive the dev server with chat commands and read the replies.
-        client.onChat = { _, sender, text in
+        client.onChat = { [weak self] _, sender, text in
             #if targetEnvironment(simulator)
             print("[chat] \(sender.isEmpty ? "" : sender + ": ")\(text)"); fflush(stdout)
             #endif
+            // The reply to the /seed sent on join (VoxeLibre's "Seed: [n]", or an
+            // unknown-command error on other games), logged on device too.
+            if self?.seedAsked == true, sender.isEmpty, text.contains("Seed: [") || text.contains("seed") {
+                self?.seedAsked = false
+                let plain = Formspec.cleanColored(text, caller: "seed").text
+                print("[seed] \(Self.host):\(Self.port) \(plain)"); fflush(stdout)
+            }
         }
         client.objects.floorTop = { [weak self] lo, hi in self?.entityFloorTop(lo: lo, hi: hi) }
         client.objects.boxBlocked = { [weak self] lo, hi in self?.anySolidBox(around: AABB(lo: lo, hi: hi)) ?? false }
@@ -1071,7 +1079,11 @@ final class WorldSession {
     }
 
     func start() {
-        if started { return }   // main-thread re-entry guard (start/stop are main-actor)
+        // Main-thread re-entry guard (start/stop are main-actor). A second start
+        // is the immersive space opening after the launcher already connected
+        // (it waits for the login before showing the world): the renderer is
+        // new, so it needs the world posted again.
+        if started { queue.async { [weak self] in self?.repostForNewRenderer() }; return }
         started = true
         // Build stamp first: deploy is install-only and a live app keeps running
         // old code, so "which build is this log from?" must be answerable here.
@@ -1091,21 +1103,7 @@ final class WorldSession {
             self.connEpoch += 1
             self.fatalDenied = false
             self.setPhase(.connecting)
-            // Reopening the immersive space hands us a brand-new Renderer with
-            // empty buffers, but our world blocks are already loaded, so no
-            // onBlock fires to trigger a remesh and we'd show only sky. Force a
-            // full re-post: remesh the whole world and make the atlas travel
-            // with it to the new renderer (reset so it isn't skipped as "same").
-            self.lastPostedAtlasGen = -1
-            self.fullRemesh = true      // new renderer: rebuild + re-post the whole buffer
-            self.dirty = true
-            // The End skybox and the sun/moon live in the renderer, so send them
-            // again. Model textures (skins, mob textures, HUD/panel text) don't
-            // need it: they live in ModelTextureHandoff.gpuArray, which outlives
-            // the renderer. (Before that, a resumed world had no arms, no mobs
-            // and blank menus, because nothing re-sent them.)
-            self.skyboxBuilt = ["(new renderer)"]
-            self.skyBodiesBuilt = []
+            self.repostForNewRenderer()
             self.client.connect(host: Self.host, port: Self.port)
         }
         let t = DispatchSource.makeTimerSource(queue: queue)
@@ -1128,6 +1126,22 @@ final class WorldSession {
         }
         t.resume()
         timer = t
+    }
+
+    /// Reopening the immersive space hands us a brand-new Renderer with empty
+    /// buffers, but our world blocks are already loaded, so no onBlock fires to
+    /// trigger a remesh and we'd show only sky. Force a full re-post: remesh the
+    /// whole world and make the atlas travel with it to the new renderer (reset
+    /// so it isn't skipped as "same"). The End skybox and the sun/moon live in
+    /// the renderer, so send them again. Model textures (skins, mob textures,
+    /// HUD/panel text) don't need it: they live in ModelTextureHandoff.gpuArray,
+    /// which outlives the renderer. Session queue.
+    private func repostForNewRenderer() {
+        lastPostedAtlasGen = -1
+        fullRemesh = true
+        dirty = true
+        skyboxBuilt = ["(new renderer)"]
+        skyBodiesBuilt = []
     }
 
     /// Cleanly leave the server so it frees our name immediately (a fast
@@ -10521,7 +10535,11 @@ final class WorldSession {
             // spinning forever there (a regression once).
             let hasWorldGeom = changedRaw.values.contains { !$0.solid.isEmpty || !$0.cutout.isEmpty }
             if posted, hasWorldGeom {
-                if !self.worldReadyLogged { self.worldReadyLogged = true; print("[session] world ready (first geometry posted) \(PerfStats.uptime())"); fflush(stdout) }
+                if !self.worldReadyLogged {
+                    self.worldReadyLogged = true; print("[session] world ready (first geometry posted) \(PerfStats.uptime())"); fflush(stdout)
+                    // Ask every server for its world seed, for the log (chat isn't shown).
+                    self.queue.async { self.seedAsked = true; self.client.sendChat("/seed") }
+                }
                 self.queue.async { self.deniedReason = nil }   // back in: drop the old kick/shutdown message
                 DispatchQueue.main.async { [weak self] in
                     self?.appModel?.worldReady = true
