@@ -15,10 +15,12 @@
 #          [--out DIR] [--port P] [--png] [--all]
 # Writes worldmap-SEED.html, a self-contained viewer (serve it or open it).
 # --png writes a static picture instead; --all labels terrain features too.
+# --probe FILE (x,y,z per line, e.g. a logged path) writes the nodes below,
+# at and above each point to world/probe_out.csv.
 set -e
 HERE=${0:A:h}
 LUANTI=/Applications/luanti.app/Contents/MacOS/luanti
-SEED="" META="" FROM="" RENDER_ARGS="" FORMAT=html CX=0 CZ=0 RADIUS=384 STEP=2 PORT=30123 OUT=""
+SEED="" META="" FROM="" PROBE="" RENDER_ARGS="" FORMAT=html CX=0 CZ=0 RADIUS=384 STEP=2 PORT=30123 OUT=""
 while (( $# )); do
   case $1 in
     --seed) SEED=$2; shift 2 ;;
@@ -26,6 +28,7 @@ while (( $# )); do
     --from-world) FROM=$2; META=${META:-$2/map_meta.txt}; shift 2 ;;
     --all) RENDER_ARGS=--all; shift ;;
     --png) FORMAT=png; shift ;;
+    --probe) PROBE=$2; shift 2 ;;
     --center) CX=${2%,*}; CZ=${2#*,}; shift 2 ;;
     --radius) RADIUS=$2; shift 2 ;;
     --step) STEP=$2; shift 2 ;;
@@ -41,6 +44,7 @@ WORLD=$OUT/world
 rm -rf "$WORLD"; mkdir -p "$WORLD/worldmods"
 cp -R "$HERE/mod" "$WORLD/worldmods/worldmap"
 [[ -n $FROM ]] && cp "$FROM/map.sqlite" "$WORLD/map.sqlite"
+[[ -n $PROBE ]] && cp "$PROBE" "$WORLD/probe.txt"
 cat > "$WORLD/world.mt" <<EOF
 gameid = mineclone2
 backend = sqlite3

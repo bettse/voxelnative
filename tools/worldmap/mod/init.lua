@@ -123,6 +123,24 @@ local function scan()
 		game_version())
 	write("worldmap_pois.json", '{"meta":' .. meta .. ',"pois":[' .. table.concat(pois, ",") .. "]}\n")
 	minetest.log("action", string.format("[worldmap] scanned %d columns in %.1fs, %d pois", #lines - 1, os.clock() - t0, #pois))
+	-- --probe: the nodes below, at and above each listed point (x,y,z per
+	-- line), to check a player's logged path against the generated world.
+	local pf = io.open(out .. "/probe.txt")
+	if pf then
+		local rows = { "x,y,z,below,feet,head" }
+		for line in pf:lines() do
+			local x, y, z = line:match("^([-%d.]+),([-%d.]+),([-%d.]+)")
+			if x then
+				local p = {x = math.floor(x + 0.5), y = math.floor(y + 0.5), z = math.floor(z + 0.5)}
+				local vm = VoxelManip()
+				vm:read_from_map(vector.offset(p, 0, -1, 0), vector.offset(p, 0, 1, 0))
+				rows[#rows + 1] = string.format("%d,%d,%d,%s,%s,%s", p.x, p.y, p.z,
+					vm:get_node_at(vector.offset(p, 0, -1, 0)).name, vm:get_node_at(p).name, vm:get_node_at(vector.offset(p, 0, 1, 0)).name)
+			end
+		end
+		pf:close()
+		write("probe_out.csv", table.concat(rows, "\n") .. "\n")
+	end
 	write("worldmap_done", "ok\n")
 	minetest.request_shutdown("worldmap done", false, 0)
 end
