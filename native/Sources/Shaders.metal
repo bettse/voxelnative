@@ -23,14 +23,20 @@ typedef struct
     float2 uv       [[attribute(1)]];   // half2
     ushort layer    [[attribute(2)]];
     float shade     [[attribute(3)]];   // half; shade + 2*waving class, lava negative
-    uchar4 lightTint [[attribute(4)]];  // light byte, then tint r, g, b
+    uchar4 lightTint [[attribute(4)]];  // day, night (1/16 banks), tint RGB565 low, high
 } WorldVertex;
 
 // The mesher's float4 params (layer, shade, light, packed tint) back from a
-// WorldVertex, so the world shaders read exactly what they used to.
+// WorldVertex, so the world shaders read exactly what they used to. Light
+// comes back in the smooth-light format (1024 + day + night*256).
 static inline float4 worldParams(WorldVertex in) {
-    return float4(float(in.layer), in.shade, float(in.lightTint.x),
-                  float(in.lightTint.y) + float(in.lightTint.z) * 256.0 + float(in.lightTint.w) * 65536.0);
+    uint t = uint(in.lightTint.z) | (uint(in.lightTint.w) << 8);
+    float r = round(float(t & 31u) * 255.0 / 31.0);
+    float g = round(float((t >> 5) & 63u) * 255.0 / 63.0);
+    float b = round(float(t >> 11) * 255.0 / 31.0);
+    return float4(float(in.layer), in.shade,
+                  1024.0 + float(in.lightTint.x) + float(in.lightTint.y) * 256.0,
+                  r + g * 256.0 + b * 65536.0);
 }
 
 typedef struct

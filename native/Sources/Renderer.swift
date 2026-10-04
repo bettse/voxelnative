@@ -1384,7 +1384,7 @@ actor Renderer {
 
     /// The world meshes' packed 24-byte vertex (WorldVertex in Shaders.metal,
     /// written by MeshHandoff.packWorld): position float3, uv half2, layer
-    /// ushort, shade half, light + tint uchar4. Entities, HUD and hands keep
+    /// ushort, shade half, day + night light and RGB565 tint as uchar4. Entities, HUD and hands keep
     /// the 36-byte layout above.
     static func buildWorldVertexDescriptor() -> MTLVertexDescriptor {
         let d = MTLVertexDescriptor()

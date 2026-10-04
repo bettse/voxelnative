@@ -66,8 +66,11 @@ final class MeshHandoff {
 
     /// The mesher's 9-float vertices (x,y,z, u,v, layer, shade, light, tint)
     /// packed to 24 bytes each: position float3, uv half2, layer UInt16, shade
-    /// half, then light and the tint's r,g,b as bytes. A third less than the
-    /// 36 we uploaded, and the world meshes were the biggest thing in memory.
+    /// half, then the day and night light in 1/16-bank steps (a byte each) and
+    /// the tint as RGB565. A third less than the 36 we uploaded, and the world
+    /// meshes were the biggest thing in memory. The light needs both bytes:
+    /// smooth light is a 16-bit value (WorldMesher.packSmoothLight), and
+    /// clamping it to one byte read as full daylight, so caves never got dark.
     static func packWorld(_ f: [Float]) -> [UInt8] {
         let n = f.count / 9
         var out = [UInt8](repeating: 0, count: n * worldVertexStride)
@@ -82,14 +85,32 @@ final class MeshHandoff {
                 d.storeBytes(of: Float16(f[s + 4]), toByteOffset: 14, as: Float16.self)
                 d.storeBytes(of: UInt16(clamping: Int(f[s + 5].rounded())), toByteOffset: 16, as: UInt16.self)
                 d.storeBytes(of: Float16(f[s + 6]), toByteOffset: 18, as: Float16.self)
-                d.storeBytes(of: UInt8(clamping: Int(f[s + 7].rounded())), toByteOffset: 20, as: UInt8.self)
-                let t = max(0, min(16777215, Int(f[s + 8].rounded())))
-                d.storeBytes(of: UInt8(t & 0xFF), toByteOffset: 21, as: UInt8.self)
-                d.storeBytes(of: UInt8((t >> 8) & 0xFF), toByteOffset: 22, as: UInt8.self)
-                d.storeBytes(of: UInt8((t >> 16) & 0xFF), toByteOffset: 23, as: UInt8.self)
+                let (day, night) = lightBytes(f[s + 7])
+                d.storeBytes(of: day, toByteOffset: 20, as: UInt8.self)
+                d.storeBytes(of: night, toByteOffset: 21, as: UInt8.self)
+                d.storeBytes(of: tint565(f[s + 8]), toByteOffset: 22, as: UInt16.self)
             }
         }
         return out
+    }
+
+    /// A vertex light value as day and night banks in 1/16 steps (0...240).
+    /// Two formats come in: a node's param1 byte (day + night*16, whole banks)
+    /// or, from 1024, smooth light (day + night*256, 1/16 steps).
+    static func lightBytes(_ v: Float) -> (UInt8, UInt8) {
+        let p = max(0, Int(v.rounded()))
+        if p >= 1024 {
+            let q = p - 1024
+            return (UInt8(clamping: q & 0xFF), UInt8(clamping: q >> 8))
+        }
+        return (UInt8(clamping: (p & 0x0F) * 16), UInt8(clamping: ((p >> 4) & 0x0F) * 16))
+    }
+
+    /// A packed tint (r + g*256 + b*65536) as RGB565: white stays exact.
+    static func tint565(_ v: Float) -> UInt16 {
+        let t = max(0, min(16777215, Int(v.rounded())))
+        let r = t & 0xFF, g = (t >> 8) & 0xFF, b = (t >> 16) & 0xFF
+        return UInt16((r * 31 + 127) / 255) | UInt16((g * 63 + 127) / 255) << 5 | UInt16((b * 31 + 127) / 255) << 11
     }
 
     private func makeMesh(_ device: MTLDevice, _ verts: [Float], _ indices: [UInt32]) -> GPUMesh? {
