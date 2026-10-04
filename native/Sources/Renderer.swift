@@ -341,7 +341,6 @@ actor Renderer {
         get { appModel.modelTextureHandoff.gpuLogical }
         set { appModel.modelTextureHandoff.gpuLogical = newValue }
     }
-    var captureTexture: MTLTexture?   // CPU-readable copy of a frame, for screenshots
     let entityPipelineState: MTLRenderPipelineState
     let handPipelineState: MTLRenderPipelineState
 
@@ -1875,15 +1874,6 @@ actor Renderer {
         pushQuadV9(&hudScratchGV, bl, br, br + up * (2 * hh), bl + up * (2 * hh), layer: 0, shade: 1, light: 255, tint: 16777215)
         upload(hudScratchGV, into: &hudGlassVertexBuffer); upload(Self.hudGlassIdx, into: &hudGlassIndexBuffer)
         hudGlassIndexCount = Self.hudGlassIdx.count
-    }
-
-    private func ensureCaptureTexture(like src: MTLTexture) {
-        if let ct = captureTexture, ct.width == src.width, ct.height == src.height { return }
-        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: src.pixelFormat,
-                                                         width: src.width, height: src.height, mipmapped: false)
-        d.storageMode = .shared
-        d.usage = [.shaderRead]
-        captureTexture = device.makeTexture(descriptor: d)
     }
 
     // MARK: Photo mode
