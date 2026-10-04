@@ -3,6 +3,7 @@
 // simulator/dev aids only; the ones that send chat commands (/grantme, /giveme,
 // /teleport, /setblock) are ordinary Luanti chat run against the developer's own
 // local dev world to stage a test scene.
+import CryptoKit
 import Foundation
 import os
 import Darwin
@@ -502,6 +503,24 @@ final class WorldSession {
     private let input = GameInput()
     private var worldReadyLogged = false
     private var seedAsked = false   // /seed sent on join; its reply is logged as [seed]
+    private var statusAsked = false // /status sent on join; logged as [world] status
+
+    /// One join's facts for rebuilding its map offline with the same game
+    /// build: the media fingerprint pins the exact game and mod versions
+    /// (VoxeLibre has no version command), the mod list names them, and the
+    /// join position says where to look. The mapgen type and its settings
+    /// never reach a client. Session queue.
+    private func logWorldFacts() {
+        let fp = client.media.fingerprint()
+        let names = client.nodes.allNames().values
+        var mods = Set<String>()
+        for n in names { if let c = n.firstIndex(of: ":") { mods.insert(String(n[..<c])) } }
+        let modList = mods.sorted().joined(separator: " ")
+        let modHash = SHA256.hash(data: Data(modList.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+        let feet = player.snapshot().feet
+        print("[world] \(Self.host):\(Self.port) proto=\(client.protoVer) media=\(fp.files) mediafp=\(fp.hash) nodes=\(names.count) items=\(client.items.count) mods=\(mods.count) modsfp=\(modHash) join=(\(Int(feet.x.rounded())),\(Int(feet.y.rounded())),\(Int(feet.z.rounded())))")
+        print("[world] mods: \(modList)"); fflush(stdout)
+    }
     private var skyBrightnessSmooth: Float = 1   // day-bank light at the head, 0..1, eased (cave fog)
     /// sky.cpp getWickedTimeOfDay: night takes 0.415 of the cycle.
     static func wickedTimeOfDay(_ t: Float) -> Float {
@@ -899,6 +918,14 @@ final class WorldSession {
                 self?.seedAsked = false
                 let plain = Formspec.cleanColored(text, caller: "seed").text
                 print("[seed] \(Self.host):\(Self.port) \(plain)"); fflush(stdout)
+            }
+            // /status: the Luanti server version, game name and uptime.
+            if self?.statusAsked == true, sender.isEmpty, text.hasPrefix("# Server") {
+                self?.statusAsked = false
+                // Minus the "clients:" list: other players' names aren't map facts.
+                var st = Formspec.cleanColored(text, caller: "status").text
+                if let r = st.range(of: " | clients:") { st = String(st[..<r.lowerBound]) }
+                print("[world] status \(st)"); fflush(stdout)
             }
         }
         client.objects.floorTop = { [weak self] lo, hi in self?.entityFloorTop(lo: lo, hi: hi) }
@@ -10567,8 +10594,13 @@ final class WorldSession {
             if posted, hasWorldGeom {
                 if !self.worldReadyLogged {
                     self.worldReadyLogged = true; print("[session] world ready (first geometry posted) \(PerfStats.uptime())"); fflush(stdout)
-                    // Ask every server for its world seed, for the log (chat isn't shown).
-                    self.queue.async { self.seedAsked = true; self.client.sendChat("/seed") }
+                    // What a map of this world needs, for the log (chat isn't shown):
+                    // the seed, the server version, and which game build it runs.
+                    self.queue.async {
+                        self.logWorldFacts()
+                        self.seedAsked = true; self.client.sendChat("/seed")
+                        self.statusAsked = true; self.client.sendChat("/status")
+                    }
                 }
                 self.queue.async { self.deniedReason = nil }   // back in: drop the old kick/shutdown message
                 DispatchQueue.main.async { [weak self] in

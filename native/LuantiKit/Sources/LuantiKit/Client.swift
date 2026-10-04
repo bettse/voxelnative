@@ -326,7 +326,7 @@ public final class Client {
     private var clientReadySent = false
     private var spawn = SIMD3<Float>(0, 20, 0)   // SERVER-frame node coords; updated by MOVE_PLAYER
     private var dayNightOverride: Float? = nil   // OVERRIDE_DAY_NIGHT_RATIO (cave/Nether/End)
-    var protoVer = 0                              // negotiated protocol version (TOCLIENT_HELLO; test-settable)
+    public var protoVer = 0                              // negotiated protocol version (TOCLIENT_HELLO; test-settable)
     /// Luanti centres node g on g (it spans [g-0.5, g+0.5]); our mesh, physics
     /// and raycast draw node g at [g, g+1]. Every position crossing the wire is
     /// shifted here, once, so nothing downstream needs a +0.5 patch:

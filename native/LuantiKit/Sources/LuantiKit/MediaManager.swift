@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// Downloads media (PNG textures, ...) over the game connection. Parses
@@ -128,6 +129,15 @@ public final class MediaManager {
     }
 
     public func has(_ name: String) -> Bool { store[name] != nil }
+
+    /// The announced files and a hash over their sorted name:sha1 pairs: the
+    /// same game and mods at the same versions give the same fingerprint, so a
+    /// join log says exactly which build a server runs.
+    public func fingerprint() -> (files: Int, hash: String) {
+        let lines = sha1Hex.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)\n" }.joined()
+        let d = SHA256.hash(data: Data(lines.utf8))
+        return (sha1Hex.count, d.prefix(8).map { String(format: "%02x", $0) }.joined())
+    }
     public func bytes(_ name: String) -> Data? { store[name] }
     #if DEBUG
     /// Test seam: store raw bytes under a name (unit tests build synthetic PNGs).
