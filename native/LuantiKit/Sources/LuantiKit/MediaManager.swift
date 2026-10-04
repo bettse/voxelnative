@@ -130,6 +130,15 @@ public final class MediaManager {
 
     public func has(_ name: String) -> Bool { store[name] != nil }
 
+    /// Bytes held: read into memory vs memory-mapped from the cache (pages the
+    /// OS can drop, so they don't count against the app), for the [mem] log.
+    private var mappedNames: Set<String> = []
+    public func memoryBytes() -> (inMemory: Int, mapped: Int) {
+        var a = 0, m = 0
+        for (k, d) in store { if mappedNames.contains(k) { m += d.count } else { a += d.count } }
+        return (a, m)
+    }
+
     /// The announced files and a hash over their sorted name:sha1 pairs: the
     /// same game and mods at the same versions give the same fingerprint, so a
     /// join log says exactly which build a server runs.
@@ -208,6 +217,7 @@ public final class MediaManager {
             let mapped = name.hasSuffix(".ogg")
             if let url = cacheURL(name), let data = try? Data(contentsOf: url, options: mapped ? .alwaysMapped : []) {
                 store[name] = data; requested.insert(name); hits.append(name)
+                if mapped { mappedNames.insert(name) } else { mappedNames.remove(name) }
                 pushedLanded(name)
             }
         }
@@ -252,6 +262,7 @@ public final class MediaManager {
             if name.isEmpty && comp.isEmpty { break }   // ran off the end of a short/corrupt blob
             let data = Zstd.decompress(comp, maxSize: 8 * 1024 * 1024) ?? comp
             store[name] = data
+            mappedNames.remove(name)
             downloaded += 1
             if name.hasSuffix(".ogg") { downloadedSounds.append(name) }
             pushedLanded(name)
@@ -297,7 +308,7 @@ public final class MediaManager {
         for name in downloadedSounds {
             guard let url = cacheURL(name), let d = try? Data(contentsOf: url, options: .alwaysMapped),
                   d.count == store[name]?.count else { continue }
-            store[name] = d; n += 1; bytes += d.count
+            store[name] = d; mappedNames.insert(name); n += 1; bytes += d.count
         }
         downloadedSounds.removeAll()
         print("[media] mapped \(n) downloaded sounds (\(bytes >> 20) MB) from the cache"); fflush(stdout)

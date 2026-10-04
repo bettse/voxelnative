@@ -503,6 +503,26 @@ final class WorldSession {
     private let input = GameInput()
     private var worldReadyLogged = false
     private var seedAsked = false   // /seed sent on join; its reply is logged as [seed]
+
+    /// Every 10 s, where CPU memory goes, next to the renderer's GPU [mem] line:
+    /// a session's footprint grew ~300 MB past what the GPU side explains
+    /// (1.02 GB when visionOS closed the world). Session queue.
+    private var lastCPUMemLog: TimeInterval = 0
+    private func logCPUMemoryIfDue() {
+        let now = AppClock.seconds
+        guard now - lastCPUMemLog >= 10 else { return }
+        lastCPUMemLog = now
+        func mb(_ b: Int) -> String { String(format: "%.1f", Double(b) / 1048576) }
+        var heap = malloc_statistics_t(); malloc_zone_statistics(nil, &heap)
+        let media = client.media.memoryBytes()
+        let nBlocks = client.world.blocks.count
+        let atlasB = atlas.memoryBytes
+        let modelCPU = modelTexData.reduce(0) { $0 + $1.count }
+        print("[mem] cpu heap=\(mb(Int(heap.size_in_use)))MB media=\(mb(media.inMemory))MB(+\(mb(media.mapped)) mapped) " +
+              "mapblocks=\(mb(nBlocks * WorldMap.NODES_PER_BLOCK * 4))MB/\(nBlocks) atlasCPU=\(mb(atlasB.layers))MB " +
+              "atlasCaches=\(mb(atlasB.caches))MB modelCPU=\(mb(modelCPU))MB/\(modelTexData.count) " +
+              "objects=\(client.objects.count) skinCache=\(skinCache.count) \(Self.healthNote())"); fflush(stdout)
+    }
     private var statusAsked = false // /status sent on join; logged as [world] status
 
     /// One join's facts for rebuilding its map offline with the same game
@@ -1148,6 +1168,7 @@ final class WorldSession {
             self.client.poll(dt)
             let t2 = self.perf.now()
             self.perf.add("tick", t0, t1); self.perf.add("poll", t1, t2)
+            self.logCPUMemoryIfDue()
             defer { self.skinMisses = 0 }
             self.perf.endIteration(note: "ents=\(self.client.objects.count) models=\(self.lastModelsDrawn) skinMiss=\(self.skinMisses) verts=\(self.lastModelVerts / 9) particles=\(self.particles.count) spawners=\(self.activeSpawners.count)")
         }

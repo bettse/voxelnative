@@ -549,6 +549,15 @@ public final class TextureAtlas {
     }
     /// Animated tiles' frames by tile name, kept across rebuilds (seed).
     private var animCache: [String: AnimLayer] = [:]
+
+    /// CPU bytes for the [mem] log: layer pixels, and the decode/animation caches.
+    public var memoryBytes: (layers: Int, caches: Int) {
+        let l = layers.reduce(0) { $0 + $1.count } + bigLayers.reduce(0) { $0 + $1.count }
+        var c = 0
+        for (_, v) in decodeCache { c += v.data.count + (v.px?.count ?? 0) }
+        for (_, a) in animCache { c += a.frames.reduce(0) { $0 + $1.count } }
+        return (l, c)
+    }
     private func rawLayer(_ key: String, _ px: [UInt8]) -> Int {
         // Always big: these are overwritten in place as media arrives, so one
         // can't move between the arrays (a flat placeholder, then a real icon).
@@ -610,7 +619,9 @@ public final class TextureAtlas {
             return evaluate(String(token.dropFirst().dropLast()), media: media)
         }
         guard token.lowercased().hasSuffix(".png"), let data = media.bytes(token) else { return nil }
-        return decodeCached(token, data, size: TextureAtlas.tile)
+        // Not cached: a tile is evaluated once and keeps its layer across
+        // rebuilds, so caching its source PNGs only held ~16 MB for nothing.
+        return TextureAtlas.decodePNG(data, size: TextureAtlas.tile)
     }
 
     /// Split on `sep` only at the top nesting level (respecting () and []).
