@@ -253,6 +253,7 @@ public final class MediaManager {
             let data = Zstd.decompress(comp, maxSize: 8 * 1024 * 1024) ?? comp
             store[name] = data
             downloaded += 1
+            if name.hasSuffix(".ogg") { downloadedSounds.append(name) }
             pushedLanded(name)
             if let url = cacheURL(name) {
                 // Populate the on-disk cache for next launch off the tick thread:
@@ -280,6 +281,25 @@ public final class MediaManager {
             print("[media] server skipped \(outstanding.count) requested file(s): \(outstanding.sorted().prefix(8).joined(separator: ", "))"); fflush(stdout)
             outstanding.removeAll()
         }
-        if pending.isEmpty { onComplete?() } else { requestNextBatch() }
+        if pending.isEmpty { remapDownloadedSounds(); onComplete?() } else { requestNextBatch() }
+    }
+
+    /// Sounds that arrived over the network sit in memory as plain Data, unlike
+    /// cache hits, which are memory-mapped (pages the OS can drop and re-read).
+    /// Once the download is done, wait for their cache writes and swap each for
+    /// a mapping of its cached file, so a first join doesn't keep ~57 MB of
+    /// VoxeLibre's OGG resident for the whole session.
+    private var downloadedSounds: [String] = []
+    private func remapDownloadedSounds() {
+        guard !downloadedSounds.isEmpty else { return }
+        Self.cacheQueue.sync {}   // the async cache writes queued before this
+        var n = 0, bytes = 0
+        for name in downloadedSounds {
+            guard let url = cacheURL(name), let d = try? Data(contentsOf: url, options: .alwaysMapped),
+                  d.count == store[name]?.count else { continue }
+            store[name] = d; n += 1; bytes += d.count
+        }
+        downloadedSounds.removeAll()
+        print("[media] mapped \(n) downloaded sounds (\(bytes >> 20) MB) from the cache"); fflush(stdout)
     }
 }
