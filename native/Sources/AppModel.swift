@@ -53,14 +53,17 @@ final class AppModel {
     @ObservationIgnored let player = PlayerState()
     @ObservationIgnored lazy var session = WorldSession(handoff: meshHandoff, entityHandoff: entityHandoff, modelHandoff: modelHandoff, modelTextureHandoff: modelTextureHandoff, handHudHandoff: handHudHandoff, skyboxHandoff: skyboxHandoff, screenshotFlag: screenshotFlag, player: player)
 
-    // PSVR2 Sense controllers are the only input, so the launcher refuses to
-    // connect until BOTH are on, and losing either mid-game drops back to the
-    // launcher (after a short grace so a radio blip doesn't eject you).
+    // The launcher refuses to connect until BOTH Sense controllers (or a
+    // keyboard) are on. Mid-game, only losing ALL input drops back to the
+    // launcher (after a short grace so a radio blip doesn't eject you): one
+    // controller going to sleep just shows a notice, since the other still
+    // walks or digs. It used to eject on either.
     var leftControllerOn = false
     var rightControllerOn = false
     var keyboardOn = false   // a BLE keyboard is an alternative to the Sense pair
     // Ready to play with either BOTH Sense controllers or a keyboard.
     var controllersReady: Bool { (leftControllerOn && rightControllerOn) || keyboardOn }
+    var anyInput: Bool { leftControllerOn || rightControllerOn || keyboardOn }
     @ObservationIgnored private var controllersObserved = false
     @ObservationIgnored private var lossTimer: Timer?
     func observeControllers() {
@@ -96,8 +99,11 @@ final class AppModel {
         keyboardOn = GCKeyboard.coalesced != nil
         print("[input] sense L=\(l) R=\(r) kbd=\(keyboardOn)"); fflush(stdout)
         lossTimer?.invalidate(); lossTimer = nil
-        if controllersReady {
+        if controllersReady || (anyInput && immersiveSpaceState != .closed) {
             if lossCountdownShown { session.showControllerLoss(secondsLeft: nil); lossCountdownShown = false }
+            if !controllersReady, immersiveSpaceState != .closed {
+                session.showOneControllerMissing(left: !leftControllerOn)
+            }
             return
         }
         guard immersiveSpaceState != .closed else { return }
@@ -108,7 +114,7 @@ final class AppModel {
         var left = Self.lossGrace
         lossTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] t in
             guard let self else { t.invalidate(); return }
-            guard !self.controllersReady, self.immersiveSpaceState != .closed else {
+            guard !self.anyInput, self.immersiveSpaceState != .closed else {
                 t.invalidate(); self.lossTimer = nil
                 if self.lossCountdownShown { self.session.showControllerLoss(secondsLeft: nil); self.lossCountdownShown = false }
                 return

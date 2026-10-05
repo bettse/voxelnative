@@ -3586,6 +3586,15 @@ final class WorldSession {
         }
     }
 
+    /// One Sense controller dropped (asleep, battery) while the other still
+    /// works: say so, but stay in the world.
+    func showOneControllerMissing(left: Bool) {
+        queue.async { [weak self] in
+            self?.noticeText = "\(left ? "Left" : "Right") controller disconnected"
+            self?.noticeExpiry = AppClock.seconds + 4
+        }
+    }
+
     /// Called by the renderer once Photos has the clip (or refused it).
     func videoSaved(ok: Bool, denied: Bool) {
         queue.async { [weak self] in
