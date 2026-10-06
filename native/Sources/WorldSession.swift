@@ -5855,6 +5855,48 @@ final class WorldSession {
     /// mcl_bossbars / mcl_potions add them, so the generic path can be
     /// screenshotted headless.
     private static func fakeHudElements() -> [(Int, Client.HudElement)] {
+        fakeHudElementList()
+    }
+    #endif
+
+    /// VoxeLibre's effect HUD is an icon per effect with only the level (II)
+    /// and time left under it; desktop shows no names anywhere, so you have
+    /// to know the icons. Add a right-aligned list under the icon row, one
+    /// line per effect in icon order: "Swiftness II". The icon file
+    /// (mcl_potions_effect_<name>.png) says which effect it is.
+    static func effectNameLines(_ els: [(Int, Client.HudElement)]) -> [(Int, Client.HudElement)] {
+        let prefix = "mcl_potions_effect_"
+        let icons = els.filter { $0.1.type == 0 && $0.1.text.hasPrefix(prefix) }.sorted { $0.1.offset.x > $1.1.offset.x }
+        guard !icons.isEmpty else { return [] }
+        func textAt(_ e: Client.HudElement, dy: Float) -> String {
+            // Non-empty: mcl_potions pre-creates every slot's label, blank until used.
+            els.first { $0.1.type == 1 && !$0.1.text.isEmpty && $0.1.pos == e.pos
+                && abs($0.1.offset.x - (e.offset.x + 22)) < 1 && abs($0.1.offset.y - dy) < 1 }?.1.text ?? ""
+        }
+        var out: [(Int, Client.HudElement)] = []
+        for (k, (_, e)) in icons.enumerated() {
+            let key = e.text.dropFirst(prefix.count).prefix { $0 != "." && $0 != "^" }
+            var line = effectDisplayName(String(key))
+            let level = textAt(e, dy: 50)   // the time left already shows under the icon
+            if !level.isEmpty { line += " " + level }
+            var t = Client.HudElement()
+            t.type = 1; t.text = line; t.pos = SIMD2(1, 0); t.align = SIMD2(-1, 1)
+            t.offset = SIMD2(-12, 84 + Float(k) * 17); t.number = 0xFFFFFF; t.zIndex = 100; t.style = 1
+            out.append((2_000_000 + k, t))
+        }
+        return out
+    }
+    /// mcl_potions effect name -> its in-game name (title case, two exceptions).
+    static func effectDisplayName(_ key: String) -> String {
+        switch key {
+        case "dolphin_grace": return "Dolphin's Grace"
+        case "hero_of_village": return "Hero of the Village"
+        default: return key.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+        }
+    }
+
+    #if targetEnvironment(simulator)
+    private static func fakeHudElementList() -> [(Int, Client.HudElement)] {
         func el(_ type: Int, _ text: String, pos: SIMD2<Float>, align: SIMD2<Float>, offset: SIMD2<Float>,
                 scale: SIMD2<Float> = SIMD2(1, 1), number: Int = 0xFFFFFF, z: Int = 0) -> Client.HudElement {
             var e = Client.HudElement()
@@ -5868,7 +5910,9 @@ final class WorldSession {
             (9002, el(0, "(mcl_bossbars.png^[transformR270^[verticalframe:14:4^(mcl_bossbars_empty.png^[lowpart:60:mcl_bossbars.png^[transformR270^[verticalframe:14:5))^[resize:1456x40",
                       pos: SIMD2(0.5, 0), align: SIMD2(0, 1), offset: SIMD2(0, 65), scale: SIMD2(0.375, 0.375))),
             (9003, el(0, "mcl_potions_effect_swiftness.png", pos: SIMD2(1, 0), align: SIMD2(1, 1), offset: SIMD2(-54, 3), scale: SIMD2(0.375, 0.375), z: 100)),
-            (9004, el(1, "Swiftness II", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 50), z: 100)),
+            // What mcl_potions really sends: the level alone under the icon
+            // (the name comes from effectNameLines).
+            (9004, el(1, "II", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 50), z: 100)),
             (9005, el(1, "0:42", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 65), z: 100)),
         ]
     }
@@ -5926,6 +5970,9 @@ final class WorldSession {
         #if targetEnvironment(simulator)
         let hudBaseCount = elems.count
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
+        #endif
+        elems.append(contentsOf: Self.effectNameLines(elems))
+        #if targetEnvironment(simulator)
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
         // adds (awards/api.lua), including the icon-as-statbar, to verify.
         if UserDefaults.standard.bool(forKey: "vrdev.fakeAward") || UserDefaults.standard.bool(forKey: "vrdev.awardTest") {
