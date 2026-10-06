@@ -247,6 +247,9 @@ public final class NodeRegistry {
     public func digSound(_ id: UInt16) -> String? { lock.withLockUnchecked { digSounds[id] } }
     private var footstepSounds: [UInt16: String] = [:]   // node -> "footstep" sound group (walking on it)
     public func footstepSound(_ id: UInt16) -> String? { lock.withLockUnchecked { footstepSounds[id] } }
+    private var footstepGains: [UInt16: (gain: Float, pitch: Float)] = [:]
+    /// The footstep's own gain/pitch from this node's definition, else (1, 1).
+    public func footstepGain(_ id: UInt16) -> (gain: Float, pitch: Float) { lock.withLockUnchecked { footstepGains[id] ?? (1, 1) } }
     // node_dig_prediction: the node this one turns INTO when dug (rare; most dig to
     // air). Lets the local dig prediction show the right result instead of a hole.
     private var digPredictions: [UInt16: String] = [:]
@@ -632,11 +635,18 @@ public final class NodeRegistry {
             if let collConnect { collisionConnectBoxes[id] = collConnect }
         }
         if r.overrun { return }
-        let footstep = readSoundSpec(r)                  // sound_footstep (played while walking on it)
-        let dig = readSoundSpec(r)                       // sound_dig (looped while mining)
-        let dug = readSoundSpec(r)                       // sound_dug (played on break)
+        // The footstep's gain is kept per node, not in the by-name table:
+        // VoxeLibre plays the same file for a footstep (gain 0.2) and the
+        // break (gain 1.0), and the break, read after it, overwrote the
+        // footstep's gain, so steps on stone played 5x too loud.
+        let footstep = readSoundSpec(r, keepGain: false)  // sound_footstep (played while walking on it)
+        let dig = readSoundSpec(r).name                    // sound_dig (looped while mining)
+        let dug = readSoundSpec(r).name                    // sound_dug (played on break)
         if r.overrun { return }
-        if !footstep.isEmpty { footstepSounds[id] = footstep }
+        if !footstep.name.isEmpty {
+            footstepSounds[id] = footstep.name
+            footstepGains[id] = (footstep.gain > 0 ? footstep.gain : 1, footstep.pitch)
+        }
         if !dig.isEmpty { digSounds[id] = dig }
         if !dug.isEmpty { dugSounds[id] = dug }
         // Tail: legacy flags, node_dig_prediction, leveled_max, alpha,
@@ -670,11 +680,11 @@ public final class NodeRegistry {
     /// The gain/pitch are kept per sound NAME (VoxeLibre defines them
     /// consistently per sound: sand footsteps at 0.045, wood at 0.3) so the
     /// client plays a node sound at the mod's volume, not 1.0.
-    private func readSoundSpec(_ r: PacketReader) -> String {
+    private func readSoundSpec(_ r: PacketReader, keepGain: Bool = true) -> (name: String, gain: Float, pitch: Float) {
         let name = r.string16()
         let gain = r.f32(), pitch = r.f32(); _ = r.f32()
-        if !name.isEmpty, gain > 0 { soundGains[name] = (gain, pitch > 0 ? pitch : 1) }
-        return name
+        if keepGain, !name.isEmpty, gain > 0 { soundGains[name] = (gain, pitch > 0 ? pitch : 1) }
+        return (name, gain, pitch > 0 ? pitch : 1)
     }
     private var soundGains: [String: (gain: Float, pitch: Float)] = [:]
     /// (gain, pitch) a node definition gave this sound name, else (1, 1).

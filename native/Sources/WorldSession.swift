@@ -3108,7 +3108,10 @@ final class WorldSession {
             let dy: Float = inLiquid ? 0 : ph.grounded ? 0.05 : 0.5
             return SIMD3(Int(floor(ph.feet.x)), Int(floor(ph.feet.y - dy)), Int(floor(ph.feet.z)))
         }
-        func playStep() { let n = stepNode(); stepCount += 1; playNodeSound(client.nodes.footstepSound(client.world.nodeId(n)), at: n) }
+        func playStep() {
+            let n = stepNode(), id = client.world.nodeId(n); stepCount += 1
+            playNodeSound(client.nodes.footstepSound(id), at: n, gain: client.nodes.footstepGain(id))
+        }
         if bobbing {
             let was = stepPhase
             stepPhase = (stepPhase + dt * min(spd * 10, 70) * 0.03).truncatingRemainder(dividingBy: 1)
@@ -3713,10 +3716,10 @@ final class WorldSession {
         // happen TO the player: damage and knockback.
     }
     /// Play a node sound group positionally at a node (dig loop / dug on break).
-    private func playNodeSound(_ name: String?, at node: SIMD3<Int>) {
+    private func playNodeSound(_ name: String?, at node: SIMD3<Int>, gain spec: (gain: Float, pitch: Float)? = nil) {
         guard let name, !name.isEmpty else { return }
         let pos = SIMD3<Float>(Float(node.x) + 0.5, Float(node.y) + 0.5, Float(node.z) + 0.5)   // node centre in our [g,g+1] grid (built locally, so gridShift is not applied)
-        let g = client.nodes.soundGain(name)   // the NODEDEF's gain/pitch for this sound
+        let g = spec ?? client.nodes.soundGain(name)   // the NODEDEF's gain/pitch for this sound
         // The engine plays these client-made sounds 2D at their own gain
         // (sound_maker.cpp); positional playback multiplies by 3, and at the
         // sub-3-node distance of your own feet or hands nothing attenuates
@@ -6562,8 +6565,9 @@ final class WorldSession {
             guard simd_distance(e.pos, me) < 16 else { continue }
             let p = e.pos + SIMD3(0, e.cbMin.y - 0.5, 0)
             let under = SIMD3(Int(floor(p.x)), Int(floor(p.y)), Int(floor(p.z)))
-            guard let name = client.nodes.footstepSound(client.world.nodeId(under)), !name.isEmpty else { continue }
-            let g = client.nodes.soundGain(name)
+            let uid = client.world.nodeId(under)
+            guard let name = client.nodes.footstepSound(uid), !name.isEmpty else { continue }
+            let g = client.nodes.footstepGain(uid)
             playSound(SoundSpec(id: -1, name: name, gain: g.gain * 0.6, type: 1, pos: e.pos,
                                 objectId: 0, loop: false, fade: 0, pitch: g.pitch, ephemeral: true))
         }
