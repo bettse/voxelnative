@@ -5859,32 +5859,24 @@ final class WorldSession {
     }
     #endif
 
-    /// VoxeLibre's effect HUD is an icon per effect with only the level (II)
-    /// and time left under it; desktop shows no names anywhere, so you have
-    /// to know the icons. Add a right-aligned list under the icon row, one
-    /// line per effect in icon order: "Swiftness II". The icon file
+    /// The active status effects as (icon texture, "Name Level"), right to
+    /// left like the HUD row. VoxeLibre's effect HUD is just an icon with the
+    /// level (II) and time left; desktop names them nowhere, so the open
+    /// inventory lists them beside the panel. The icon file
     /// (mcl_potions_effect_<name>.png) says which effect it is.
-    static func effectNameLines(_ els: [(Int, Client.HudElement)]) -> [(Int, Client.HudElement)] {
+    static func activeEffects(_ els: [(Int, Client.HudElement)]) -> [(icon: String, label: String, time: String)] {
         let prefix = "mcl_potions_effect_"
         let icons = els.filter { $0.1.type == 0 && $0.1.text.hasPrefix(prefix) }.sorted { $0.1.offset.x > $1.1.offset.x }
-        guard !icons.isEmpty else { return [] }
         func textAt(_ e: Client.HudElement, dy: Float) -> String {
             // Non-empty: mcl_potions pre-creates every slot's label, blank until used.
             els.first { $0.1.type == 1 && !$0.1.text.isEmpty && $0.1.pos == e.pos
                 && abs($0.1.offset.x - (e.offset.x + 22)) < 1 && abs($0.1.offset.y - dy) < 1 }?.1.text ?? ""
         }
-        var out: [(Int, Client.HudElement)] = []
-        for (k, (_, e)) in icons.enumerated() {
+        return icons.map { (_, e) in
             let key = e.text.dropFirst(prefix.count).prefix { $0 != "." && $0 != "^" }
-            var line = effectDisplayName(String(key))
-            let level = textAt(e, dy: 50)   // the time left already shows under the icon
-            if !level.isEmpty { line += " " + level }
-            var t = Client.HudElement()
-            t.type = 1; t.text = line; t.pos = SIMD2(1, 0); t.align = SIMD2(-1, 1)
-            t.offset = SIMD2(-12, 84 + Float(k) * 17); t.number = 0xFFFFFF; t.zIndex = 100; t.style = 1
-            out.append((2_000_000 + k, t))
+            let level = textAt(e, dy: 50)
+            return (e.text, effectDisplayName(String(key)) + (level.isEmpty ? "" : " " + level), textAt(e, dy: 65))
         }
-        return out
     }
     /// mcl_potions effect name -> its in-game name (title case, two exceptions).
     static func effectDisplayName(_ key: String) -> String {
@@ -5971,7 +5963,6 @@ final class WorldSession {
         let hudBaseCount = elems.count
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
         #endif
-        elems.append(contentsOf: Self.effectNameLines(elems))
         #if targetEnvironment(simulator)
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
         // adds (awards/api.lua), including the icon-as-statbar, to verify.
@@ -6574,6 +6565,52 @@ final class WorldSession {
                        layer: highlightLayer, tint: Self.packTint(20, 20, 25), v: &v, idx: &idx)
             appendQuad(center: toOrigin(lc + toward * 0.002), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
                        layer: t.layer, tint: tip.color ?? 16777215, v: &v, idx: &idx)
+        }
+        // Active status effects, named, to the right of the panel: the HUD only
+        // shows their icons and time left.
+        var effectEls = client.hudElements.map { ($0.key, $0.value) }
+        #if targetEnvironment(simulator)
+        if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { effectEls += Self.fakeHudElementList() }
+        #endif
+        let effects = Self.activeEffects(effectEls)
+        if !effects.isEmpty {
+            // Like Minecraft's inventory: a dark tile per effect, icon on the
+            // left, name on top, time left under it in grey.
+            let tileH: Float = 0.085, gap: Float = 0.012, ic: Float = 0.026, th: Float = 0.017, pad: Float = 0.016
+            let rows = effects.enumerated().compactMap { (k, fx) -> (icon: (layer: Int, uv: SIMD2<Float>)?, name: (layer: Int, aspect: Float), time: (layer: Int, aspect: Float)?)? in
+                guard let n = formspecLabelLayer(fx.label) else { return nil }
+                // The time changes every second: a per-row text layer redrawn in
+                // place (like the HUD timers), not a new cached label each tick.
+                let t = fx.time.isEmpty ? nil : hudTextLayer(id: 3_000_000 + k, text: fx.time)
+                return (hudImage(fx.icon).map { (layer: $0.layer, uv: $0.uv) }, (layer: n.layer, aspect: n.aspect), t)
+            }
+            let textW = rows.map { th * 2 * max(0.4, max($0.name.aspect, $0.time?.aspect ?? 0)) }.max() ?? 0
+            let w = pad * 3 + ic * 2 + textW
+            let left = uMax + 0.03
+            for (k, r) in rows.enumerated() {
+                let top = vMax - Float(k) * (tileH + gap)
+                let mid = top - tileH * 0.5
+                let plate = fr.center + fr.right * (left + w * 0.5) + fr.up * mid
+                appendQuad(center: toOrigin(plate - toward * 0.003), right: oRight, up: oUp, hw: w * 0.5 + 0.003, hh: tileH * 0.5 + 0.003,
+                           layer: highlightLayer, tint: Self.packTint(110, 110, 115), v: &v, idx: &idx)   // light rim
+                appendQuad(center: toOrigin(plate - toward * 0.004), right: oRight, up: oUp, hw: w * 0.5, hh: tileH * 0.5,
+                           layer: highlightLayer, tint: Self.packTint(38, 38, 42), v: &v, idx: &idx)
+                if let icon = r.icon {
+                    let c = fr.center + fr.right * (left + pad + ic) + fr.up * mid - toward * 0.007
+                    appendOverlayQuadUV(center: toOrigin(c), right: oRight, up: oUp, hw: ic, hh: ic,
+                                        layer: icon.layer, uv: icon.uv, tint: 16777215, v: &v, idx: &idx)
+                }
+                let x0 = left + pad * 2 + ic * 2
+                let nw = th * max(0.4, r.name.aspect)
+                appendQuad(center: toOrigin(fr.center + fr.right * (x0 + nw) + fr.up * (mid + th * 1.05) - toward * 0.007),
+                           right: oRight, up: oUp, hw: nw, hh: th, layer: r.name.layer, tint: 16777215, v: &v, idx: &idx)
+                if let t = r.time {
+                    // The timer renderer draws taller glyphs than the label one; 0.75 matches them.
+                    let tth = th * 0.75, tw = tth * max(0.4, t.aspect)
+                    appendQuad(center: toOrigin(fr.center + fr.right * (x0 + tw) + fr.up * (mid - th * 1.05) - toward * 0.007),
+                               right: oRight, up: oUp, hw: tw, hh: tth, layer: t.layer, tint: Self.packTint(170, 170, 170), v: &v, idx: &idx)
+                }
+            }
         }
         if let hi = invHover, let st = inventoryStack(invSlots[hi]), let nl = invNameLayer(st.name, stack: st) {
             let lc = fr.center + fr.up * (vMax + 0.16) + toward * 0.01
