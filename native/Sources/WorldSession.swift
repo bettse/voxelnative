@@ -1073,7 +1073,7 @@ final class WorldSession {
             // texture: VoxeLibre's weather adds ~37 short-lived spawners a second,
             // 13k lines in a 6-minute snowy session.
             guard let self else { return }
-            if self.spawnerLogged.insert(sp.texture).inserted { print("[spawner] id=\(sp.serverId) tex=\(sp.texture) size=\(sp.sizeMin)..\(sp.sizeMax) amount=\(sp.amount) attached=\(sp.attachedId) pos=\(sp.posMin)..\(sp.posMax) anim=\(sp.look.animType):\(sp.look.animA)x\(sp.look.animB)/\(sp.look.animLength)s glow=\(sp.look.glow) node=\(sp.look.nodeId)"); fflush(stdout) }
+            if self.spawnerLogged.insert(sp.texture).inserted { print("[spawner] id=\(sp.serverId) tex=\(sp.texture) size=\(sp.sizeMin)..\(sp.sizeMax) end=\(sp.sizeMinEnd.map { "\($0)" } ?? "-")..\(sp.sizeMaxEnd.map { "\($0)" } ?? "-") scale=\(sp.look.scaleStart)->\(sp.look.scaleEnd) amount=\(sp.amount) attached=\(sp.attachedId) pos=\(sp.posMin)..\(sp.posMax) anim=\(sp.look.animType):\(sp.look.animA)x\(sp.look.animB)/\(sp.look.animLength)s glow=\(sp.look.glow) node=\(sp.look.nodeId)"); fflush(stdout) }
             self.activeSpawners[sp.serverId] = ActiveSpawner(spec: sp, emitted: 0, age: 0, gone: 0)
         }
         client.onDeleteParticleSpawner = { [weak self] id in self?.activeSpawners.removeValue(forKey: id) }
@@ -5906,6 +5906,10 @@ final class WorldSession {
             // (the name comes from effectNameLines).
             (9004, el(1, "II", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 50), z: 100)),
             (9005, el(1, "0:42", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 65), z: 100)),
+            // A second effect with no level: a blank label above its timer.
+            (9006, el(0, "mcl_potions_effect_night_vision.png", pos: SIMD2(1, 0), align: SIMD2(1, 1), offset: SIMD2(-106, 3), scale: SIMD2(0.375, 0.375), z: 100)),
+            (9007, el(1, "", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-84, 50), z: 100)),
+            (9008, el(1, "3:54", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-84, 65), z: 100)),
         ]
     }
     #endif
@@ -6026,9 +6030,12 @@ final class WorldSession {
             }
         }
         #endif
-        // Visible text lines, for the stacking check in the text case below.
+        // Text lines, for the stacking check in the text case below. Empty ones
+        // count too: the server laid out that row even when it's blank, and an
+        // effect with no level (blank label above its timer) left the timer
+        // with no neighbour, so it drew at full size, huge under the icons.
         let textLines: [(id: Int, pos: SIMD2<Float>, off: SIMD2<Float>)] = elems.compactMap { (id, e) in
-            e.type == 1 && !e.text.isEmpty && !skip.contains(id) ? (id, e.pos, e.offset) : nil
+            e.type == 1 && !skip.contains(id) ? (id, e.pos, e.offset) : nil
         }
         for (id, e) in elems where !skip.contains(id) && drawn < 128 {
             // statbar/inventory/compass/minimap/hotbar aren't drawn here EXCEPT
@@ -7017,8 +7024,14 @@ final class WorldSession {
         billboards.append(contentsOf: hud)
         // Break-burst debris: small camera-facing billboards of the broken
         // node's tile, shrinking toward zero as they age out.
+        // Particles inside your head aren't drawn: status effects spawn their
+        // swirls at your own position, and one a few centimetres from the eye
+        // filled the view. Desktop's camera near plane clips those; the
+        // headset's sits far closer.
+        let head = player.rayOrigin()
         for i in particles.indices {
             let p = particles[i]
+            if simd_distance_squared(p.pos, head) < 0.5 * 0.5 { continue }
             // Particle size is constant over its life unless the texture carries
             // a scale tween (Particle::updateVertices); the old shrink-to-zero
             // made every smoke puff collapse instead of just vanishing.
