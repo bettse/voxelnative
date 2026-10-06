@@ -98,6 +98,11 @@ def upload_screenshots(paths, display_type="APP_APPLE_VISION_PRO"):
     """Replace the editable version's screenshots for one display type with
     `paths`, in order: reserve each file, PUT its bytes to the URLs Apple hands
     back, commit it with an MD5, then set the set's order."""
+    # Every file must be readable before the old set is deleted: a bad path
+    # used to fail mid-way and leave the store listing with no screenshots.
+    missing = [p for p in paths if not os.path.isfile(p)]
+    if missing:
+        sys.exit(f"not found, nothing changed: {', '.join(missing)}")
     aid = app_id()
     versions = request("GET", f"/v1/apps/{aid}/appStoreVersions")["data"]
     ver = next(v for v in versions if v["attributes"]["appStoreState"] in
