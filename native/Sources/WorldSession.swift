@@ -503,6 +503,7 @@ final class WorldSession {
     private let input = GameInput()
     private var worldReadyLogged = false
     private var seedAsked = false   // /seed sent on join; its reply is logged as [seed]
+    private var everAuthenticated = false   // the server answered a login this session (see scheduleReconnect)
     /// VoxeLibre's coordinate readout (/whereami), from the server's reply;
     /// nil until the join-time query answers or on a game without it.
     private var coordsShown: Bool?
@@ -765,6 +766,7 @@ final class WorldSession {
         client.onAuthenticated = { [weak self] seed in
             print("[session] AUTHENTICATED map_seed=\(seed) \(PerfStats.uptime())"); fflush(stdout)
             self?.reconnectAttempts = 0
+            self?.everAuthenticated = true
             self?.setPhase(.streaming)
         }
         client.onSpawn = { [weak self] pos, yaw, pitch in
@@ -1154,6 +1156,7 @@ final class WorldSession {
             guard let self else { return }
             self.stopped = false
             self.reconnectAttempts = 0
+            self.everAuthenticated = false
             self.reconnectPending = false
             self.connEpoch += 1
             self.fatalDenied = false
@@ -1230,6 +1233,16 @@ final class WorldSession {
             guard let self else { return }
             if self.stopped || reason == "app exited" || reason == "client disconnect" { return }
             if self.fatalDenied { return }   // wrong password / name not allowed: don't hammer the server
+            // Silence from a server we've never reached this session is an
+            // offline server (or a wrong address): two unanswered attempts and
+            // we say so. The long retry run is for a server that IS answering
+            // but still holds our name after an unclean exit, which is an
+            // ACCESS_DENIED, not a timeout.
+            if reason == "no answer from server", !self.everAuthenticated, self.reconnectAttempts >= 1 {
+                print("[session] giving up: no answer from \(Self.host):\(Self.port)"); fflush(stdout)
+                self.setPhase(.failed("no answer from \(Self.host):\(Self.port)"))
+                return
+            }
             if self.reconnectPending || self.reconnectAttempts >= 25 {
                 if self.reconnectAttempts >= 25 { self.setPhase(.failed("server unreachable")) }
                 return

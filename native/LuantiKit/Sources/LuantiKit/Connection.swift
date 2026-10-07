@@ -248,7 +248,9 @@ public final class Connection {
             handleDatagram(pkt)
             if !(isConnected || connecting) { return }
         }
-        if connecting && time - connectStarted > 10.0 { finish("no answer from server"); return }
+        // 6 s, not the desktop's 10: a reachable server answers the HELLO in
+        // well under a second, and the headset user is standing there waiting.
+        if connecting && time - connectStarted > 6.0 { finish("no answer from server"); return }
         if time - lastReceived > Self.PEER_TIMEOUT { finish("timed out"); return }
         for c in 0..<Self.CHANNEL_COUNT {
             let ch = channels[c]

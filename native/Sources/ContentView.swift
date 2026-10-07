@@ -273,6 +273,9 @@ struct ContentView: View {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)   // spinner until the world is ready
                     Text(phaseText).font(.callout).foregroundStyle(.secondary)
+                    // An offline server used to mean standing here until the
+                    // attempts ran out, with no way to stop.
+                    Button("Cancel") { cancelConnect() }.controlSize(.small)
                 }
             }
             if case .failed(let reason) = appModel.connPhase {
@@ -376,11 +379,25 @@ struct ContentView: View {
     /// 30 s covers the reconnects a relaunch needs while the server still holds
     /// our name from an unclean exit (~30 s).
     static let loginTimeout: TimeInterval = 30
+    /// Stop a connect attempt from the launcher. The session's own stop
+    /// sends the goodbye and drops any pending reconnect.
+    private func cancelConnect() {
+        print("[launcher] connect cancelled"); fflush(stdout)
+        connecting = false
+        appModel.session.stop()
+        Task {
+            // After the stop settles, like the timeout path: a phase the session
+            // queue already posted would otherwise land on top of this.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if !connecting { appModel.connPhase = .idle }
+        }
+    }
     private func loginThenOpenWorld() async {
         appModel.observeLifecycle()
         appModel.startSession()
         let deadline = Date().addingTimeInterval(Self.loginTimeout)
         while true {
+            if !connecting { return }   // cancelled from the launcher
             switch appModel.connPhase {
             case .streaming, .playing:
                 await openWorld(); return
