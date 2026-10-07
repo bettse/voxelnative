@@ -5892,6 +5892,36 @@ final class WorldSession {
             return (e.text, effectDisplayName(String(key)) + (level.isEmpty ? "" : " " + level), textAt(e, dy: 65))
         }
     }
+    /// mcl_info's coordinate readout ("Location: Overworld: x:117.4 y:37.0
+    /// z:93.7", plus a black shadow copy 1 px off) redrawn as three columns
+    /// top-left, the mirror of the status effects top-right: x, y, z labels
+    /// on the effects' level row, whole-number values on their time row.
+    /// The realm is dropped (you can see which one you're in) and so is the
+    /// word Location. Values are floored: the block you stand in.
+    static func coordinateColumns(_ els: [(Int, Client.HudElement)]) -> [(Int, Client.HudElement)] {
+        guard let src = els.first(where: { $0.1.type == 1 && $0.1.text.hasPrefix("Location:") }) else { return els }
+        var out = els.filter { !($0.1.type == 1 && $0.1.text.hasPrefix("Location:")) }
+        func value(_ axis: String) -> Int? {
+            guard let r = src.1.text.range(of: axis + ":") else { return nil }
+            let rest = src.1.text[r.upperBound...]
+            let num = rest.prefix { $0 == "-" || $0 == "." || $0.isNumber }
+            return Float(num).map { Int(floor($0)) }
+        }
+        for (k, axis) in ["x", "y", "z"].enumerated() {
+            guard let v = value(axis) else { continue }
+            // Column centres 52 px apart from the left edge, like the effect
+            // icons from the right (-54, -106, ...), text rows 50 and 65.
+            let cx: Float = 30 + 52 * Float(k)
+            var label = Client.HudElement()
+            label.type = 1; label.text = axis; label.pos = SIMD2(0, 0); label.align = SIMD2(0, 1)
+            label.offset = SIMD2(cx, 50); label.number = 0xCCCAC0; label.zIndex = 100; label.style = 1
+            var val = label
+            val.text = String(v); val.offset = SIMD2(cx, 65); val.number = 0xFFFFFF
+            out.append((2_100_000 + k, label)); out.append((2_100_010 + k, val))
+        }
+        return out
+    }
+
     /// mcl_potions effect name -> its in-game name (title case, two exceptions).
     static func effectDisplayName(_ key: String) -> String {
         switch key {
@@ -5981,6 +6011,7 @@ final class WorldSession {
         let hudBaseCount = elems.count
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
         #endif
+        elems = Self.coordinateColumns(elems)
         #if targetEnvironment(simulator)
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
         // adds (awards/api.lua), including the icon-as-statbar, to verify.
