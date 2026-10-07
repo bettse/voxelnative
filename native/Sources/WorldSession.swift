@@ -8532,6 +8532,14 @@ final class WorldSession {
                                      light: Float, tint: Float, v: inout [Float], idx: inout [UInt32]) {
         let scale = PlayerState.scale
         let hx = size.x * 0.5, hy = size.y * 0.5
+        // 3 cm toward the head. These lie almost on a surface (an item frame's
+        // map is 1.75 cm off the frame's back, sign text a hair off the sign),
+        // and model geometry is built per tick then corrected for head motion
+        // per frame, so a few mm of wobble made the map z-fight its frame.
+        var pos = pos
+        let toHead = player.rayOrigin() - pos
+        let dh = simd_length(toHead)
+        if dh > 0.1 { pos += toHead / dh * 0.03 }
         let rx = (pos.x - eye.x) * scale, ry = (pos.y - eye.y) * scale, rz = (pos.z - eye.z) * scale
         let op = SIMD3<Float>(rx * cosY - rz * sinY, ry, rx * sinY + rz * cosY)
         let ca = cos(yaw), sa = sin(yaw)
