@@ -155,7 +155,7 @@ final class WorldSession {
     // confused more than helped). Stored, not computed: it was read per
     // option per tick while the menu was open, rebuilding the array each time.
     private let koganeOptions: [String] = {
-        var o = ["Resume", "Take photo", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
+        var o = ["Resume", "Take photo", "Coordinates", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
         if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 2) }
         return o
     }()
@@ -503,6 +503,9 @@ final class WorldSession {
     private let input = GameInput()
     private var worldReadyLogged = false
     private var seedAsked = false   // /seed sent on join; its reply is logged as [seed]
+    /// VoxeLibre's coordinate readout (/whereami), from the server's reply;
+    /// nil until the join-time query answers or on a game without it.
+    private var coordsShown: Bool?
 
     /// Every 10 s, where CPU memory goes, next to the renderer's GPU [mem] line:
     /// a session's footprint grew ~300 MB past what the GPU side explains
@@ -938,6 +941,11 @@ final class WorldSession {
                 self?.seedAsked = false
                 let plain = Formspec.cleanColored(text, caller: "seed").text
                 print("[seed] \(Self.host):\(Self.port) \(plain)"); fflush(stdout)
+            }
+            // /whereami replies ("Show location is set to: 1" / "set to 0"):
+            // the coordinates toggle's state.
+            if sender.isEmpty, text.contains("Show location"), let d = text.last(where: { $0.isNumber }) {
+                self?.coordsShown = d != "0"
             }
             // /status: the Luanti server version, game name and uptime.
             if self?.statusAsked == true, sender.isEmpty, text.hasPrefix("# Server") {
@@ -3656,6 +3664,12 @@ final class WorldSession {
         case "Take photo":
             koganeMenuOpen = false
             startPhotoCountdown(3)
+        case "Coordinates":
+            // VoxeLibre's /whereami (no privilege needed) turns its own
+            // coordinate readout on or off, and keeps the choice in player meta.
+            // The menu stays open so the dot shows the server's answer.
+            client.sendChat(coordsShown == true ? "/whereami 0" : "/whereami 1")
+            return
         case "Exit to menu":
             koganeMenuOpen = false
             DispatchQueue.main.async { [weak self] in self?.appModel?.requestExit(.toMenu) }
@@ -6076,8 +6090,11 @@ final class WorldSession {
                 // lines fit like desktop while lone text keeps its full size.
                 var gap = Float.infinity
                 for o in textLines where o.id != id && o.pos == e.pos && abs(o.off.x - e.offset.x) < 40 {
+                    // Under 3 px is the same line, not a neighbour: mcl_info draws
+                    // a black copy 1 px off as a shadow, which squeezed the
+                    // coordinate readout to a smudge.
                     let dy = abs(o.off.y - e.offset.y)
-                    if dy > 0.5 { gap = min(gap, dy) }
+                    if dy >= 3 { gap = min(gap, dy) }
                 }
                 if gap.isFinite {
                     let maxTh = gap * Self.hudSizeBoost * Float(t.lines)
@@ -9283,8 +9300,9 @@ final class WorldSession {
             }
             // Audio toggles show their state as a dot (green = on, grey = off).
             let label = i < koganeOptions.count ? koganeOptions[i] : ""
-            if label == "Toggle music" || label == "Toggle sound" {
-                let on = label == "Toggle music" ? VolumeSettings.shared.music > 0 : VolumeSettings.shared.sfx > 0
+            if label == "Toggle music" || label == "Toggle sound" || label == "Coordinates" {
+                let on = label == "Coordinates" ? coordsShown == true
+                    : label == "Toggle music" ? VolumeSettings.shared.music > 0 : VolumeSettings.shared.sfx > 0
                 appendQuad(center: at(0.575, 0.19, oy), right: hr, up: hu, hw: 0.02, hh: 0.02,
                            layer: highlightLayer, tint: on ? Self.packTint(60, 210, 90) : Self.packTint(70, 70, 78),
                            v: &v, idx: &idx)
@@ -10771,6 +10789,7 @@ final class WorldSession {
                         self.logWorldFacts()
                         self.seedAsked = true; self.client.sendChat("/seed")
                         self.statusAsked = true; self.client.sendChat("/status")
+                        self.client.sendChat("/whereami")   // the coordinates toggle's current state
                     }
                 }
                 self.queue.async { self.deniedReason = nil }   // back in: drop the old kick/shutdown message
