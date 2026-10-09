@@ -4160,7 +4160,7 @@ final class WorldSession {
         if !gripHeld { rmbSuppressed = false }
         client.placeHeld = gripHeld && !rmbSuppressed
         let wi = client.wieldIndex
-        guard gripHeld, wi >= 0, wi < hotbar.count, let name = hotbar[wi], client.items.isEatable(name) else { return }
+        guard gripHeld, !rmbSuppressed, wi >= 0, wi < hotbar.count, let name = hotbar[wi], client.items.isEatable(name) else { return }
         if eatKick <= 0 {
             client.sendInteract(action: 5, under: nil, above: nil)   // (re)arm on_secondary_use -> is_eating
             eatKick = 0.5
@@ -4208,6 +4208,11 @@ final class WorldSession {
             let nodeDist: Float = nodeHit?.dist ?? .infinity
             if obj.dist <= nodeDist {
                 client.sendInteract(action: 3, objectId: obj.id)   // rightclick object (mount horse, ...)
+                // Like a node use: the press went to the mob. Feeding a cow with
+                // meat in hand also started a meal, since the eat re-arm below
+                // ran on any held grip with food; desktop never eats while the
+                // right-click lands on an object.
+                rmbSuppressed = true
                 print("[place] rightclick object \(obj.id)"); fflush(stdout)
                 return false
             }
@@ -9501,7 +9506,8 @@ final class WorldSession {
         var vel = simd_normalize(player.aim()) * speed
         let dt: Float = 0.03
         var hitPos: SIMD3<Float>? = nil
-        for _ in 0..<200 {   // 6 s of flight
+        var beyond: SIMD3<Float>? = nil   // the arc left loaded terrain here
+        for _ in 0..<400 {   // 12 s of flight: a lobbed crossbow bolt flies ~10 s
             let next = p + vel * dt + SIMD3(0, -0.5 * g * dt * dt, 0)
             let seg = next - p, len = simd_length(seg)
             if len > 1e-5, let hit = client.world.raycast(origin: p, dir: seg, maxDist: len,
@@ -9510,9 +9516,17 @@ final class WorldSession {
                 hitPos = p + seg / len * hit.dist
                 break
             }
+            // Past the blocks we have (a far hillside, the view-distance edge):
+            // the ray skips unloaded nodes, so the ring used to vanish for any
+            // long shot. Show a grey ring where the arc leaves what's loaded:
+            // it lands at least this far, in this direction.
+            let cell = SIMD3(Int(floor(next.x)), Int(floor(next.y)), Int(floor(next.z)))
+            if client.world.nodeId(cell) == WorldMap.CONTENT_IGNORE { beyond = next; break }
             p = next; vel.y -= g * dt
         }
-        guard let hp = hitPos else { return }
+        let tint: Float
+        let hp: SIMD3<Float>
+        if let h = hitPos { hp = h; tint = 16777215 } else if let b = beyond { hp = b; tint = Self.packTint(150, 150, 150) } else { return }
         let hx = frameHeadXform
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
         let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
@@ -9520,7 +9534,7 @@ final class WorldSession {
         let rx = (hp.x - eye.x) * scale, ry = (hp.y - eye.y) * scale, rz = (hp.z - eye.z) * scale
         let op = SIMD3<Float>(rx * cy - rz * sy, ry, -(rx * sy + rz * cy))
         let hh = max(0.02, simd_length(op) * 0.02)   // about the same size on screen at any distance
-        appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: aimRingLayer, tint: 16777215, v: &v, idx: &idx)
+        appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: aimRingLayer, tint: tint, v: &v, idx: &idx)
     }
 
     /// A white ring with a dark outline, for the aim marker.
