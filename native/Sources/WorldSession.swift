@@ -503,6 +503,12 @@ final class WorldSession {
     private let input = GameInput()
     private var worldReadyLogged = false
     private var seedAsked = false   // /seed sent on join; its reply is logged as [seed]
+    // The inventory clock: the real time, reformatted only when the minute changes.
+    private var clockMinute = -1
+    private var clockText = ""
+    private static let clockFormatter: DateFormatter = {
+        let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none; return f   // the headset's 12/24 h choice
+    }()
     private var everAuthenticated = false   // the server answered a login this session (see scheduleReconnect)
     /// VoxeLibre's coordinate readout (/whereami), from the server's reply;
     /// nil until the join-time query answers or on a game without it.
@@ -6633,6 +6639,31 @@ final class WorldSession {
                        layer: highlightLayer, tint: Self.packTint(20, 20, 25), v: &v, idx: &idx)
             appendQuad(center: toOrigin(lc + toward * 0.002), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
                        layer: t.layer, tint: tip.color ?? 16777215, v: &v, idx: &idx)
+        }
+        // A clock to the left of the panel, the mirror of the effect tiles:
+        // the real time on top (easy to lose track of in here), the game's
+        // time of day under it in grey. In-place text layers, so the minute
+        // ticking over rewrites two layers instead of minting new ones.
+        let nowMinute = Int(Date().timeIntervalSince1970 / 60)
+        if nowMinute != clockMinute { clockMinute = nowMinute; clockText = Self.clockFormatter.string(from: Date()) }
+        let gameMinutes = Int(client.timeFraction * 24 * 60) % (24 * 60)   // 0 = midnight, like time_of_day
+        let gameText = String(format: "game %d:%02d", gameMinutes / 60, gameMinutes % 60)
+        if let rt = hudTextLayer(id: 3_100_000, text: clockText), let gt = hudTextLayer(id: 3_100_001, text: gameText) {
+            let tileH: Float = 0.085, pad: Float = 0.016
+            let rth: Float = 0.017, gth: Float = 0.0125   // the HUD text renderer draws tall glyphs
+            let rw = rth * max(0.4, rt.aspect), gw = gth * max(0.4, gt.aspect)
+            let w = pad * 2 + 2 * max(rw, gw)
+            let right = uMin - 0.03, mid = vMax - tileH * 0.5
+            let plate = fr.center + fr.right * (right - w * 0.5) + fr.up * mid
+            appendQuad(center: toOrigin(plate - toward * 0.003), right: oRight, up: oUp, hw: w * 0.5 + 0.003, hh: tileH * 0.5 + 0.003,
+                       layer: highlightLayer, tint: Self.packTint(110, 110, 115), v: &v, idx: &idx)   // light rim
+            appendQuad(center: toOrigin(plate - toward * 0.004), right: oRight, up: oUp, hw: w * 0.5, hh: tileH * 0.5,
+                       layer: highlightLayer, tint: Self.packTint(38, 38, 42), v: &v, idx: &idx)
+            let x0 = right - w + pad
+            appendQuad(center: toOrigin(fr.center + fr.right * (x0 + rw) + fr.up * (mid + rth * 1.05) - toward * 0.007),
+                       right: oRight, up: oUp, hw: rw, hh: rth, layer: rt.layer, tint: 16777215, v: &v, idx: &idx)
+            appendQuad(center: toOrigin(fr.center + fr.right * (x0 + gw) + fr.up * (mid - rth * 1.05) - toward * 0.007),
+                       right: oRight, up: oUp, hw: gw, hh: gth, layer: gt.layer, tint: Self.packTint(170, 170, 170), v: &v, idx: &idx)
         }
         // Active status effects, named, to the right of the panel: the HUD only
         // shows their icons and time left.
