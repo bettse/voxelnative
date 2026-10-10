@@ -195,6 +195,7 @@ final class SimControl: @unchecked Sendable {
         }
         if let r = sticks["r"] {
             if r.x != 0 { s.turn = r.x }
+            if r.y != 0 { s.hotbarAxis = r.y }
             if r.y != 0 && abs(r.y) > abs(s.menuNavY) { s.menuNavY = r.y }
         }
         if k.contains("w") { s.move.y = 1; s.menuNavY = 1 }
@@ -206,6 +207,7 @@ final class SimControl: @unchecked Sendable {
         if k.contains("space") || k.contains("lt") { s.jump = true }
         if k.contains("lt") || k.contains("rt") { s.menuSelect = true }
         if k.contains("shift") || k.contains("l3") { s.sneak = true }
+        if k.contains("l3") { s.sneakButton = true }
         if k.contains("e") || k.contains("lgrip") { s.fast = true }
         if k.contains("lgrip") { s.gripL = true }
         if k.contains("rgrip") { s.gripR = true }

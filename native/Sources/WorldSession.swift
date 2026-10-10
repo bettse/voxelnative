@@ -392,6 +392,15 @@ final class WorldSession {
     private var placeRepeatArmed = false
     private var placeRepeatTimer: Float = 0
     private var prevHotbarPrev = false, prevHotbarNext = false
+    // Right stick flick = hotbar step: one step per push past 0.7, re-armed
+    // near centre; held past 0.4 s it repeats a few times a second.
+    private var hotbarFlickArmed = true, hotbarFlickHeld: Float = 0
+    private var lastWieldIndex = -1         // the slot before the last change, for right X
+    private var prevCross = false
+    // Left stick click: hold = sneak while held; a tap (< 0.35 s) toggles sneak
+    // until the next tap. Any press while toggled turns it off.
+    private var sneakToggled = false, prevSneakButton = false
+    private var sneakPressAt: Double = 0, sneakPressClearsToggle = false
     private var dead = false            // hp == 0; blocks dig/place and arms respawn
     private var damageFlash: Float = 0  // seconds of red hit-cast left
     private var recentFallDamage: Float = 0   // set by reportFallDamage so the HP drop plays the fall sound
@@ -2495,13 +2504,36 @@ final class WorldSession {
         // Cycle within the server's hotbar size (HUD_SET_PARAM 1; VoxeLibre 9),
         // capped by our 9 wrist slots.
         let hb = max(1, min(client.hotbarItemCount, hotbar.count))
-        if gi.hotbarNext && !prevHotbarNext { client.setWieldIndex((client.wieldIndex + 1) % hb); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout) }
-        if gi.hotbarPrev && !prevHotbarPrev { client.setWieldIndex((client.wieldIndex + hb - 1) % hb); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout) }
+        if gi.hotbarNext && !prevHotbarNext { selectHotbar((client.wieldIndex + 1) % hb) }
+        if gi.hotbarPrev && !prevHotbarPrev { selectHotbar((client.wieldIndex + hb - 1) % hb) }
         prevHotbarNext = gi.hotbarNext; prevHotbarPrev = gi.hotbarPrev
         stepWristTwist(gi, dt: dt, hotbarSize: hb)
+        // Right stick up / down steps the hotbar too (up = previous, like the
+        // mouse wheel): the left thumb is on the walk stick whenever you move,
+        // so square / triangle can't be reached to pull a sword mid-run. A
+        // flick steps once; the angle gate keeps a diagonal turn from stepping.
+        // Not with a panel up: the stick is menu navigation there.
+        let panelUp = inventoryOpen || formspecOpen || keyboardOpen
+        let hy = gi.hotbarAxis
+        if !panelUp, abs(hy) > 0.7, abs(hy) > 1.5 * abs(gi.turn) {
+            if hotbarFlickArmed {
+                hotbarFlickArmed = false; hotbarFlickHeld = 0
+                selectHotbar((client.wieldIndex + (hy > 0 ? hb - 1 : 1)) % hb, how: "flick")
+            } else {
+                hotbarFlickHeld += dt
+                if hotbarFlickHeld > 0.4 { hotbarFlickHeld -= 0.3; selectHotbar((client.wieldIndex + (hy > 0 ? hb - 1 : 1)) % hb, how: "flick") }
+            }
+        } else if abs(hy) < 0.3 {
+            hotbarFlickArmed = true
+        }
+        // Right X: back to the slot you had before (sword <-> pickaxe in one press).
+        if !panelUp, gi.cross, !prevCross, lastWieldIndex >= 0, lastWieldIndex < hb, lastWieldIndex != client.wieldIndex {
+            selectHotbar(lastWieldIndex, how: "swap")
+        }
+        prevCross = gi.cross
         // Keyboard 1-9 picks a hotbar slot directly, like desktop.
         if gi.hotbarSlot >= 0, gi.hotbarSlot != prevHotbarSlot, gi.hotbarSlot < hb {
-            client.setWieldIndex(gi.hotbarSlot); print("[hotbar] wield=\(client.wieldIndex)"); fflush(stdout)
+            selectHotbar(gi.hotbarSlot)
         }
         prevHotbarSlot = gi.hotbarSlot
         // Sim-only: -vrdev.openInventory 1 opens the panel a few seconds in, so
@@ -2818,6 +2850,18 @@ final class WorldSession {
         // desktop (Esc only opens the Kogane menu once nothing else is up).
         if gi.cancel && !prevCancel, inventoryOpen, !keyboardOpen { toggleInventory() }
         prevCancel = gi.cancel
+        // Left stick click: hold sneaks while held (as before); a tap toggles
+        // sneak on until the next tap, since holding a stick click while steering
+        // along a ledge is the hardest hold on the controller. Shift stays a hold.
+        if gi.sneakButton && !prevSneakButton {
+            sneakPressAt = AppClock.seconds
+            sneakPressClearsToggle = sneakToggled
+            if sneakToggled { sneakToggled = false; print("[sneak] toggle off"); fflush(stdout) }
+        } else if !gi.sneakButton && prevSneakButton, !sneakPressClearsToggle, AppClock.seconds - sneakPressAt < 0.35 {
+            sneakToggled = true; print("[sneak] toggle on"); fflush(stdout)
+        }
+        prevSneakButton = gi.sneakButton
+        if sneakToggled { gi.sneak = true }
         // Q drops the wielded stack (Shift+Q one item), a desktop key with no
         // controller button. Not while a panel or keyboard is up.
         if !inventoryOpen, !keyboardOpen, gi.drop && !prevDropKey { dropWielded(single: gi.sneak) }
@@ -3420,9 +3464,8 @@ final class WorldSession {
         while twistTimer >= 1 {
             twistTimer -= 1
             let dir = twistAngle > 0 ? 1 : -1
-            client.setWieldIndex((client.wieldIndex + dir + hb) % hb)
+            selectHotbar((client.wieldIndex + dir + hb) % hb, how: "twist")
             input.rumble(intensity: 0.45, sharpness: 0.9, leftOnly: true)
-            print("[hotbar] twist wield=\(client.wieldIndex)"); fflush(stdout)
         }
     }
 
@@ -10806,6 +10849,15 @@ final class WorldSession {
         dirty = true
     }
     /// A whole mapblock arrived/changed (stream): re-mesh it and its neighbours.
+    /// Every in-game hotbar change goes through here so right X can swap back
+    /// to the slot you had before.
+    private func selectHotbar(_ i: Int, how: String = "") {
+        guard i != client.wieldIndex else { return }
+        lastWieldIndex = client.wieldIndex
+        client.setWieldIndex(i)
+        print("[hotbar] \(how.isEmpty ? "" : how + " ")wield=\(client.wieldIndex)"); fflush(stdout)
+    }
+
     private func markBlockDirty(_ b: SIMD3<Int>) {
         dirtyBlocks.insert(b)
         for n in Self.neighborOffsets { dirtyBlocks.insert(b &+ n) }
