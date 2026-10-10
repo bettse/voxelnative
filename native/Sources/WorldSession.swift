@@ -1141,6 +1141,27 @@ final class WorldSession {
         }
     }
 
+    /// Memory warning: give back what we can right now instead of only logging
+    /// it. Every mapblock beyond the view range goes at once (the usual sweep
+    /// keeps a two-block margin for two minutes), and with it the mesh and
+    /// node metadata; the server re-streams them if we walk back. The media
+    /// store is already memory-mapped from disk, and the atlas can't shrink
+    /// (its layer indices are session-stable), so blocks are the big movable
+    /// piece. Logs the footprint before and after so a log shows whether the
+    /// warning was about us at all (visionOS also closes the world when the
+    /// whole system runs short, at a footprint that is fine on a quiet day).
+    func shedMemory() {
+        queue.async { [self] in
+            let before = Self.healthNote()
+            let feet = player.snapshot().feet
+            let nb = WorldMap.blockPos(SIMD3(Int(floor(feet.x)), Int(floor(feet.y)), Int(floor(feet.z))))
+            let gone = client.purgeFarBlocks(near: nb, radius: client.wantedRange)
+            for b in gone { markBlockDirty(b) }
+            if !gone.isEmpty { dirty = true; remeshCooldown = 0 }
+            print("[health] shed \(gone.count) far mapblocks, \(client.world.blocks.count) left; before \(before); after \(Self.healthNote()) at=\(Self.clockTime())"); fflush(stdout)
+        }
+    }
+
     func start() {
         // Main-thread re-entry guard (start/stop are main-actor). A second start
         // is the immersive space opening after the launcher already connected

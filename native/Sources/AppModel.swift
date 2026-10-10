@@ -183,8 +183,9 @@ final class AppModel {
         nc.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { _ in
             print("[health] thermal changed \(WorldSession.healthNote()) at=\(WorldSession.clockTime())"); fflush(stdout)
         }
-        nc.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
+        nc.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             print("[health] MEMORY WARNING \(WorldSession.healthNote()) at=\(WorldSession.clockTime())"); fflush(stdout)
+            self?.session.shedMemory()
         }
     }
 }

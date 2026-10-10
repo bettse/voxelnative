@@ -9,6 +9,7 @@
 #if targetEnvironment(simulator)
 import Foundation
 import Network
+import UIKit
 
 final class SimControl: @unchecked Sendable {
     static let shared = SimControl()
@@ -92,6 +93,7 @@ final class SimControl: @unchecked Sendable {
         aim slot <n> | aim <list> <index> | aim widget <name> | aim uv <u> <v> | aim key <id> | aim off
         type <text> | chat <text>
         touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
+        memwarn                  (post a memory warning, like the Simulator's Debug menu)
         state | slots | widgets | entities  (JSON, answered on the next game tick; entities = mobs within 24 nodes)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
                  rt lt rgrip lgrip square triangle circle cross options create l3 r3
@@ -107,6 +109,9 @@ final class SimControl: @unchecked Sendable {
             return query(cmd)
         case "help":
             return Self.help.replacingOccurrences(of: "\n", with: " / ")
+        case "memwarn":
+            DispatchQueue.main.async { NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil) }
+            return "ok"
         default: break
         }
         lock.lock(); defer { lock.unlock() }
