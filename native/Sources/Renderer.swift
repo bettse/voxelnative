@@ -351,6 +351,9 @@ actor Renderer {
     private var accessoryTracking: AccessoryTrackingProvider?
     private let accessoryLock = NSLock()
     private nonisolated(unsafe) var accessoryXforms: [String: simd_float4x4] = [:]
+    // Key -> when its tracking dropped; the stale pose above stays for accessoryGrace.
+    private nonisolated(unsafe) var accessoryLost: [String: TimeInterval] = [:]
+    private static let accessoryGrace: TimeInterval = 0.5
     // The provider the session is running, read per frame (under accessoryLock)
     // to predict controller poses for the frame's display time.
     private nonisolated(unsafe) var runningAccessoryProvider: AccessoryTrackingProvider?
@@ -600,8 +603,22 @@ actor Renderer {
                     let t = a.originFromAnchorTransform.columns.3
                     print("[acc] key=\(key) tracked=\(a.isTracked) t=(\(t.x), \(t.y), \(t.z))"); fflush(stdout)
                 }
-                if a.isTracked { self.accessoryXforms[key] = a.originFromAnchorTransform }
-                else { self.accessoryXforms.removeValue(forKey: key) }
+                // A controller that loses tracking keeps its last pose for a short
+                // grace (resolveHandPoses drops it after accessoryGrace) instead of
+                // vanishing at once: the cameras lose a hand held low or behind you
+                // for a few frames while the buttons keep working, and switching
+                // straight to the bare-hand anchor and back made the panel dot
+                // flicker between two places.
+                let now = CACurrentMediaTime()
+                if a.isTracked {
+                    self.accessoryXforms[key] = a.originFromAnchorTransform
+                    if let lost = self.accessoryLost.removeValue(forKey: key) {
+                        print("[acc] \(key) tracking back after \(String(format: "%.2f", now - lost)) s"); fflush(stdout)
+                    }
+                } else if self.accessoryXforms[key] != nil, self.accessoryLost[key] == nil {
+                    self.accessoryLost[key] = now
+                    print("[acc] \(key) tracking lost"); fflush(stdout)
+                }
                 self.accessoryLock.unlock()
             }
         }
@@ -730,7 +747,14 @@ actor Renderer {
     private func resolveHandPoses(frameIndex: UInt64, at time: TimeInterval?) {
         guard poseFrame != frameIndex else { return }
         poseFrame = frameIndex
-        accessoryLock.lock(); var acc = accessoryXforms; let provider = runningAccessoryProvider; accessoryLock.unlock()
+        accessoryLock.lock()
+        var acc = accessoryXforms
+        let provider = runningAccessoryProvider
+        let now = CACurrentMediaTime()
+        for (k, lost) in accessoryLost where now - lost > Self.accessoryGrace {
+            acc.removeValue(forKey: k)    // past the grace, fall through to the bare hand
+        }
+        accessoryLock.unlock()
         // Predict each controller to when this frame is shown. The anchorUpdates
         // stream only hands over the last reported pose, whenever its task gets
         // to run, so the panel dot trailed the controller and stuttered when an
