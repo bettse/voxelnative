@@ -50,9 +50,9 @@ final class LiquidFlowUVTests: XCTestCase {
     /// point on the shared edge of two neighbouring cells must land on the same
     /// texel (UVs equal modulo 1) whichever cell emits it, for any flow angle.
     func testTranslateMakesNeighbouringCellsSeamless() {
-        // Our top face: u = local z, v = 1 - local x (see WorldMesher.faces/uv).
+        // Flowing tops use flowBaseUV: u = local z, v = local x.
         func cellUV(_ g: SIMD3<Int>, lx: Float, lz: Float, _ dir: SIMD2<Float>) -> SIMD2<Float> {
-            WorldMesher.flowRotUV(SIMD2(lz, 1 - lx), dir) + WorldMesher.flowTranslateUV(g, dir)
+            WorldMesher.flowRotUV(WorldMesher.flowBaseUV(SIMD3(lx, 1, lz)), dir) + WorldMesher.flowTranslateUV(g, dir)
         }
         func sameTexel(_ a: SIMD2<Float>, _ b: SIMD2<Float>) -> Bool {
             let d = a - b
@@ -69,6 +69,33 @@ final class LiquidFlowUVTests: XCTestCase {
             let c = cellUV(g, lx: 0.7, lz: 1, dir)
             let d = cellUV(g &+ SIMD3(0, 0, 1), lx: 0.7, lz: 0, dir)
             XCTAssertTrue(sameTexel(c, d), "z edge dir=\(dir) c=\(c) d=\(d)")
+        }
+    }
+
+    /// The animated strip scrolls toward +v. On the surface, +v must point the
+    /// way the liquid flows, for each axis: the old u = z, v = 1 - x layout
+    /// sent every flow along X uphill (lava "flowing backwards").
+    func testScrollDirectionRunsDownhill() {
+        func surfaceDirOfTexV(_ dir: SIMD2<Float>) -> SIMD2<Float> {
+            // Which world (x, z) direction a step of +v in texture space lands on:
+            // sample the UV at the cell centre and at centre + small world offsets.
+            let c = WorldMesher.flowRotUV(WorldMesher.flowBaseUV(SIMD3(0.5, 1, 0.5)), dir)
+            let px = WorldMesher.flowRotUV(WorldMesher.flowBaseUV(SIMD3(0.6, 1, 0.5)), dir) - c   // +x step
+            let pz = WorldMesher.flowRotUV(WorldMesher.flowBaseUV(SIMD3(0.5, 1, 0.6)), dir) - c   // +z step
+            // Solve for the world step whose UV delta is (0, +0.1): project.
+            return simd_normalize(SIMD2(px.y, pz.y))
+        }
+        let cases: [(h: (Float, Float, Float, Float), flow: SIMD2<Float>)] = [
+            ((1, 0.5, 1, 0.5), SIMD2(1, 0)),    // x0 side high: flows +X
+            ((0.5, 1, 0.5, 1), SIMD2(-1, 0)),   // flows -X
+            ((1, 1, 0.5, 0.5), SIMD2(0, 1)),    // z0 side high: flows +Z
+            ((0.5, 0.5, 1, 1), SIMD2(0, -1)),   // flows -Z
+        ]
+        for (h, flow) in cases {
+            let dir = WorldMesher.liquidFlowDir(h00: h.0, h10: h.1, h01: h.2, h11: h.3)
+            XCTAssertTrue(approx(dir, flow), "flow dir \(dir) expected \(flow)")
+            let s = surfaceDirOfTexV(dir)
+            XCTAssertTrue(approx(s, flow), "texture +v runs along \(s), flow is \(flow)")
         }
     }
 }
