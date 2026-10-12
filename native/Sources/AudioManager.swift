@@ -24,6 +24,21 @@ final class DisplaySettings {
 /// the client's wanted_range in PLAYERPOS: lower = the server streams and the
 /// client meshes fewer blocks, trading draw distance for a lighter GPU/thermal
 /// load. Clamped to a sane band.
+/// Movement options. Autojump is desktop Luanti's "autojump" setting (off by
+/// default there too): walking into a one-node step hops up it without
+/// pressing jump. Cached in memory because the physics tick reads it every frame.
+final class MoveSettings {
+    static let shared = MoveSettings()
+    private let defaults = UserDefaults.standard
+    private let key = "move.autojump"
+    private var cached: Bool
+    private init() { cached = UserDefaults.standard.bool(forKey: key) }
+    var autojump: Bool {
+        get { cached }
+        set { cached = newValue; defaults.set(newValue, forKey: key); print("[move] autojump \(newValue)"); fflush(stdout) }
+    }
+}
+
 final class ViewSettings {
     static let shared = ViewSettings()
     static let minBlocks = 3, maxBlocks = 12, defaultBlocks = 8

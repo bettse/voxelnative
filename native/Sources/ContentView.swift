@@ -39,6 +39,7 @@ struct ContentView: View {
     @State private var volMusic = VolumeSettings.shared.music
     @State private var volSfx = VolumeSettings.shared.sfx
     @State private var viewBlocks = Double(ViewSettings.shared.blocks)   // view distance
+    @State private var autojump = MoveSettings.shared.autojump
 
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
@@ -442,6 +443,11 @@ struct ContentView: View {
             }
             .frame(maxWidth: 360)
             Text("Lower = fewer blocks drawn (cooler/quieter, shorter view).")
+                .font(.footnote).foregroundStyle(.secondary)
+            Toggle("Auto-jump", isOn: $autojump)
+                .frame(maxWidth: 360)
+                .onChange(of: autojump) { _, v in MoveSettings.shared.autojump = v }
+            Text("Walking into a one-block step hops up it, like desktop Luanti.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .onChange(of: viewBlocks) { _, v in

@@ -285,9 +285,10 @@ final class WorldSession {
     private var creeperCache: [Int: Bool] = [:]   // per-entity creeper flag; mesh/name are stable, so don't re-lowercase every frame
     private var bgMissLogged: Set<String> = []    // one-time log for a missing fill-background texture
     private var skinCache: [Int: (mesh: String, frame: Float, bones: Int, positions: [SIMD3<Float>])] = [:]   // entity id -> last skin
-    // Perf: how far out we skin+draw real mob meshes. Capped at 96 nodes
-    // (past that they're clutter), but a lower view-distance slider pulls it in
-    // so fewer mobs get skinned each tick (skinning is the fan-spinning cost).
+    // Perf: how far out we animate (skin) mob meshes. Capped at 96 nodes, and
+    // a lower view-distance slider pulls it in so fewer mobs get skinned each
+    // tick (skinning is the fan-spinning cost). Past it a mob still draws its
+    // model, frozen in the bind pose.
     private var mobRenderDist: Float = 96
     // Perf: the bind-pose bounds/fit-height of a model depend only on its
     // mesh + visible-surface set (never on pose or the player), so cache them
@@ -317,6 +318,7 @@ final class WorldSession {
     // free_move: Luanti toggles it with K when the player has "fly";
     // in VR a double-tap of jump does it. Off again if the priv goes away.
     private var flying = false
+    private var autojumpUntil: Double = 0   // autojump holds the jump key until this time (localplayer.cpp m_autojump_time)
     private var flyPrevJump = false
     private var flyLastTap: TimeInterval = -10
     private var fakeSkyboxSent = false
@@ -3049,6 +3051,7 @@ final class WorldSession {
             } else {
                 // disable_jump on the node you stand on OR the one your feet are
                 // in (cobweb, end portal) blocks the jump (localplayer.cpp).
+                if AppClock.seconds < autojumpUntil { gi.jump = true }   // autojump: a held jump for 0.1 s
                 var jumpBlocked = false
                 if gi.jump && grounded {
                     let fx = Int(floor(feet.x)), fz = Int(floor(feet.z)), fy = Int(floor(feet.y))
@@ -3112,6 +3115,29 @@ final class WorldSession {
             let mdx = dx, mdz = dz
             let kb = player.takeExternalDelta(dt: dt)   // server knockback (PLAYER_SPEED), swept against walls
             let r = collideMove(feet: feet, delta: SIMD3(mdx + kb.x, vy * dt, mdz + kb.y), grounded: grounded, climbing: climbing)
+            // Autojump (localplayer.cpp handleAutojump), when the setting is on:
+            // on the ground, walking, not already jumping or sneaking, and this
+            // tick's move came up short (ran into something). If the box one
+            // node higher is clear and the same move from there gets farther,
+            // hold the jump key for a tenth of a second.
+            if MoveSettings.shared.autojump, grounded, !climbing, !flying, !gi.jump, !gi.sneak,
+               AppClock.seconds >= autojumpUntil, mdx != 0 || mdz != 0 {
+                let want = SIMD2(mdx + kb.x, mdz + kb.y)
+                let got = SIMD2(r.feet.x - feet.x, r.feet.z - feet.z)
+                if simd_length_squared(got) < simd_length_squared(want) * 0.99 {
+                    let up = feet + SIMD3(0, 1, 0)
+                    let upBox = playerBox(up)
+                    let clear = !solidBoxes(around: AABB(lo: upBox.lo - 0.6, hi: upBox.hi + 0.6)).contains { $0.overlaps(upBox) }
+                    if clear {
+                        let j = collideMove(feet: up, delta: SIMD3(want.x, 0, want.y), grounded: false)
+                        let jgot = SIMD2(j.feet.x - up.x, j.feet.z - up.z)
+                        if simd_length_squared(jgot) > simd_length_squared(got) * 1.01 {
+                            autojumpUntil = AppClock.seconds + 0.1
+                            print("[move] autojump at \(feet)"); fflush(stdout)
+                        }
+                    }
+                }
+            }
             feet = r.feet
             // Sneak edge-glue (localplayer.cpp move(): "keep on top of last
             // walked node"): while sneaking on the ground, the player's centre is
@@ -7011,8 +7037,7 @@ final class WorldSession {
             }
             // Real 3D model for nearby mesh-visual entities (other players
             // included: VoxeLibre's mcl_armor_character*.b3d); billboard otherwise.
-            if e.visual == "mesh", !e.textures.isEmpty,
-               let mesh = model(for: e.mesh), simd_distance(e.pos, s.feet) < mobRenderDist {
+            if e.visual == "mesh", !e.textures.isEmpty, let mesh = model(for: e.mesh) {
                 let pm0 = perf.now()
                 let drew = e.useTextureAlpha
                     ? appendModel(mesh, entity: e, eye: eye, cosY: cy, sinY: sy,
@@ -7043,6 +7068,11 @@ final class WorldSession {
                     print("[mobmiss] \(e.name) mesh=\(e.mesh) tex=[\(tex)] resolved=\(resolved)/\(e.textures.count) \(detail)"); fflush(stdout)
                 }
             }
+            // A mesh mob never gets the generic billboard: that drew the raw skin
+            // sheet on a quad, which read as a flattened box with the mob's
+            // features spread over it (far mobs, and every mob for a moment
+            // before its model and skin arrived). Nothing until it can draw.
+            if e.visual == "mesh" { continue }
             // Item visuals ("wielditem"/"item": wield_item, else textures[0], is the
             // itemstring). Dropped items (__builtin:item) keep their VR-tuned
             // size + spin; every other item entity -- falling nodes, item
@@ -8417,7 +8447,9 @@ final class WorldSession {
         // Skin once per entity per distinct frame: a chest parked on its last
         // frame or a mob between server ticks reuses the previous result.
         let positions: [SIMD3<Float>]
-        if !mesh.joints.isEmpty, (mesh.isAnimated && e.animRange != nil) || !e.boneOverrides.isEmpty {
+        // Past mobRenderDist the model draws in its bind pose, unskinned.
+        let farLOD = simd_length(e.pos - eye) > mobRenderDist
+        if !farLOD, !mesh.joints.isEmpty, (mesh.isAnimated && e.animRange != nil) || !e.boneOverrides.isEmpty {
             // Frame quantisation is a distance LOD (perf review #5): up close,
             // 1/20-frame steps are invisible but an animating mob (~0.25
             // frame/tick) missed the skin cache every single tick; ~55 mesh mobs
