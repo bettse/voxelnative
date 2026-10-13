@@ -33,6 +33,8 @@ final class SimControl: @unchecked Sendable {
     private var chats: [String] = []
     private var touches: [String: Bool] = [:]   // "l.trigger" -> finger on (sensors never set stay unknown)
     private var _pitchDeg: Float = 0
+    private var _headOffset = SIMD2<Float>(0, 0)
+    var headOffset: SIMD2<Float> { lock.lock(); defer { lock.unlock() }; return _headOffset }
     private var _leftRollDeg: Float = 0
     private var _handAtMouth = false
     private var _aim: Aim? = nil
@@ -94,6 +96,7 @@ final class SimControl: @unchecked Sendable {
         type <text> | chat <text>
         touch l|r stick|a|b|grip|trigger 0|1 | touch off   (finger resting on a sensor)
         memwarn                  (post a memory warning, like the Simulator's Debug menu)
+        head <x> <z>             (move the fake head in the room, metres; physical locomotion test)
         state | slots | widgets | entities  (JSON, answered on the next game tick; entities = mobs within 24 nodes)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
                  rt lt rgrip lgrip square triangle circle cross options create l3 r3
@@ -124,6 +127,7 @@ final class SimControl: @unchecked Sendable {
             sticks[a[0]] = SIMD2(Float(a[1]) ?? 0, Float(a[2]) ?? 0)
         case "turn" where a.count == 1:  yawDelta += (Float(a[0]) ?? 0) * .pi / 180
         case "pitch" where a.count == 1: _pitchDeg = Float(a[0]) ?? 0
+        case "head" where a.count == 2: _headOffset = SIMD2(Float(a[0]) ?? 0, Float(a[1]) ?? 0)
         case "roll" where a.count == 2 && a[0] == "l": _leftRollDeg = Float(a[1]) ?? 0
         case "hand" where a.count == 2 && a[0] == "r": _handAtMouth = a[1] == "mouth"
         case "aim" where a.first == "off": _aim = nil

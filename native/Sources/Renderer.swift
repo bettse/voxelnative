@@ -689,10 +689,12 @@ actor Renderer {
         let spin = d.double(forKey: "vrdev.spin")
         let yaw = Float(d.double(forKey: "vrdev.yaw")) * .pi / 180
                 + (spin != 0 ? Float(AppClock.seconds * spin) * .pi / 180 : 0)
-        if pitch == 0 && yaw == 0 { return matrix_identity_float4x4 }
+        let ho = SimControl.shared.headOffset   // vrctl "head x z": a step in the room
+        if pitch == 0 && yaw == 0 && ho == .zero { return matrix_identity_float4x4 }
         // Yaw about the world up axis, then pitch about the head's right axis;
         // +pitch tilts the forward (-Z) ray up toward +Y.
-        return matrix4x4_rotation(radians: yaw, axis: SIMD3(0, 1, 0))
+        return matrix4x4_translation(ho.x, 0, ho.y)
+             * matrix4x4_rotation(radians: yaw, axis: SIMD3(0, 1, 0))
              * matrix4x4_rotation(radians: pitch, axis: SIMD3(1, 0, 0))
         #else
         return matrix_identity_float4x4

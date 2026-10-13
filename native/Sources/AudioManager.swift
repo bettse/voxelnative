@@ -30,12 +30,21 @@ final class DisplaySettings {
 final class MoveSettings {
     static let shared = MoveSettings()
     private let defaults = UserDefaults.standard
-    private let key = "move.autojump"
-    private var cached: Bool
-    private init() { cached = UserDefaults.standard.bool(forKey: key) }
+    private let key = "move.autojump", physKey = "move.physical"
+    private var cached: Bool, physCached: Bool
+    private init() {
+        cached = UserDefaults.standard.bool(forKey: key)
+        // Physical locomotion (your real steps move the character) is on unless
+        // turned off: the key is stored inverted so "unset" means on.
+        physCached = !UserDefaults.standard.bool(forKey: physKey)
+    }
     var autojump: Bool {
         get { cached }
         set { cached = newValue; defaults.set(newValue, forKey: key); print("[move] autojump \(newValue)"); fflush(stdout) }
+    }
+    var physicalMove: Bool {
+        get { physCached }
+        set { physCached = newValue; defaults.set(!newValue, forKey: physKey); print("[move] physical \(newValue)"); fflush(stdout) }
     }
 }
 
@@ -150,6 +159,7 @@ final class AudioManager: NSObject {
     // decoded and footsteps fire 3-4 times a second, so decoding Ogg through a
     // temp WAV per play was the largest sustained CPU cost outside the tick.
     // Music tracks (20 s+) aren't cached: they're tens of MB each and rare.
+    private var recentPlays: [String: [Double]] = [:]   // sound name -> recent start times (same-sound cap)
     private var pcmCache: [String: AVAudioPCMBuffer] = [:]
     private var pcmCacheOrder: [String] = []       // insertion order for a simple cap
     private static let pcmCacheMax = 160           // entries, and...
@@ -348,6 +358,17 @@ final class AudioManager: NSObject {
             // (see Source.boost), so the sliders still scale it.
             let base = positional && spec.gain > 1 ? 1 : spec.gain * (positional ? 3 : 1)
             var vol = VolumeSettings.shared.volume(base: base, channel: channel)
+            // Many copies of one sound at once (a chicken pen: every bird clucks
+            // at gain 1, and VoxeLibre's own comment calls its farms loud): the
+            // 3rd and later copies within 0.6 s play at 1/n, the 7th+ are dropped.
+            if positional {
+                let now = AppClock.seconds
+                var ts = (self.recentPlays[spec.name] ?? []).filter { now - $0 < 0.6 }
+                let n = ts.count
+                ts.append(now); self.recentPlays[spec.name] = ts
+                if n >= 6 { return }
+                if n >= 2 { vol /= Float(n) }
+            }
             // A muted channel (music off, master 0) must be SILENT. Setting the
             // player volume to 0 didn't reliably silence a long music track on
             // device (Eric kept hearing the background music), so don't schedule

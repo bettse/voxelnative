@@ -3037,6 +3037,31 @@ final class WorldSession {
             // horizontal hit steps up rises <= stepHeight (slabs, stairs), so full
             // blocks still need a jump and you hit your head indoors.
             var (feet, vy, grounded) = player.physics()
+            // Physical locomotion: your real steps move the character. The head's
+            // horizontal offset from the room anchor (PlayerState.roomAnchor) is
+            // walked off through collision each tick and the anchor follows by
+            // what actually moved; what was blocked stays as view lean, so
+            // stepping back undoes it. A 5 cm dead zone keeps seated head bob
+            // from creeping, and a step with no floor under it is refused (the
+            // view leans over the ledge instead of the character walking off).
+            if MoveSettings.shared.physicalMove, grounded, !flying, !inventoryOpen, !formspecOpen, player.hasHead() {
+                let hp = player.headXform().columns.3, anchor = player.roomAnchor()
+                let lean = SIMD2<Float>(hp.x - anchor.x, hp.z - anchor.y)      // metres, tracking space
+                if simd_length(lean) > 0.05 {
+                    let yaw = player.snapshot().yaw
+                    let d4 = matrix4x4_rotation(radians: yaw, axis: SIMD3<Float>(0, 1, 0)) * SIMD4<Float>(lean.x, 0, -lean.y, 0)
+                    let want = SIMD3<Float>(d4.x, 0, d4.z) / PlayerState.scale
+                    let r = collideMove(feet: feet, delta: want, grounded: true)
+                    let moved = SIMD3<Float>(r.feet.x - feet.x, 0, r.feet.z - feet.z)
+                    if simd_length(moved) > 1e-4,
+                       collideMove(feet: r.feet, delta: SIMD3(0, -0.6, 0), grounded: true).hitFloor {
+                        feet = r.feet
+                        let back = matrix4x4_rotation(radians: -yaw, axis: SIMD3<Float>(0, 1, 0))
+                            * SIMD4<Float>(moved.x * PlayerState.scale, 0, moved.z * PlayerState.scale, 0)
+                        player.setRoomAnchor(anchor + SIMD2(back.x, -back.z))
+                    }
+                }
+            }
             // Climbing = Luanti's centre-column sample, PLUS a jump-gated body grab
             // so you can catch a ladder whose lowest rung is a node above your feet
             // (the igloo shaft) by pressing up while standing under/against it.

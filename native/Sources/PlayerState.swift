@@ -160,6 +160,9 @@ final class PlayerState {
     func setSpawn(_ pos: SIMD3<Float>, yaw: Float, pitch: Float) {
         lock.lock(); defer { lock.unlock() }
         _feet = pos; _yaw = yaw; _pitch = pitch
+        // The room anchor moves to wherever the head is now: a teleport must not
+        // carry a lean over (the character would land offset from the view).
+        _roomAnchor = SIMD2(_headXform.columns.3.x, _headXform.columns.3.z)
         // A spawn/teleport kills momentum. The fall speed built up while
         // waiting for the first MOVE_PLAYER (feet at the origin, nothing under
         // them) otherwise rides into the first tick and tunnels the player
@@ -347,7 +350,22 @@ final class PlayerState {
     /// origin put the eye ~3 nodes up.)
     private var _originLift: Float = PlayerState.eyeHeight
     func setOriginLift(_ l: Float) { lock.lock(); _originLift = l; lock.unlock() }
-    func origin() -> SIMD3<Float> { lock.lock(); defer { lock.unlock() }; return _feet + SIMD3(0, _originLift, 0) }
+    /// Room anchor: the tracking-space (x, z) point, in metres, the character
+    /// stands under. Physical locomotion walks the head's offset from it off
+    /// through collision and moves the anchor along by what actually moved, so
+    /// the nominal eye renders at the anchor, not at the tracking origin, and
+    /// only the unwalked remainder shows as lean.
+    private var _roomAnchor = SIMD2<Float>(0, 0)
+    func setRoomAnchor(_ a: SIMD2<Float>) { lock.lock(); _roomAnchor = a; lock.unlock() }
+    func roomAnchor() -> SIMD2<Float> { lock.lock(); defer { lock.unlock() }; return _roomAnchor }
+    /// The anchor as a node-space offset (same yaw + Z mirror the renderer
+    /// applies to the head offset). Lock held by the caller.
+    private func roomShift() -> SIMD3<Float> {
+        if _roomAnchor == .zero { return .zero }
+        let r = matrix4x4_rotation(radians: _yaw, axis: SIMD3<Float>(0, 1, 0)) * SIMD4<Float>(_roomAnchor.x, 0, -_roomAnchor.y, 0)
+        return SIMD3<Float>(r.x, 0, r.z) / PlayerState.scale
+    }
+    func origin() -> SIMD3<Float> { lock.lock(); defer { lock.unlock() }; return _feet + SIMD3(0, _originLift, 0) - roomShift() }
 
     /// Everything the per-frame world/sky uniform update reads, grabbed under a
     /// single lock instead of six separate acquisitions (snapshot, origin,
@@ -368,7 +386,7 @@ final class PlayerState {
         lock.lock(); defer { lock.unlock() }
         return RenderState(
             snap: Snapshot(feet: _feet, yaw: _yaw, pitch: _pitch, meshRef: _meshRef),
-            origin: _feet + SIMD3(0, _originLift, 0),
+            origin: _feet + SIMD3(0, _originLift, 0) - roomShift(),
             daylight: _daylight, timeOfDay: _timeOfDay, skyVisible: _skyVisible, skySolid: _skySolid,
             sky: Self.skyUniforms(from: _sky), sunDir: _sunDir, head: _headXform)
     }

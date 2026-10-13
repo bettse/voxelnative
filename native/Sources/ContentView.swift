@@ -40,6 +40,7 @@ struct ContentView: View {
     @State private var volSfx = VolumeSettings.shared.sfx
     @State private var viewBlocks = Double(ViewSettings.shared.blocks)   // view distance
     @State private var autojump = MoveSettings.shared.autojump
+    @State private var physicalMove = MoveSettings.shared.physicalMove
 
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
@@ -448,6 +449,11 @@ struct ContentView: View {
                 .frame(maxWidth: 360)
                 .onChange(of: autojump) { _, v in MoveSettings.shared.autojump = v }
             Text("Walking into a one-block step hops up it, like desktop Luanti.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Toggle("Real steps move you", isOn: $physicalMove)
+                .frame(maxWidth: 360)
+                .onChange(of: physicalMove) { _, v in MoveSettings.shared.physicalMove = v }
+            Text("Walking around your room moves your character too (never off a ledge). Off: only your view leans.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .onChange(of: viewBlocks) { _, v in
