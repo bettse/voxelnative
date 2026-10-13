@@ -402,6 +402,12 @@ final class WorldSession {
     // Left stick click: hold = sneak while held; a tap (< 0.35 s) toggles sneak
     // until the next tap. Any press while toggled turns it off.
     private var sneakToggled = false, prevSneakButton = false
+    // Left grip: hold = sprint while held; a tap toggles sprint until the next
+    // tap (mcl_sprint only sprints while moving forward anyway, so a latched
+    // sprint costs nothing standing still). Not the quick-move modifier: the
+    // toggle is ignored while a panel is open.
+    private var sprintToggled = false, prevGripL = false
+    private var sprintPressAt: Double = 0, sprintPressClearsToggle = false
     private var sneakPressAt: Double = 0, sneakPressClearsToggle = false
     private var dead = false            // hp == 0; blocks dig/place and arms respawn
     private var damageFlash: Float = 0  // seconds of red hit-cast left
@@ -2864,6 +2870,15 @@ final class WorldSession {
         }
         prevSneakButton = gi.sneakButton
         if sneakToggled { gi.sneak = true }
+        if gi.gripL && !prevGripL {
+            sprintPressAt = AppClock.seconds
+            sprintPressClearsToggle = sprintToggled
+            if sprintToggled { sprintToggled = false; print("[sprint] toggle off"); fflush(stdout) }
+        } else if !gi.gripL && prevGripL, !sprintPressClearsToggle, AppClock.seconds - sprintPressAt < 0.35 {
+            sprintToggled = true; print("[sprint] toggle on"); fflush(stdout)
+        }
+        prevGripL = gi.gripL
+        if sprintToggled, !inventoryOpen, !formspecOpen, !keyboardOpen { gi.fast = true }
         // Q drops the wielded stack (Shift+Q one item), a desktop key with no
         // controller button. Not while a panel or keyboard is up.
         if !inventoryOpen, !keyboardOpen, gi.drop && !prevDropKey { dropWielded(single: gi.sneak) }
@@ -6151,6 +6166,21 @@ final class WorldSession {
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
         #endif
         elems = Self.coordinateColumns(elems)
+        // A latched sneak / sprint (a tap on the left stick click / left grip)
+        // gets a small tag bottom-left, since nothing else shows the toggle is
+        // on; a hold gets none (you can feel it).
+        if sneakToggled || sprintToggled {
+            var tag = Client.HudElement()
+            tag.type = 1; tag.pos = SIMD2(0, 1); tag.align = SIMD2(1, -1); tag.zIndex = 100; tag.style = 1
+            if sneakToggled {
+                tag.text = "sneaking"; tag.offset = SIMD2(20, -34); tag.number = 0x9CC9FF
+                elems.append((2_100_020, tag))
+            }
+            if sprintToggled {
+                tag.text = "sprinting"; tag.offset = SIMD2(20, sneakToggled ? -58 : -34); tag.number = 0xFFC46B
+                elems.append((2_100_021, tag))
+            }
+        }
         #if targetEnvironment(simulator)
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
         // adds (awards/api.lua), including the icon-as-statbar, to verify.

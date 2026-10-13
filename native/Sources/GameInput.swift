@@ -19,7 +19,8 @@ import simd
 /// left square / triangle = hotbar prev / next, right stick up / down = hotbar
 /// prev / next too (the left thumb is on the walk stick whenever you move, so
 /// the left buttons are out of reach mid-run), right X = back to the slot you
-/// had before. Left stick click: hold to sneak, tap to toggle it.
+/// had before. Left stick click: hold to sneak, tap to toggle it; left grip:
+/// hold to sprint, tap to toggle it (a tag bottom-left shows either latch).
 ///
 /// A BLE keyboard is an alternative to the controllers (gaze aims), on desktop
 /// Luanti's keys; the full map is the keyboard block in poll(). Look-and-pinch
