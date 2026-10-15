@@ -447,6 +447,13 @@ public final class ActiveObjects {
         // Replaced wholesale, empty included: ObjectProperties::deSerialize
         // clears the list before reading, so a re-sent empty list blanks the
         // entity rather than keeping its stale skin.
+        // Horse armor vanished after the horse left range and came back (the
+        // saddle still worked): log what skins a mesh mob arrives with or
+        // changes to, so the device log shows whether the server dropped the
+        // armor overlay or we did. Changes are rare; adds only for horses.
+        if o.visual == "mesh", (o.textures != textures && !o.textures.isEmpty) || (o.textures.isEmpty && o.name.contains("horse")) {
+            print("[aoprops] id=\(o.id) \(o.name) textures \(o.textures) -> \(textures)"); fflush(stdout)
+        }
         o.textures = textures; for t in textures { tiles.insert(t) }
         // Continue to the mesh filename (needed for visual == "mesh").
         o.spriteDiv = SIMD2(max(1, r.s16()), max(1, r.s16()))

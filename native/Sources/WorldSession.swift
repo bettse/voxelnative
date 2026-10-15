@@ -8467,8 +8467,8 @@ final class WorldSession {
         // Diagnose a partly-textured model (e.g. a player whose armour shows but
         // whose body/skin is missing): log the unresolved, non-blank specs once
         // per entity name so the device log names exactly what to download.
-        if !draw.isEmpty, !droppedSpecs.isEmpty, !modelDropLogged.contains(e.name) {
-            modelDropLogged.insert(e.name)
+        if !draw.isEmpty, !droppedSpecs.isEmpty, !modelDropLogged.contains(e.name + droppedSpecs.joined()) {
+            modelDropLogged.insert(e.name + droppedSpecs.joined())   // per skin set, not per mob: a horse re-added with armor logs again
             print("[modeldrop] \(e.name) mesh=\(e.mesh) drew=\(draw.count)/\(mesh.surfaces.count) missing=[\(droppedSpecs.joined(separator: ", "))]"); fflush(stdout)
         }
         // Fallback for white mobs (e.g. the horse): every surface mapped to a
