@@ -451,7 +451,8 @@ public final class ActiveObjects {
         // saddle still worked): log what skins a mesh mob arrives with or
         // changes to, so the device log shows whether the server dropped the
         // armor overlay or we did. Changes are rare; adds only for horses.
-        if o.visual == "mesh", (o.textures != textures && !o.textures.isEmpty) || (o.textures.isEmpty && o.name.contains("horse")) {
+        if o.visual == "mesh", !o.name.contains("stalker"),   // stalkers re-skin to their surroundings every few seconds
+           (o.textures != textures && !o.textures.isEmpty) || (o.textures.isEmpty && o.name.contains("horse")) {
             print("[aoprops] id=\(o.id) \(o.name) textures \(o.textures) -> \(textures)"); fflush(stdout)
         }
         o.textures = textures; for t in textures { tiles.insert(t) }
