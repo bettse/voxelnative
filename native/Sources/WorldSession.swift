@@ -6952,7 +6952,12 @@ final class WorldSession {
     private func postEntities() {
         frameUptime = AppClock.seconds
         guard atlasBuilt else { return }
-        frameHeadXform = player.headXform()   // one locked read for the whole pass
+        // One locked read for the whole pass, with head ROLL removed: every
+        // overlay placed from this basis (HUD text, chat, banners, nametags)
+        // then stays level like the hearts/hotbar, which the renderer already
+        // builds roll-free. With the raw basis the "sneaking"/"sprinting" tags
+        // rolled with the head against the hearts next to them (Eric: weird).
+        frameHeadXform = Renderer.levelCamera(player.headXform())
         // Snapshot the entity list once per tick and reuse it for both the model-
         // texture registration and the draw loop below, instead of filtering
         // objects.values into a fresh array twice.
