@@ -407,6 +407,7 @@ final class WorldSession {
     // sprint costs nothing standing still). Not the quick-move modifier: the
     // toggle is ignored while a panel is open.
     private var sprintToggled = false, prevGripL = false
+    private var stanceSneakLayer = -1, stanceSprintLayer = -1   // baked HUD figures for the latches
     private var sprintPressAt: Double = 0, sprintPressClearsToggle = false
     private var sneakPressAt: Double = 0, sneakPressClearsToggle = false
     private var dead = false            // hp == 0; blocks dig/place and arms respawn
@@ -2864,18 +2865,18 @@ final class WorldSession {
         if gi.sneakButton && !prevSneakButton {
             sneakPressAt = AppClock.seconds
             sneakPressClearsToggle = sneakToggled
-            if sneakToggled { sneakToggled = false; print("[sneak] toggle off"); fflush(stdout) }
+            if sneakToggled { sneakToggled = false; latchHaptic(on: false); print("[sneak] toggle off"); fflush(stdout) }
         } else if !gi.sneakButton && prevSneakButton, !sneakPressClearsToggle, AppClock.seconds - sneakPressAt < 0.35 {
-            sneakToggled = true; print("[sneak] toggle on"); fflush(stdout)
+            sneakToggled = true; latchHaptic(on: true, double: false); print("[sneak] toggle on"); fflush(stdout)
         }
         prevSneakButton = gi.sneakButton
         if sneakToggled { gi.sneak = true }
         if gi.gripL && !prevGripL {
             sprintPressAt = AppClock.seconds
             sprintPressClearsToggle = sprintToggled
-            if sprintToggled { sprintToggled = false; print("[sprint] toggle off"); fflush(stdout) }
+            if sprintToggled { sprintToggled = false; latchHaptic(on: false); print("[sprint] toggle off"); fflush(stdout) }
         } else if !gi.gripL && prevGripL, !sprintPressClearsToggle, AppClock.seconds - sprintPressAt < 0.35 {
-            sprintToggled = true; print("[sprint] toggle on"); fflush(stdout)
+            sprintToggled = true; latchHaptic(on: true, double: true); print("[sprint] toggle on"); fflush(stdout)
         }
         prevGripL = gi.gripL
         if sprintToggled, !inventoryOpen, !formspecOpen, !keyboardOpen { gi.fast = true }
@@ -6166,21 +6167,6 @@ final class WorldSession {
         if UserDefaults.standard.bool(forKey: "vrdev.fakeHud") { elems.append(contentsOf: Self.fakeHudElements()) }
         #endif
         elems = Self.coordinateColumns(elems)
-        // A latched sneak / sprint (a tap on the left stick click / left grip)
-        // gets a small tag bottom-left, since nothing else shows the toggle is
-        // on; a hold gets none (you can feel it).
-        if sneakToggled || sprintToggled {
-            var tag = Client.HudElement()
-            tag.type = 1; tag.pos = SIMD2(0, 1); tag.align = SIMD2(1, -1); tag.zIndex = 100; tag.style = 1
-            if sneakToggled {
-                tag.text = "sneaking"; tag.offset = SIMD2(20, -34); tag.number = 0x9CC9FF
-                elems.append((2_100_020, tag))
-            }
-            if sprintToggled {
-                tag.text = "sprinting"; tag.offset = SIMD2(20, sneakToggled ? -58 : -34); tag.number = 0xFFC46B
-                elems.append((2_100_021, tag))
-            }
-        }
         #if targetEnvironment(simulator)
         // -vrdev.fakeAward 1: the exact 4 elements VoxeLibre's advancement toast
         // adds (awards/api.lua), including the icon-as-statbar, to verify.
@@ -6394,6 +6380,20 @@ final class WorldSession {
                 appendOverlayQuadUV(center: c, right: hr, up: hu, hw: tw / 2 * kx * D, hh: th / 2 * ky * D,
                                     layer: t.layer, uv: SIMD2(1, 1), tint: Self.hudTint(e.number), v: &v, idx: &idx)
                 drawn += 1
+            }
+        }
+        // A latched sneak / sprint (a tap on the left stick click / left grip)
+        // shows a figure bottom-left by the hearts for as long as it's on: a
+        // crouching one (blue) for sneak, a running one (amber) for sprint.
+        // A picture, not the word, and about two hearts tall so it's seen at
+        // the same glance as the health. A hold shows nothing (you can feel it).
+        if (sneakToggled || sprintToggled), stanceSneakLayer >= 0, stanceSprintLayer >= 0 {
+            let sz: Float = 230, y = Self.hudScreen.y - 80   // ~1.8 hearts tall, centred on the hearts row
+            var x: Float = 60
+            for (on, layer, tint) in [(sneakToggled, stanceSneakLayer, 0x9CC9FF), (sprintToggled, stanceSprintLayer, 0xFFC46B)] where on {
+                appendOverlayQuadUV(center: at(SIMD2(x, y)), right: hr, up: hu, hw: sz / 2 * kx * D, hh: sz / 2 * ky * D,
+                                    layer: layer, uv: SIMD2(1, 1), tint: Self.hudTint(tint), v: &v, idx: &idx)
+                x += sz * 0.7
             }
         }
     }
@@ -8321,6 +8321,12 @@ final class WorldSession {
         if koganeClosedLayer < 0, let px = Self.renderKoganeRGBA(canvas: ModelTextureHandoff.size, closed: true) {
             koganeClosedLayer = registerRGBALayer("#koganeclosed", px); changed = true
         }
+        if stanceSneakLayer < 0, let px = Self.renderStanceRGBA(canvas: ModelTextureHandoff.size, sprint: false) {
+            stanceSneakLayer = registerRGBALayer("#stancesneak", px); changed = true
+        }
+        if stanceSprintLayer < 0, let px = Self.renderStanceRGBA(canvas: ModelTextureHandoff.size, sprint: true) {
+            stanceSprintLayer = registerRGBALayer("#stancesprint", px); changed = true
+        }
         if koganeTitleLayer < 0, let px = Self.renderTextRGBA("Menu", canvas: ModelTextureHandoff.size, fontFrac: 0.17) {
             koganeTitleLayer = registerRGBALayer("#koganetitle", px); changed = true
         }
@@ -9712,6 +9718,49 @@ final class WorldSession {
         return px
     }
 
+    /// A white stick figure with a dark outline, tinted at draw time: crouching
+    /// (sneak latched) or running with speed lines (sprint latched).
+    static func renderStanceRGBA(canvas: Int, sprint: Bool) -> [UInt8]? {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
+                                  bytesPerRow: canvas * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let s = CGFloat(canvas)
+        ctx.clear(CGRect(x: 0, y: 0, width: s, height: s))
+        ctx.setLineJoin(.round); ctx.setLineCap(.round)
+        let black = CGColor(red: 0.09, green: 0.09, blue: 0.11, alpha: 1)
+        let white = CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: s * x, y: s * y) }
+        // Polylines (body) and the head circle, drawn twice: a wide black pass
+        // underneath, then the white figure on top, so the outline survives any tint.
+        let lines: [[CGPoint]]
+        let head: CGPoint
+        if sprint {
+            head = P(0.64, 0.80)
+            lines = [[P(0.60, 0.70), P(0.50, 0.46)],                       // torso, leaning forward
+                     [P(0.50, 0.46), P(0.32, 0.36), P(0.26, 0.16)],         // trailing leg
+                     [P(0.50, 0.46), P(0.68, 0.34), P(0.78, 0.14)],         // leading leg
+                     [P(0.57, 0.63), P(0.78, 0.56)],                        // front arm
+                     [P(0.57, 0.63), P(0.40, 0.72)],                        // back arm
+                     [P(0.10, 0.62), P(0.28, 0.62)], [P(0.06, 0.50), P(0.24, 0.50)]]   // speed lines
+        } else {
+            head = P(0.40, 0.64)
+            lines = [[P(0.44, 0.54), P(0.60, 0.40)],                        // torso, hunched
+                     [P(0.60, 0.40), P(0.42, 0.28), P(0.62, 0.16)],         // folded leg
+                     [P(0.60, 0.40), P(0.76, 0.30), P(0.72, 0.16)],         // other leg
+                     [P(0.50, 0.49), P(0.68, 0.46)]]                        // arm on the knee
+        }
+        for (color, width) in [(black, s * 0.16), (white, s * 0.09)] {
+            ctx.setStrokeColor(color); ctx.setLineWidth(width)
+            for l in lines { ctx.move(to: l[0]); for p in l.dropFirst() { ctx.addLine(to: p) }; ctx.strokePath() }
+            let r = s * (color == black ? 0.125 : 0.09)
+            ctx.setFillColor(color)
+            ctx.fillEllipse(in: CGRect(x: head.x - r, y: head.y - r, width: 2 * r, height: 2 * r))
+        }
+        guard let data = ctx.data else { return nil }
+        return Array(UnsafeBufferPointer(start: data.assumingMemoryBound(to: UInt8.self), count: canvas * canvas * 4))
+    }
+
     static func renderKoganeRGBA(canvas: Int, closed: Bool = false) -> [UInt8]? {
         let cs = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
@@ -10941,6 +10990,19 @@ final class WorldSession {
         dirty = true
     }
     /// A whole mapblock arrived/changed (stream): re-mesh it and its neighbours.
+    /// A tick on the left controller when a latch changes, so a tap is known to
+    /// have toggled rather than held: one tick for sneak on, two for sprint on,
+    /// a softer single tick for either off.
+    private func latchHaptic(on: Bool, double: Bool = false) {
+        guard on else { input.rumble(intensity: 0.3, sharpness: 0.6, duration: 0.04, leftOnly: true); return }
+        input.rumble(intensity: 0.5, sharpness: 0.9, duration: 0.06, leftOnly: true)
+        if double {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { [weak self] in
+                self?.input.rumble(intensity: 0.5, sharpness: 0.9, duration: 0.05, leftOnly: true)
+            }
+        }
+    }
+
     /// Every in-game hotbar change goes through here so right X can swap back
     /// to the slot you had before.
     private func selectHotbar(_ i: Int, how: String = "") {
