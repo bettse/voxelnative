@@ -2706,8 +2706,8 @@ final class WorldSession {
             let spec = "formspec_version[4]size[11.75,10.425]label[0.375,0.375;Beacon]" +
                        "item_image[1,2;1,1;mcl_core:diamond]item_image[2.25,2;1,1;mcl_core:emerald]" +
                        "item_image[3.5,2;1,1;mcl_core:iron_ingot]item_image[4.75,2;1,1;mcl_core:gold_ingot]" +
-                       "image_button[1,3.5;1,1;mcl_potions_swift.png;swiftness;]" +
-                       "image_button[2.25,3.5;1,1;mcl_potions_leaping.png;leaping;]" +
+                       "image_button[1,3.5;1,1;mcl_potions_effect_swiftness.png;swiftness;]" +
+                       "image_button[2.25,3.5;1,1;mcl_potions_effect_leaping.png;leaping;]" +
                        "list[current_player;main;0.375,5.1;9,3;9]list[current_player;main;0.375,9.05;9,1;]"
             openFormspec(spec, ""); simSceneTimer = -1e9
         }
