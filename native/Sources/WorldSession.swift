@@ -7054,7 +7054,11 @@ final class WorldSession {
             let isCreeper: Bool
             if let c = creeperCache[e.id] { isCreeper = c }
             else {
-                isCreeper = e.mesh.lowercased().contains("creep") || e.name.lowercased().contains("creep")
+                // VoxeLibre 0.92 renamed the creeper: the live entity is
+                // mobs_mc:stalker with vl_stalker.b3d, and only its sounds still
+                // say "creeper", so matching "creep" alone never fired.
+                let m = e.mesh.lowercased(), n = e.name.lowercased()
+                isCreeper = m.contains("creep") || n.contains("creep") || m.contains("stalker") || n.contains("stalker")
                 creeperCache[e.id] = isCreeper
             }
             // Damage flash colour follows damage_texture_modifier: the engine
