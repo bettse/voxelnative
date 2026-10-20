@@ -11,10 +11,12 @@ BUNDLE=dev.ericbetts.voxelnative
 # Pick the PHYSICAL Vision Pro, not a simulator entry: the list can lead with
 # shut-down sim devices (installing there fails with "Install Application not
 # supported"), and the physical UDID isn't a 36-char UUID anymore (visionOS 27
-# gives it a shorter form like 00008142-000C14DE1E47801C), so match the
-# "physical" Reality column and take the token right before "(UDID)".
+# gives it a shorter form like 00008142-000C14DE1E47801C). Xcode 27.1 also
+# stopped printing "physical" in the Reality column (it's blank for the real
+# device, "simulated" for the sims), so take the paired Vision Pro row that
+# is NOT a simulator and use the token right before "(UDID)".
 DEV=$(xcrun devicectl list devices 2>/dev/null \
-  | awk '/Apple Vision Pro/ && /physical/ { for (i=1;i<=NF;i++) if ($i=="(UDID)") { print $(i-1); exit } }')
+  | awk '/Apple Vision Pro/ && /paired/ && !/simulated/ { for (i=1;i<=NF;i++) if ($i=="(UDID)") { print $(i-1); exit } }')
 [[ -z "$DEV" ]] && { echo "no physical Apple Vision Pro paired"; exit 1; }
 echo "device: $DEV"
 
