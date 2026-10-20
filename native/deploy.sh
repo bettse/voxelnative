@@ -30,6 +30,11 @@ command -v xcodegen >/dev/null && xcodegen generate >/dev/null
     done; sleep 5; done ) &
 WD=$!; trap 'kill $WD 2>/dev/null' EXIT
 
+# Build against the generic visionOS destination, not "id=$DEV": with Xcode
+# 27.1 a locked headset makes the device destination time out ("needs to be
+# unlocked to enable development services") before anything compiles. The
+# generic build needs no device at all; only the install below does, and
+# that one just says "device is locked" quickly if the headset is off.
 echo "building..."
 # Stamp the commit into the app (Info.plist GitHash -> logged at connect) so a
 # device log says which build it came from; deploy is install-only and a live
@@ -48,7 +53,7 @@ CONFIG="${DEPLOY_CONFIG:-Release}"
 [ -f "$HERE/.env" ] && set -a && . "$HERE/.env" && set +a
 TEAM_ARG=(); [ -n "${DEVELOPMENT_TEAM:-}" ] && TEAM_ARG=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM")
 xcodebuild -project VoxelNative.xcodeproj -scheme VoxelNative -configuration "$CONFIG" \
-  -destination "id=$DEV" -derivedDataPath "$DERIVED" -allowProvisioningUpdates "${TEAM_ARG[@]}" GIT_HASH="$GIT_HASH" build 2>&1 \
+  -destination "generic/platform=visionOS" -derivedDataPath "$DERIVED" -allowProvisioningUpdates "${TEAM_ARG[@]}" GIT_HASH="$GIT_HASH" build 2>&1 \
   | grep -E 'error:|BUILD' | grep -viE 'UsageDescription' | tee /tmp/voxel_deploy_build.txt || true
 # A failed build leaves the PREVIOUS app in Build/Products, and installing
 # that silently ships stale code: it did for most of a day when device-only
