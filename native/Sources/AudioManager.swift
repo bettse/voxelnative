@@ -53,6 +53,21 @@ final class ViewSettings {
     static let minBlocks = 3, maxBlocks = 12, defaultBlocks = 8
     private let defaults = UserDefaults.standard
     private let key = "view.blocks"
+    // How far the head-locked HUD (hearts, hunger, XP, effects, text) sits
+    // from the head, as a multiplier of the tuned distances (1.2 to 1.35 m).
+    // Cached: the session tick and the renderer read it every frame.
+    static let hudMin: Float = 0.6, hudMax: Float = 1.8
+    private var hudCached: Float = {
+        let v = UserDefaults.standard.float(forKey: "view.hudDistance")
+        return v == 0 ? 1 : max(ViewSettings.hudMin, min(ViewSettings.hudMax, v))
+    }()
+    var hudDistance: Float {
+        get { hudCached }
+        set {
+            hudCached = max(Self.hudMin, min(Self.hudMax, newValue))
+            defaults.set(hudCached, forKey: "view.hudDistance")
+        }
+    }
     var blocks: Int {
         get {
             guard defaults.object(forKey: key) != nil else { return Self.defaultBlocks }

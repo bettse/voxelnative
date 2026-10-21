@@ -41,6 +41,7 @@ struct ContentView: View {
     @State private var viewBlocks = Double(ViewSettings.shared.blocks)   // view distance
     @State private var autojump = MoveSettings.shared.autojump
     @State private var physicalMove = MoveSettings.shared.physicalMove
+    @State private var hudDistance = ViewSettings.shared.hudDistance
 
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
@@ -444,6 +445,15 @@ struct ContentView: View {
             }
             .frame(maxWidth: 360)
             Text("Lower = fewer blocks drawn (cooler/quieter, shorter view).")
+                .font(.footnote).foregroundStyle(.secondary)
+            HStack {
+                Text("HUD distance")
+                Slider(value: $hudDistance, in: ViewSettings.hudMin...ViewSettings.hudMax)
+                    .onChange(of: hudDistance) { _, v in ViewSettings.shared.hudDistance = v }
+                Text(String(format: "%.1fx", hudDistance)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 360)
+            Text("How far the health, hunger and other readouts float from your head (1.0x is the default).")
                 .font(.footnote).foregroundStyle(.secondary)
             Toggle("Auto-jump", isOn: $autojump)
                 .frame(maxWidth: 360)

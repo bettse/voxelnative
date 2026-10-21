@@ -1889,7 +1889,7 @@ actor Renderer {
         // Glass backing behind the low vitals band (HUD layout B): one soft
         // translucent panel in the same low band the hearts/hunger rows occupy,
         // projected against the head like the icons so it tracks with them.
-        let gd = 1.35 * scale
+        let gd = 1.35 * ViewSettings.shared.hudDistance * scale   // follows the HUD distance setting
         func bandDir(_ az: Float, _ e: Float) -> SIMD3<Float> { simd_normalize(fwd + right * tan(az) + up * tan(e)) }
         let pc = headPos + bandDir(0, -0.30) * gd
         // Hug the vitals rows (they reach ~az ±0.185, one row tall) instead of a

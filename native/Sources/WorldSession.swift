@@ -155,8 +155,10 @@ final class WorldSession {
     // confused more than helped). Stored, not computed: it was read per
     // option per tick while the menu was open, rebuilding the array each time.
     private let koganeOptions: [String] = {
-        var o = ["Resume", "Take photo", "Coordinates", "Exit to menu", "Quit game"]   // no Chat: the app doesn't send or show chat
-        if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 2) }
+        // No "Take photo": the left Create button (and P / F12) does that. No Chat:
+        // the app doesn't send or show chat.
+        var o = ["Resume", "Coordinates", "Exit to menu", "Quit game"]
+        if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 1) }
         return o
     }()
     private var koganeFocused = false          // gaze is on the companion
@@ -458,6 +460,13 @@ final class WorldSession {
     // pre-created potion-effect slots aren't mapped + z-sorted every frame.
     private var sortedHud: [(Int, Client.HudElement)] = []
     private var sortedHudGen = -1
+    // Gaze crosshair: on in the Nether's warped forest (enderman country).
+    // Decided once a second from the nodes around the feet; a flip re-filters
+    // the cached HUD list.
+    private var gazeCrosshair = false
+    private var gazeCrosshairTimer: Float = 0
+    private var warpedIds: Set<UInt16> = []
+    private static let netherMinY = -29067, netherMaxY = -29067 + 128   // mcl_vars.mg_nether_min/max
     // Constant quad UVs, hoisted so the emission helpers don't re-allocate the
     // array literal every call (follow-up). BL = bottom-left texture origin
     // (y-up quads), TL = top-left (y-down quads).
@@ -467,6 +476,7 @@ final class WorldSession {
     // its basis re-normalized) ~7x/frame, each call locking PlayerState. The pose
     // is fixed for the frame, so one read feeds every HUD/nametag helper.
     private var frameHeadXform = matrix_identity_float4x4
+    private var hudK: Float = 1                     // ViewSettings.hudDistance, read once per tick
     private struct ActiveSpawner { let spec: Client.ParticleSpawner; var emitted: Int; var age: Float; var gone: Float; var spawnRemainder: Float = 0 }
     private var activeSpawners: [Int: ActiveSpawner] = [:]
     private var digElapsed: Float = 0
@@ -2381,6 +2391,26 @@ final class WorldSession {
         // buys nothing. Luanti's own unload sweep is on a coarse timer too.
         // Accumulate dt so blocks still age by real elapsed time.
         let feet = player.snapshot().feet
+        gazeCrosshairTimer += dt
+        if gazeCrosshairTimer >= 1.0 {
+            gazeCrosshairTimer = 0
+            if warpedIds.isEmpty, atlasBuilt {
+                for (id, name) in client.nodes.allNames() where name.hasPrefix("mcl_crimson:warped_") { warpedIds.insert(id) }
+            }
+            let fy = Int(floor(feet.y))
+            var on = false
+            if fy >= Self.netherMinY, fy <= Self.netherMaxY, !warpedIds.isEmpty {
+                let fx = Int(floor(feet.x)), fz = Int(floor(feet.z))
+                var hits = 0
+                scan: for dy in -3...3 { for dx in stride(from: -8, through: 8, by: 2) { for dz in stride(from: -8, through: 8, by: 2) {
+                    if warpedIds.contains(client.world.nodeId(SIMD3(fx + dx, fy + dy, fz + dz))) { hits += 1; if hits >= 4 { on = true; break scan } }
+                } } }
+            }
+            if on != gazeCrosshair {
+                gazeCrosshair = on; sortedHudGen = -1   // re-filter the HUD list
+                print("[hud] gaze crosshair \(on ? "on" : "off") (warped forest)"); fflush(stdout)
+            }
+        }
         expireAccum += dt
         if expireAccum >= 1.0 {
             let myBlock = WorldMap.blockPos(SIMD3(Int(floor(feet.x)), Int(floor(feet.y)), Int(floor(feet.z))))
@@ -2534,9 +2564,17 @@ final class WorldSession {
         } else if abs(hy) < 0.3 {
             hotbarFlickArmed = true
         }
-        // Right X: back to the slot you had before (sword <-> pickaxe in one press).
-        if !panelUp, gi.cross, !prevCross, lastWieldIndex >= 0, lastWieldIndex < hb, lastWieldIndex != client.wieldIndex {
-            selectHotbar(lastWieldIndex, how: "swap")
+        // Right X: use whatever sits in hotbar slot 1 without switching to it
+        // (Eric keeps torches there: torch the wall while holding the pickaxe).
+        // Switch, place/use once, switch back, all inside this tick, so the
+        // server sees PLAYERITEM 0, INTERACT, PLAYERITEM n in that order and
+        // the hand HUD never shows the swap. (Replaced the "swap back" press.)
+        if !panelUp, gi.cross, !prevCross, hb > 0, let first = hotbar.first ?? nil, !first.isEmpty {
+            let cur = client.wieldIndex
+            if cur != 0 { client.setWieldIndex(0) }
+            let placed = performPlace(sneak: gi.sneak)
+            if cur != 0 { client.setWieldIndex(cur) }
+            print("[hotbar] quick-use slot 1 (\(first)) placed=\(placed) from slot \(cur)"); fflush(stdout)
         }
         prevCross = gi.cross
         // Keyboard 1-9 picks a hotbar slot directly, like desktop.
@@ -3810,9 +3848,6 @@ final class WorldSession {
             screenshotFlag.request()               // capture the bug as seen, before the keyboard covers it
             let ctx = bugNoteContext()               // pos/look/wield/shot, gathered now
             openKeyboard(prefill: "", saveOnDismiss: true, simple: true) { [weak self] t in self?.appendBugNote(t, context: ctx) }
-        case "Take photo":
-            koganeMenuOpen = false
-            startPhotoCountdown(3)
         case "Coordinates":
             // VoxeLibre's /whereami (no privilege needed) turns its own
             // coordinate readout on or off, and keeps the choice in player meta.
@@ -6123,11 +6158,13 @@ final class WorldSession {
     }
 
     /// Server HUD elements we replace or deliberately leave out.
-    static func hudAlwaysSkipped(_ e: Client.HudElement) -> Bool {
+    static func hudAlwaysSkipped(_ e: Client.HudElement, keepCrosshair: Bool = false) -> Bool {
         // VoxeLibre adds its own crosshair image; we deliberately draw no
         // reticle (the pointed-node outline is the cue, and a reticle
-        // at a guessed depth reads badly in stereo).
-        if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { return true }
+        // at a guessed depth reads badly in stereo). Except in the Nether's
+        // warped forest, where looking at an enderman is what starts the
+        // fight: there you want to know exactly where your gaze sits.
+        if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { return !keepCrosshair }
         // VoxeLibre also draws its hotbar background (mcl_inventory_hotbar.png)
         // as an image element; ours is wrist-anchored, so a strip of
         // empty slots floating at the bottom of view is just noise.
@@ -6156,7 +6193,7 @@ final class WorldSession {
         if client.hudGeneration != sortedHudGen {
             // Elements we never draw are dropped here, once per HUD change,
             // instead of string-matching all ~80 of them every tick.
-            sortedHud = client.hudElements.filter { !Self.hudAlwaysSkipped($0.value) }
+            sortedHud = client.hudElements.filter { !Self.hudAlwaysSkipped($0.value, keepCrosshair: gazeCrosshair) }
                 .map { ($0.key, $0.value) }.sorted { $0.1.zIndex < $1.1.zIndex }
             sortedHudGen = client.hudGeneration
         }
@@ -6214,7 +6251,7 @@ final class WorldSession {
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
         let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
         let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
-        let D = Self.hudDepth
+        let D = Self.hudDepth * hudK        // the HUD distance setting
         let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x     // rad per nominal pixel
         let ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
         // Origin-space point for a nominal screen pixel (y down), on the window.
@@ -6959,6 +6996,7 @@ final class WorldSession {
         // builds roll-free. With the raw basis the "sneaking"/"sprinting" tags
         // rolled with the head against the hearts next to them (Eric: weird).
         frameHeadXform = Renderer.levelCamera(player.headXform())
+        hudK = ViewSettings.shared.hudDistance
         // Snapshot the entity list once per tick and reuse it for both the model-
         // texture registration and the draw loop below, instead of filtering
         // objects.values into a fresh array twice.
@@ -7468,7 +7506,7 @@ final class WorldSession {
                                   into billboards: inout [EntityInstance]) {
         guard let st = client.inventory["offhand"]?.first ?? nil, !st.name.isEmpty,
               let tile = invTileCache[iconKey(st)] ?? nil, let layer = atlas.tileLayer(tile) else { return }
-        let hudDist: Float = 1.35, size: Float = 0.05 * hudDist
+        let hudDist: Float = 1.35 * hudK, size: Float = 0.05 * hudDist
         let (az, elev) = offhandHudAngles()
         let (fwd, right, up) = stableFrame(gaze, horizFwd: player.bodyForward())
         let dir = simd_normalize(fwd + right * tan(az) + up * tan(elev))
@@ -7486,7 +7524,7 @@ final class WorldSession {
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
         let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
         let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
-        let hudDist: Float = 1.35, size: Float = 0.05 * hudDist
+        let hudDist: Float = 1.35 * hudK, size: Float = 0.05 * hudDist
         let (az, elev) = offhandHudAngles()
         let center = headPos + simd_normalize(hf + hr * tan(az) + hu * tan(elev)) * hudDist - hf * 0.002
         if st.count > 1, let t = hudTextLayer(id: -2000, text: String(st.count)) {
@@ -7631,7 +7669,7 @@ final class WorldSession {
     private func appendBreathHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
         guard breath < 20 else { return }
-        let hudDist: Float = 1.35          // focal plane, was 1.7 (HUD P1)
+        let hudDist: Float = 1.35 * hudK   // focal plane, was 1.7 (HUD P1); hudK = the HUD distance setting
         let size: Float = 0.05 * hudDist
         let elev: Float = 0.30            // above the gaze (top of view)
         let step: Float = 0.055
@@ -7661,7 +7699,7 @@ final class WorldSession {
         // HUD layout B: a single low HORIZONTAL row (hearts left, hunger right)
         // in the comfortable lower band, instead of two tall corner columns that
         // read as crowded. `az` is the row centre; 10 icons run across it.
-        let hudDist: Float = 1.35          // on the panel focal plane (HUD P1)
+        let hudDist: Float = 1.35 * hudK   // on the panel focal plane (HUD P1); hudK = the HUD distance setting
         let size: Float = 0.05 * hudDist
         let elev: Float = -0.30 + elevOffset   // low band, below the gaze (HUD P3/B)
         let hstep: Float = 0.032           // radians between icons, left to right
