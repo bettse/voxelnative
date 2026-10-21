@@ -1927,9 +1927,18 @@ actor Renderer {
     /// right vector kept horizontal.
     nonisolated static func levelCamera(_ head: float4x4) -> float4x4 {
         let fwd = -simd_normalize(SIMD3<Float>(head.columns.2.x, head.columns.2.y, head.columns.2.z))
+        let rawRight = simd_normalize(SIMD3<Float>(head.columns.0.x, head.columns.0.y, head.columns.0.z))
         var right = simd_cross(fwd, SIMD3<Float>(0, 1, 0))
-        if simd_length(right) < 1e-3 { right = simd_normalize(SIMD3<Float>(head.columns.0.x, 0, head.columns.0.z)) }
-        right = simd_normalize(right)
+        let len = simd_length(right)
+        // Looking nearly straight up or down (the bed view tips the head to the
+        // ceiling) the level right axis is undefined and swings with every
+        // small head move, which spun the bed's "press O" prompt. Blend to the
+        // head's own right axis over the last ~25 degrees, so overlays stay put
+        // there and only follow roll where level has no meaning anyway.
+        let t = max(0, min(1, (abs(fwd.y) - 0.75) / 0.2))
+        right = len < 1e-3 ? rawRight : simd_mix(right / len, rawRight, SIMD3<Float>(repeating: t))
+        right -= fwd * simd_dot(right, fwd)                 // keep it perpendicular after the blend
+        right = simd_length(right) < 1e-3 ? rawRight : simd_normalize(right)
         let up = simd_cross(right, fwd)
         return float4x4(SIMD4(right, 0), SIMD4(up, 0), SIMD4(-fwd, 0), head.columns.3)
     }
