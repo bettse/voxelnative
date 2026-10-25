@@ -9761,8 +9761,13 @@ final class WorldSession {
         for step in 0..<400 {   // 12 s of flight: a lobbed crossbow bolt flies ~10 s
             let next = p + vel * dt + SIMD3(0, -0.5 * g * dt * dt, 0)
             let seg = next - p, len = simd_length(seg)
+            // Walkable nodes stop the bolt; a drawn nodebox that isn't walkable
+            // (one layer of top snow) doesn't, but the ring must still sit on
+            // its surface or it ends up buried an eighth of a block under the
+            // snow (Eric: the ring disappears on snow).
+            let nodes = client.nodes
             if len > 1e-5, let hit = client.world.raycast(origin: p, dir: seg, maxDist: len,
-                                                          pointable: { [phys] id in phys.isWalkable(id) },
+                                                          pointable: { [phys, nodes] id in phys.isWalkable(id) || nodes.kind(id) == .nodebox },
                                                           boxes: { [weak self] n, id in self?.pointBoxes(n, id) }) {
                 // A hair short of the face, or the ring z-fights the block it lands on.
                 hitPos = p + seg / len * max(0, hit.dist - 0.03)
@@ -9816,8 +9821,9 @@ final class WorldSession {
         }
         let origin = player.rayOrigin(), dir = simd_normalize(player.aim())
         var dist = currentReach
+        let nodes = client.nodes
         if let hit = client.world.raycast(origin: origin, dir: dir, maxDist: currentReach,
-                                          pointable: { [phys] id in phys.isWalkable(id) },
+                                          pointable: { [phys, nodes] id in phys.isWalkable(id) || nodes.kind(id) == .nodebox },
                                           boxes: { [weak self] n, id in self?.pointBoxes(n, id) }) { dist = min(dist, hit.dist) }
         if let obj = client.objects.raycastEntity(origin: origin, dir: dir, maxDist: currentReach) { dist = min(dist, obj.dist) }
         let hp = origin + dir * max(0.3, dist - 0.03)   // a hair in front of the surface, never inside the face
