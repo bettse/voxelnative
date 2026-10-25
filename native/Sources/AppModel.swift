@@ -185,6 +185,7 @@ final class AppModel {
         }
         nc.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
             print("[health] MEMORY WARNING \(WorldSession.healthNote()) at=\(WorldSession.clockTime())"); fflush(stdout)
+            sessionNote("memory warning \(WorldSession.healthNote())")
             self?.session.shedMemory()
         }
     }

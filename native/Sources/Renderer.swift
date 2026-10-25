@@ -3102,11 +3102,15 @@ actor Renderer {
         while true {
             if layerRenderer.state == .invalidated {
                 print("Layer is invalidated \(Date()) \(WorldSession.healthNote())")
+                let health = WorldSession.healthNote()
                 Task { @MainActor in
                     appModel.immersiveSpaceState = .closed
                     if !appModel.exitingByUser {
                         appModel.resumeWorld = true
                         print("[launcher] world closed by the system; will resume"); fflush(stdout)
+                        sessionNote("world closed by the system \(health)")
+                    } else {
+                        sessionNote("world closed by the user \(health)")
                     }
                     appModel.exitingByUser = false
                 }

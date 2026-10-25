@@ -15,7 +15,8 @@ deploy:         ## build + install + launch on the headset
 
 devlog:         ## pull the headset's Documents (native.log + shots) into $(OUT) and tail the log
 	rm -rf $(OUT) && xcrun devicectl device copy from --device $(DEVICE) --domain-type appDataContainer \
-	  --domain-identifier $(BUNDLE) --source Documents --destination $(OUT) >/dev/null 2>&1 && tail -40 $(OUT)/native.log
+	  --domain-identifier $(BUNDLE) --source Documents --destination $(OUT) >/dev/null 2>&1 && tail -40 $(OUT)/native.log; \
+	  [ -f $(OUT)/sessions.log ] && echo "--- sessions.log (never rotated):" && tail -20 $(OUT)/sessions.log || true
 
 devshots:       ## list the newest headset screenshots (after devlog)
 	ls -t $(OUT)/shot-*.png | head -5

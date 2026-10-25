@@ -6,17 +6,39 @@ func redirectStdioToFile() {
     let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
     let url = dir.appendingPathComponent("native.log")
     let path = url.path
-    // Keep the previous run's log (native.log.prev) so a crash-then-relaunch
-    // doesn't erase the crash session's log before we can pull it.
-    let prev = dir.appendingPathComponent("native.log.prev")
-    try? FileManager.default.removeItem(at: prev)
-    try? FileManager.default.moveItem(at: url, to: prev)
+    // Keep the last five runs' logs (native.log.prev, then .2 to .5, oldest
+    // last) so a crash-then-relaunch doesn't erase the crash session's log
+    // before we can pull it. One .prev wasn't enough: a day with three
+    // launches had lost the session with the system close by the evening.
+    let fm = FileManager.default
+    let names = ["native.log.prev", "native.log.2", "native.log.3", "native.log.4", "native.log.5"]
+    try? fm.removeItem(at: dir.appendingPathComponent(names.last!))
+    for i in stride(from: names.count - 1, to: 0, by: -1) {
+        try? fm.moveItem(at: dir.appendingPathComponent(names[i - 1]), to: dir.appendingPathComponent(names[i]))
+    }
+    try? fm.moveItem(at: url, to: dir.appendingPathComponent(names[0]))
     freopen(path, "w", stdout)
     freopen(path, "w", stderr)
     setvbuf(stdout, nil, _IONBF, 0)
     setvbuf(stderr, nil, _IONBF, 0)
     print("=== native.log start \(Date()) ===")
     fflush(stdout)
+    sessionNote("launch")
+}
+
+/// One line per notable session event (launch, world closed by the system,
+/// quit, memory warning) appended to Documents/sessions.log, which is never
+/// rotated: the day's closes stay listed even after the per-run logs roll off.
+func sessionNote(_ note: String) {
+    let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+    let url = dir.appendingPathComponent("sessions.log")
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    let line = "\(f.string(from: Date())) \(note)\n"
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
+    } else {
+        try? line.data(using: .utf8)!.write(to: url)
+    }
 }
 
 /// Delete the in-headset screenshots (Documents/shot-*.png) when launched with
