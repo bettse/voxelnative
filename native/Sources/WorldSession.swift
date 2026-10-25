@@ -7596,7 +7596,7 @@ final class WorldSession {
         guard xpHudShown else { return }
         let (_, fraction) = xpDisplay()
         let frac = max(0, min(1, fraction))
-        let hudDist = Self.xpHudDist
+        let hudDist = Self.xpHudDist * hudK   // follows the HUD distance setting like the hearts
         // A flat row across the bottom of view, just above the hearts / hunger
         // rows: one track quad and one fill quad over its left `fraction`.
         // It used to be 12 segments on an arc, each at its own depth and
@@ -7644,7 +7644,7 @@ final class WorldSession {
         let dir = simd_normalize(hf + hu * tanf(xpBarElev() + 0.05))
         // Same distance as the bar, the digits scaled to keep their old size.
         let k = Self.xpHudDist / 1.7
-        let center = headPos + dir * Self.xpHudDist
+        let center = headPos + dir * Self.xpHudDist * hudK
         appendQuad(center: center, right: hr, up: hu, hw: 0.10 * k, hh: 0.10 * k,
                    layer: xpLevelLayer, tint: Self.packTint(128, 255, 32), v: &v, idx: &idx)
     }
@@ -9456,7 +9456,7 @@ final class WorldSession {
         let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
         // Well up in the UPPER visual field and pushed back so it doesn't sit over
         // the action (Eric: the "Bug note saved" banner was still too prominent).
-        let center = headPos + hf * 1.5 + hu * 0.30
+        let center = headPos + hf * 1.5 * hudK + hu * 0.30
         // Backdrop is a short band; the text quad is SQUARE so the square text
         // canvas isn't squashed vertically (that made it a thin unreadable line).
         // The canvas margins are transparent, so only the centred text band shows.
@@ -9508,7 +9508,7 @@ final class WorldSession {
             var th = perLine * Float(max(1, chatRing[slot].lines))
             var tw = th * max(0.1, chatRing[slot].aspect)
             if tw > hMax { th *= hMax / tw; tw = hMax }
-            let center = headPos + hf * 1.7 + hu * (oy - th)   // top edge at oy; further out so a fresh MOTD isn't in your face (Eric)
+            let center = headPos + hf * 1.7 * hudK + hu * (oy - th)   // top edge at oy; further out so a fresh MOTD isn't in your face (Eric)
             let tint = Self.packTint(Int(255 * fade), Int(255 * fade), Int(255 * fade))
             // backdrop sized to the block + aspect-correct text quad over it
             appendQuad(center: center, right: hr, up: hu, hw: max(tw + 0.02, 0.12), hh: th + 0.012,
