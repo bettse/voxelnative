@@ -9757,15 +9757,18 @@ final class WorldSession {
         let dt: Float = 0.03
         var hitPos: SIMD3<Float>? = nil
         var beyond: SIMD3<Float>? = nil   // the arc left loaded terrain here
-        for _ in 0..<400 {   // 12 s of flight: a lobbed crossbow bolt flies ~10 s
+        var arc: [SIMD3<Float>] = []      // a dot every 0.3 s of flight, so the path reads even when the end is off the map
+        for step in 0..<400 {   // 12 s of flight: a lobbed crossbow bolt flies ~10 s
             let next = p + vel * dt + SIMD3(0, -0.5 * g * dt * dt, 0)
             let seg = next - p, len = simd_length(seg)
             if len > 1e-5, let hit = client.world.raycast(origin: p, dir: seg, maxDist: len,
                                                           pointable: { [phys] id in phys.isWalkable(id) },
                                                           boxes: { [weak self] n, id in self?.pointBoxes(n, id) }) {
-                hitPos = p + seg / len * hit.dist
+                // A hair short of the face, or the ring z-fights the block it lands on.
+                hitPos = p + seg / len * max(0, hit.dist - 0.03)
                 break
             }
+            if step % 10 == 9, step >= 19 { arc.append(next) }
             // Past the blocks we have (a far hillside, the view-distance edge):
             // the ray skips unloaded nodes, so the ring used to vanish for any
             // long shot. Show a grey ring where the arc leaves what's loaded:
@@ -9781,9 +9784,21 @@ final class WorldSession {
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
         let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
         let scale = PlayerState.scale
-        let rx = (hp.x - eye.x) * scale, ry = (hp.y - eye.y) * scale, rz = (hp.z - eye.z) * scale
-        let op = SIMD3<Float>(rx * cy - rz * sy, ry, -(rx * sy + rz * cy))
-        let hh = max(0.02, simd_length(op) * 0.02)   // about the same size on screen at any distance
+        func toOrigin(_ w: SIMD3<Float>) -> SIMD3<Float> {
+            let rx = (w.x - eye.x) * scale, ry = (w.y - eye.y) * scale, rz = (w.z - eye.z) * scale
+            return SIMD3<Float>(rx * cy - rz * sy, ry, -(rx * sy + rz * cy))
+        }
+        // The path: small faint dots along the arc (not the first 0.6 s, which
+        // sits in your face). With a crossbow most raised shots leave the loaded
+        // map, so the ring alone parked at the map edge and didn't follow the
+        // head; the dots do.
+        for a in arc {
+            let od = toOrigin(a)
+            let dh = max(0.015, simd_length(od) * 0.01)
+            appendQuad(center: od, right: hr, up: hu, hw: dh, hh: dh, layer: aimRingLayer, tint: 16777215, v: &v, idx: &idx)
+        }
+        let op = toOrigin(hp)
+        let hh = max(0.03, simd_length(op) * 0.03)   // about the same size on screen at any distance (was 0.02: read as a speck)
         appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: aimRingLayer, tint: tint, v: &v, idx: &idx)
     }
 
