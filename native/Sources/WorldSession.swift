@@ -5593,7 +5593,7 @@ final class WorldSession {
     /// falling node, item frame): resolved once instead of ~10 registry lookups
     /// per entity per tick. Cleared whenever model layers are released, since
     /// the cached layer indices would then point at reused slots.
-    private enum ItemDraw { case model(nid: UInt16, layer: Int), cube([Int]), card(layer: Int, uv: SIMD2<Float>) }
+    private enum ItemDraw { case model(nid: UInt16, layer: Int), cube([Int]), boxes([NodeRegistry.Box], [Int]), card(layer: Int, uv: SIMD2<Float>) }
     private var itemDrawCache: [String: ItemDraw] = [:]
 
     /// When a panel closes, give back the icon layers only that panel needed.
@@ -7196,7 +7196,7 @@ final class WorldSession {
                     let draw = itemDraw(itemStr)
                     if isDrop, loggedDropIds.insert(e.id).inserted {
                         let path: String
-                        switch draw { case .model: path = "model"; case .cube: path = "cube"; case .card: path = "card"; case nil: path = "NONE (no layer yet)" }
+                        switch draw { case .model: path = "model"; case .cube: path = "cube"; case .boxes: path = "boxes"; case .card: path = "card"; case nil: path = "NONE (no layer yet)" }
                         print("[drop] draw id=\(e.id) item=\(itemStr) path=\(path) pos=\(e.pos) light=\(light)"); fflush(stdout)
                     }
                     switch draw {
@@ -7213,6 +7213,10 @@ final class WorldSession {
                         appendItemCube(faceLayers: layers, pos: e.pos,
                                        eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
                                        size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
+                    case .boxes(let boxes, let layers):
+                        appendItemBoxes(boxes, faceLayers: layers, pos: e.pos,
+                                        eye: eye, cosY: cy, sinY: sy, playerYaw: s.yaw, light: light,
+                                        size: cubeSz, spin: isDrop, v: &mv, idx: &mi)
                     case .card(let layer, let uv):
                         // Tools/craftitems (and non-cube/non-mesh nodes): flat card.
                         appendItemQuads(pos: e.pos, layer: layer, uv: uv,
@@ -8177,6 +8181,13 @@ final class WorldSession {
                 let layers = (0..<6).map { (client.nodes.faceTile(nid, $0) ?? topTile).flatMap(iconLayerForTile) ?? -1 }
                 if !layers.contains(-1) { d = .cube(layers) }
                 else { return nil }   // a cube waits for its faces; never falls back to a card
+            } else if kind == .nodebox, let boxes = client.nodes.boxes(nid), !boxes.isEmpty {
+                // Stairs, slabs, fences, walls: the node's own boxes, like the
+                // world mesh and the inventory icon. They used to fall through
+                // to the flat card (Eric: a mined cobble staircase looked flat).
+                let layers = (0..<6).map { (client.nodes.faceTile(nid, $0) ?? topTile).flatMap(iconLayerForTile) ?? -1 }
+                if !layers.contains(-1) { d = .boxes(boxes, layers) }
+                else { return nil }
             }
         }
         if d == nil, let spec = droppedItemSpec(itemStr), let layer = modelTexLayer[spec] {
@@ -8769,6 +8780,38 @@ final class WorldSession {
                 pushV(&v, op.x + wx, op.y + ly, -(op.z + wz), uvs[k].x, uvs[k].y, l, 1.0, light, 16777215)
             }
             pushQuad(&idx, vb)
+        }
+    }
+
+    /// A nodebox item (stairs, slab, fence...): each of the node's boxes as a
+    /// small block, every face sampling the part of its tile the box covers
+    /// (WorldMesher.boxUV, the world mesh's rule), spinning like a cube drop.
+    private func appendItemBoxes(_ boxes: [NodeRegistry.Box], faceLayers: [Int], pos: SIMD3<Float>,
+                                 eye: SIMD3<Float>, cosY: Float, sinY: Float, playerYaw: Float,
+                                 light: Float, size sz: Float = 0.22, spin: Bool = true,
+                                 v: inout [Float], idx: inout [UInt32]) {
+        guard faceLayers.count == 6 else { return }
+        let scale = PlayerState.scale
+        let rx = (pos.x - eye.x) * scale, ry = (pos.y - eye.y) * scale, rz = (pos.z - eye.z) * scale
+        let op = SIMD3<Float>(rx * cosY - rz * sinY, ry, rx * sinY + rz * cosY)
+        let spinA = spin ? Float(frameUptime.truncatingRemainder(dividingBy: 1000)) * (Float.pi * 0.5) : 0
+        let a = spinA + playerYaw
+        let ca = cos(a), sa = sin(a)
+        let normals: [SIMD3<Int>] = [SIMD3(0, 1, 0), SIMD3(0, -1, 0), SIMD3(1, 0, 0), SIMD3(-1, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 0, -1)]
+        for b in boxes {
+            for fi in 0..<6 {
+                let vb = UInt32(v.count / 9)
+                let l = Float(faceLayers[fi])
+                for k in 0..<4 {
+                    let u = Self.unitCubeFaces[fi][k]          // which corner of the box this is
+                    let c = SIMD3<Float>(u.x < 0 ? b.min.x : b.max.x, u.y < 0 ? b.min.y : b.max.y, u.z < 0 ? b.min.z : b.max.z)
+                    let uv = WorldMesher.boxUV(normals[fi], c + 0.5)
+                    let lx = c.x * sz * scale, ly = c.y * sz * scale, lz = c.z * sz * scale
+                    let wx = lx * ca - lz * sa, wz = lx * sa + lz * ca
+                    pushV(&v, op.x + wx, op.y + ly, -(op.z + wz), uv.x, uv.y, l, 1.0, light, 16777215)
+                }
+                pushQuad(&idx, vb)
+            }
         }
     }
 
