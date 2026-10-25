@@ -2406,8 +2406,11 @@ final class WorldSession {
                     if warpedIds.contains(client.world.nodeId(SIMD3(fx + dx, fy + dy, fz + dz))) { hits += 1; if hits >= 4 { on = true; break scan } }
                 } } }
             }
+            #if targetEnvironment(simulator)
+            if UserDefaults.standard.bool(forKey: "vrdev.gazeCross") { on = true }   // -vrdev.gazeCross 1: force the marker for screenshots
+            #endif
             if on != gazeCrosshair {
-                gazeCrosshair = on; sortedHudGen = -1   // re-filter the HUD list
+                gazeCrosshair = on
                 print("[hud] gaze crosshair \(on ? "on" : "off") (warped forest)"); fflush(stdout)
             }
         }
@@ -6158,13 +6161,17 @@ final class WorldSession {
     }
 
     /// Server HUD elements we replace or deliberately leave out.
-    static func hudAlwaysSkipped(_ e: Client.HudElement, keepCrosshair: Bool = false) -> Bool {
+    static func hudAlwaysSkipped(_ e: Client.HudElement) -> Bool {
         // VoxeLibre adds its own crosshair image; we deliberately draw no
         // reticle (the pointed-node outline is the cue, and a reticle
         // at a guessed depth reads badly in stereo). Except in the Nether's
         // warped forest, where looking at an enderman is what starts the
         // fight: there you want to know exactly where your gaze sits.
-        if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { return !keepCrosshair }
+        // The warped-forest gaze marker is drawn in the world at the pointed
+        // depth instead (appendGazeMarker): a reticle on the 1.2 m HUD plane
+        // doubled in stereo whenever the eyes were on a block further away
+        // (Eric: fuzzy, and it didn't seem to move with the head).
+        if e.type == 0, e.text.range(of: "crosshair", options: .caseInsensitive) != nil { return true }
         // VoxeLibre also draws its hotbar background (mcl_inventory_hotbar.png)
         // as an image element; ours is wrist-anchored, so a strip of
         // empty slots floating at the bottom of view is just noise.
@@ -6193,7 +6200,7 @@ final class WorldSession {
         if client.hudGeneration != sortedHudGen {
             // Elements we never draw are dropped here, once per HUD change,
             // instead of string-matching all ~80 of them every tick.
-            sortedHud = client.hudElements.filter { !Self.hudAlwaysSkipped($0.value, keepCrosshair: gazeCrosshair) }
+            sortedHud = client.hudElements.filter { !Self.hudAlwaysSkipped($0.value) }
                 .map { ($0.key, $0.value) }.sorted { $0.1.zIndex < $1.1.zIndex }
             sortedHudGen = client.hudGeneration
         }
@@ -7415,6 +7422,7 @@ final class WorldSession {
             }
         }
         appendAimMarker(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
+        appendGazeMarker(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
         // The pause menu goes after the XP level, server HUD and nametags: the
         // overlay has no depth test, so later quads paint over earlier ones and
         // the level digits used to sit on top of the menu panel (device shot).
@@ -9777,6 +9785,55 @@ final class WorldSession {
         let op = SIMD3<Float>(rx * cy - rz * sy, ry, -(rx * sy + rz * cy))
         let hh = max(0.02, simd_length(op) * 0.02)   // about the same size on screen at any distance
         appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: aimRingLayer, tint: tint, v: &v, idx: &idx)
+    }
+
+    /// Warped-forest gaze marker: a small cross drawn IN THE WORLD at the point
+    /// the gaze ray hits (node or mob, else at reach), sized for a constant
+    /// angular size. At the target's own depth both eyes fuse it with the
+    /// target; a HUD-plane reticle at 1.2 m doubled against anything further.
+    private var gazeCrossLayer = -1
+    private func appendGazeMarker(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
+                                  v: inout [Float], idx: inout [UInt32]) {
+        guard gazeCrosshair, !inventoryOpen, !formspecOpen, !dead else { return }
+        if gazeCrossLayer < 0 {
+            guard let px = Self.renderGazeCrossRGBA(canvas: ModelTextureHandoff.size) else { return }
+            gazeCrossLayer = registerRGBALayer("#gazecross", px); modelTexturesDirty = true
+        }
+        let origin = player.rayOrigin(), dir = simd_normalize(player.aim())
+        var dist = currentReach
+        if let hit = client.world.raycast(origin: origin, dir: dir, maxDist: currentReach,
+                                          pointable: { [phys] id in phys.isWalkable(id) },
+                                          boxes: { [weak self] n, id in self?.pointBoxes(n, id) }) { dist = min(dist, hit.dist) }
+        if let obj = client.objects.raycastEntity(origin: origin, dir: dir, maxDist: currentReach) { dist = min(dist, obj.dist) }
+        let hp = origin + dir * max(0.3, dist - 0.03)   // a hair in front of the surface, never inside the face
+        let hx = frameHeadXform
+        let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
+        let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
+        let scale = PlayerState.scale
+        let rx = (hp.x - eye.x) * scale, ry = (hp.y - eye.y) * scale, rz = (hp.z - eye.z) * scale
+        let op = SIMD3<Float>(rx * cy - rz * sy, ry, -(rx * sy + rz * cy))
+        let hh = max(0.012, simd_length(op) * 0.012)
+        appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: gazeCrossLayer, tint: 16777215, v: &v, idx: &idx)
+    }
+
+    /// A thin white cross with a dark outline, for the gaze marker.
+    static func renderGazeCrossRGBA(canvas: Int) -> [UInt8]? {
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
+                                  bytesPerRow: canvas * 4, space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let c = CGFloat(canvas)
+        ctx.clear(CGRect(x: 0, y: 0, width: c, height: c))
+        ctx.setLineCap(.round)
+        for (color, w) in [(CGColor(red: 0, green: 0, blue: 0, alpha: 0.85), c * 0.14), (CGColor(red: 1, green: 1, blue: 1, alpha: 1), c * 0.07)] {
+            ctx.setStrokeColor(color); ctx.setLineWidth(w)
+            ctx.move(to: CGPoint(x: c * 0.18, y: c * 0.5)); ctx.addLine(to: CGPoint(x: c * 0.82, y: c * 0.5)); ctx.strokePath()
+            ctx.move(to: CGPoint(x: c * 0.5, y: c * 0.18)); ctx.addLine(to: CGPoint(x: c * 0.5, y: c * 0.82)); ctx.strokePath()
+        }
+        guard let base = ctx.data else { return nil }
+        var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
+        px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
+        return px
     }
 
     /// A white ring with a dark outline, for the aim marker.
