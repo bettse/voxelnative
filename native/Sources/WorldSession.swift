@@ -251,6 +251,13 @@ final class WorldSession {
     private var reconnectPending = false   // one retry in flight at a time
     private var connEpoch = 0              // bumped on start()/stop(); a pending retry from an older epoch is stale (F1)
     private var fatalDenied = false        // true after a non-retryable ACCESS_DENIED (wrong pw, name not allowed, etc)
+    private var serverCrashTimes: [Double] = []   // ACCESS_DENIED 12 (server crashed) times, for the crash-loop cap
+    /// Three server crashes within three minutes of each other: stop rejoining.
+    private func crashRetryAllowed() -> Bool {
+        let now = AppClock.seconds
+        serverCrashTimes = serverCrashTimes.filter { now - $0 < 180 } + [now]
+        return serverCrashTimes.count < 3
+    }
     // Human-readable connection trouble for the in-world banner (mid-session
     // drops, after the launcher is gone). nil while all is well. Session-queue side.
     private(set) var connProblem: String? = nil
@@ -1141,12 +1148,26 @@ final class WorldSession {
             // or kick without the flag, stops and shows the reason, like
             // desktop's "Access denied. Reason: ..." screen.
             guard let self else { return }
-            let reason = r.isEmpty ? "access denied" : r
-            if self.client.deniedReconnect || code == 8 || code == 9 {
+            var reason = r.isEmpty ? "access denied" : r
+            // 12 is "the server crashed": Eric's restarts itself, so retry like a
+            // server fail, unless it keeps crashing the moment we arrive (a
+            // broken spot under our feet crashed it five times in two minutes).
+            let crashLoop = code == 12 && !self.crashRetryAllowed()
+            if crashLoop { reason += " It crashed every time you joined here; something at this spot breaks the server." }
+            if !crashLoop, self.client.deniedReconnect || code == 8 || code == 9 || code == 12 {
                 self.deniedReason = code == 8 ? nil : reason   // keep it on the banner while retrying
             } else {
                 self.fatalDenied = true
                 self.setPhase(.failed(reason))
+                // In-world with nothing left to talk to, a frozen world under a
+                // banner reads as a hang (Eric quit and relaunched to get out).
+                // Hand back to the launcher, which shows the reason, once the
+                // banner has had a moment.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                    guard let self, self.fatalDenied else { return }
+                    print("[session] fatal denial: back to the launcher"); fflush(stdout)
+                    self.appModel?.requestExit(.toMenu)
+                }
             }
         }
         client.onDisconnected = { [weak self] r in
@@ -11246,7 +11267,10 @@ final class WorldSession {
                 // connProblem is session-queue state (setPhase writes it, the
                 // status banner reads it), so clear the "Connecting/Reconnecting"
                 // banner here, not on the mesher queue this block runs on.
-                if posted, hasWorldGeom { self.connProblem = nil }
+                // Not while we're cut off: a local remesh (a predicted torch)
+                // after a disconnect cleared the "Disconnected" banner in a
+                // blink (Eric: a message too fast to read, then a dead world).
+                if posted, hasWorldGeom, !self.fatalDenied, !self.reconnectPending { self.connProblem = nil }
             }
         }
     }
