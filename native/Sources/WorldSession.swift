@@ -157,7 +157,7 @@ final class WorldSession {
     private let koganeOptions: [String] = {
         // No "Take photo": the left Create button (and P / F12) does that. No Chat:
         // the app doesn't send or show chat.
-        var o = ["Resume", "Coordinates", "Exit to menu", "Quit game"]
+        var o = ["Resume", "Coordinates", "Biome", "Exit to menu", "Quit game"]
         if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 1) }
         return o
     }()
@@ -547,6 +547,7 @@ final class WorldSession {
     /// VoxeLibre's coordinate readout (/whereami), from the server's reply;
     /// nil until the join-time query answers or on a game without it.
     private var coordsShown: Bool?
+    private var biomeShown: Bool?          // mcl_info debug level >= 3 (the Biome menu toggle)
 
     /// Every 10 s, where CPU memory goes, next to the renderer's GPU [mem] line:
     /// a session's footprint grew ~300 MB past what the GPU side explains
@@ -986,8 +987,13 @@ final class WorldSession {
             }
             // /whereami replies ("Show location is set to: 1" / "set to 0"):
             // the coordinates toggle's state.
-            if sender.isEmpty, text.contains("Show location"), let d = text.last(where: { $0.isNumber }) {
-                self?.coordsShown = d != "0"
+            if sender.isEmpty, text.contains("Show location") || text.contains("Debug level"), let d = text.last(where: { $0.isNumber }) {
+                let level = Int(String(d)) ?? 0      // mcl_info level: 1 coordinates, 3 adds the biome
+                self?.coordsShown = level >= 1
+                self?.biomeShown = level >= 3
+            }
+            if sender.isEmpty, text.lowercased().contains("don't have permission") || text.lowercased().contains("privilege") {
+                self?.noticeText = "Biome needs the debug privilege"; self?.noticeExpiry = AppClock.seconds + 4
             }
             // /status: the Luanti server version, game name and uptime.
             if self?.statusAsked == true, sender.isEmpty, text.hasPrefix("# Server") {
@@ -3878,6 +3884,12 @@ final class WorldSession {
             // The menu stays open so the dot shows the server's answer.
             client.sendChat(coordsShown == true ? "/whereami 0" : "/whereami 1")
             return
+        case "Biome":
+            // The biome is mcl_info debug level 3 (/debug needs the debug
+            // privilege; the reply says so if you lack it). Off goes back to
+            // level 1 (coordinates) or 0.
+            client.sendChat(biomeShown == true ? (coordsShown == true ? "/debug 1" : "/debug 0") : "/debug 3")
+            return
         case "Exit to menu":
             koganeMenuOpen = false
             DispatchQueue.main.async { [weak self] in self?.appModel?.requestExit(.toMenu) }
@@ -6112,13 +6124,32 @@ final class WorldSession {
     /// The realm is dropped (you can see which one you're in) and so is the
     /// word Location. Values are floored: the block you stand in.
     static func coordinateColumns(_ els: [(Int, Client.HudElement)]) -> [(Int, Client.HudElement)] {
-        guard let src = els.first(where: { $0.1.type == 1 && $0.1.text.hasPrefix("Location:") }) else { return els }
-        var out = els.filter { !($0.1.type == 1 && $0.1.text.hasPrefix("Location:")) }
+        // mcl_info's readout is one text element, one "Key: value" line per
+        // field the debug level allows: at level 1 just "Location: ...", at 3
+        // "Biome: ...", "Coords: ..." (dropped, same numbers) and "Location: ...".
+        func isReadout(_ e: Client.HudElement) -> Bool {
+            e.type == 1 && e.text.split(separator: "\n").contains { $0.hasPrefix("Location:") }
+        }
+        guard let src = els.first(where: { isReadout($0.1) }) else { return els }
+        var out = els.filter { !isReadout($0.1) }
+        let lines = src.1.text.split(separator: "\n").map(String.init)
+        let location = lines.first { $0.hasPrefix("Location:") } ?? ""
         func value(_ axis: String) -> Int? {
-            guard let r = src.1.text.range(of: axis + ":") else { return nil }
-            let rest = src.1.text[r.upperBound...]
+            guard let r = location.range(of: axis + ":") else { return nil }
+            let rest = location[r.upperBound...]
             let num = rest.prefix { $0 == "-" || $0 == "." || $0.isNumber }
             return Float(num).map { Int(floor($0)) }
+        }
+        // The biome, by its name only ("Biome: Plains (Plains), Humidity: 50.0,
+        // Temperature: 50.0"), under the columns.
+        if let b = lines.first(where: { $0.hasPrefix("Biome:") }) {
+            var name = String(b.dropFirst("Biome:".count)).trimmingCharacters(in: .whitespaces)
+            if let p = name.firstIndex(of: "(") { name = String(name[..<p]).trimmingCharacters(in: .whitespaces) }
+            if let c = name.firstIndex(of: ",") { name = String(name[..<c]).trimmingCharacters(in: .whitespaces) }
+            var el = Client.HudElement()
+            el.type = 1; el.text = name; el.pos = SIMD2(0, 0); el.align = SIMD2(1, 1)
+            el.offset = SIMD2(6, 82); el.number = 0xCCCAC0; el.zIndex = 100; el.style = 1
+            out.append((2_100_030, el))
         }
         for (k, axis) in ["x", "y", "z"].enumerated() {
             guard let v = value(axis) else { continue }
@@ -9659,8 +9690,8 @@ final class WorldSession {
             }
             // Audio toggles show their state as a dot (green = on, grey = off).
             let label = i < koganeOptions.count ? koganeOptions[i] : ""
-            if label == "Toggle music" || label == "Toggle sound" || label == "Coordinates" {
-                let on = label == "Coordinates" ? coordsShown == true
+            if label == "Toggle music" || label == "Toggle sound" || label == "Coordinates" || label == "Biome" {
+                let on = label == "Coordinates" ? coordsShown == true : label == "Biome" ? biomeShown == true
                     : label == "Toggle music" ? VolumeSettings.shared.music > 0 : VolumeSettings.shared.sfx > 0
                 appendQuad(center: at(0.575, 0.19, oy), right: hr, up: hu, hw: 0.02, hh: 0.02,
                            layer: highlightLayer, tint: on ? Self.packTint(60, 210, 90) : Self.packTint(70, 70, 78),
