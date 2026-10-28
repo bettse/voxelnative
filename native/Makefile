@@ -1,5 +1,7 @@
 # Everyday chores for the native visionOS client. Run from native/.
-DEVICE   ?= 70B79CDE-6606-5BF2-BFBC-1345834E5D85
+# The paired headset, found the way deploy.sh finds it (its UDID changed with
+# visionOS 27, and Xcode 27.1 stopped labelling it "physical").
+DEVICE   ?= $(shell xcrun devicectl list devices 2>/dev/null | awk '/Apple Vision Pro/ && /paired/ && !/simulated/ { for (i=1;i<=NF;i++) if ($$i=="(UDID)") { print $$(i-1); exit } }')
 SIM      ?= AAA51166-3572-43B8-9B71-9090483A2301
 BUNDLE   ?= dev.ericbetts.voxelnative
 OUT      ?= /tmp/vdev
