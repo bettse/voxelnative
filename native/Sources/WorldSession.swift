@@ -9853,13 +9853,9 @@ final class WorldSession {
         // sits in your face). With a crossbow most raised shots leave the loaded
         // map, so the ring alone parked at the map edge and didn't follow the
         // head; the dots do.
-        // Filled dots, not little rings: three "circles" beside the real ring
-        // read as clutter (Eric), the ring must be the one circle.
-        for a in arc {
-            let od = toOrigin(a)
-            let dh = max(0.012, simd_length(od) * 0.007)
-            appendQuad(center: od, right: hr, up: hu, hw: dh, hh: dh, layer: aimDotLayer, tint: Self.packTint(230, 230, 230), v: &v, idx: &idx)
-        }
+        // The flight path was drawn as dots along `arc` for a while; Eric wants
+        // the landing ring alone, so the arc is computed but not drawn.
+        _ = arc
         let op = toOrigin(hp)
         let hh = max(0.03, simd_length(op) * 0.03)   // about the same size on screen at any distance (was 0.02: read as a speck)
         appendQuad(center: op, right: hr, up: hu, hw: hh, hh: hh, layer: aimRingLayer, tint: tint, v: &v, idx: &idx)
