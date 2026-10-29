@@ -9778,7 +9778,7 @@ final class WorldSession {
     // direction; bow speed 40 * charge over 0.5 s, at least 4; loaded crossbow
     // 68) and vl_projectile's flight (movement_gravity, no drag in air),
     // stepped and raycast against walkable nodes.
-    private var aimRingLayer = -1
+    private var aimRingLayer = -1, aimDotLayer = -1   // the landing ring, and the filled dot for the arc
     private var serverGravity: Float = 9.81   // movement_gravity (TOCLIENT_MOVEMENT), arrows fall by it
     private var bowDrawStart: Double? = nil
     private func appendAimMarker(eye: SIMD3<Float>, cosY cy: Float, sinY sy: Float,
@@ -9802,6 +9802,10 @@ final class WorldSession {
         if aimRingLayer < 0 {
             guard let px = Self.renderAimRingRGBA(canvas: ModelTextureHandoff.size) else { return }
             aimRingLayer = registerRGBALayer("#aimring", px); modelTexturesDirty = true
+        }
+        if aimDotLayer < 0 {
+            guard let px = Self.renderAimRingRGBA(canvas: ModelTextureHandoff.size, filled: true) else { return }
+            aimDotLayer = registerRGBALayer("#aimdot", px); modelTexturesDirty = true
         }
         let g = serverGravity > 0 ? serverGravity : 9.81
         var p = player.snapshot().feet + SIMD3(0, 1.5, 0)
@@ -9849,10 +9853,12 @@ final class WorldSession {
         // sits in your face). With a crossbow most raised shots leave the loaded
         // map, so the ring alone parked at the map edge and didn't follow the
         // head; the dots do.
+        // Filled dots, not little rings: three "circles" beside the real ring
+        // read as clutter (Eric), the ring must be the one circle.
         for a in arc {
             let od = toOrigin(a)
-            let dh = max(0.015, simd_length(od) * 0.01)
-            appendQuad(center: od, right: hr, up: hu, hw: dh, hh: dh, layer: aimRingLayer, tint: 16777215, v: &v, idx: &idx)
+            let dh = max(0.012, simd_length(od) * 0.007)
+            appendQuad(center: od, right: hr, up: hu, hw: dh, hh: dh, layer: aimDotLayer, tint: Self.packTint(230, 230, 230), v: &v, idx: &idx)
         }
         let op = toOrigin(hp)
         let hh = max(0.03, simd_length(op) * 0.03)   // about the same size on screen at any distance (was 0.02: read as a speck)
@@ -9910,13 +9916,23 @@ final class WorldSession {
     }
 
     /// A white ring with a dark outline, for the aim marker.
-    static func renderAimRingRGBA(canvas: Int) -> [UInt8]? {
+    static func renderAimRingRGBA(canvas: Int, filled: Bool = false) -> [UInt8]? {
         let cs = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
                                   bytesPerRow: canvas * 4, space: cs,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         let c = CGFloat(canvas)
         ctx.clear(CGRect(x: 0, y: 0, width: c, height: c))
+        if filled {
+            // A solid dot with a dark rim, for the flight-path dots.
+            let d = CGRect(x: c * 0.25, y: c * 0.25, width: c * 0.5, height: c * 0.5)
+            ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.8)); ctx.fillEllipse(in: d.insetBy(dx: -c * 0.06, dy: -c * 0.06))
+            ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.fillEllipse(in: d)
+            guard let base = ctx.data else { return nil }
+            var px = [UInt8](repeating: 0, count: canvas * canvas * 4)
+            px.withUnsafeMutableBytes { _ = memcpy($0.baseAddress, base, canvas * canvas * 4) }
+            return px
+        }
         let r = CGRect(x: c * 0.18, y: c * 0.18, width: c * 0.64, height: c * 0.64)
         ctx.setStrokeColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.9)); ctx.setLineWidth(c * 0.16); ctx.strokeEllipse(in: r)
         ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1)); ctx.setLineWidth(c * 0.08); ctx.strokeEllipse(in: r)
