@@ -5411,7 +5411,19 @@ final class WorldSession {
         let hover = invHover.map { invSlots[$0] }
         if let held = invHeld {
             if let h = hover {
-                if h.loc == held.loc && h.list == held.list && h.index == held.index { invHeld = nil; return }
+                if h.loc == held.loc && h.list == held.list && h.index == held.index {
+                    // The source slot. The hand is a reference to it (nothing has
+                    // moved on the server yet), so "put back" is only bookkeeping:
+                    // trigger puts everything back, grip puts ONE back like desktop's
+                    // right-click, instead of dropping the whole hold (Eric: putting
+                    // half back put it all back).
+                    if secondary {
+                        let total = inventoryStack(h)?.count ?? 0
+                        let holding = held.count == 0 ? total : held.count
+                        invHeld = holding > 1 ? (held.loc, held.list, held.index, holding - 1) : nil
+                    } else { invHeld = nil }
+                    return
+                }
                 // Clicking the craft output again while already holding the crafted
                 // result crafts another batch and accumulates it in the hand, like
                 // desktop. The hand references the hidden craftresult slot,
@@ -6702,19 +6714,27 @@ final class WorldSession {
                        layer: highlightLayer, tint: (invHover == i || isHeld) ? Self.packTint(232, 184, 64) : Self.packTint(44, 44, 54),
                        v: &v, idx: &idx)
             let stack = inventoryStack(s)   // once per slot (was up to 3 lookups, each a nodemeta: parse)
-            if let st = stack, !isHeld,
+            // What stays in the cell while part of it is in the hand: the whole
+            // stack is held with count 0, a partial hold leaves the rest showing
+            // with its own count, like desktop's split stack.
+            let shown: Int = {
+                guard let st = stack else { return 0 }
+                guard isHeld, let h = invHeld else { return st.count }
+                return h.count == 0 ? 0 : max(0, st.count - h.count)
+            }()
+            if let st = stack, shown > 0,
                nodeIcon3D(st.name, center: cq(0.008), oRight: oRight, oUp: oUp, oToward: toOriginDir(toward),
                           size: cell * 0.62, v: &v, idx: &idx) {
                 // Drew a 3D node icon (block/chest); count/wear overlays below still apply.
-                if st.count > 1, let cl = invCountLayer(st.count) {
+                if shown > 1, let cl = invCountLayer(shown) {
                     let cc = fr.center + fr.right * (s.u + cell * 0.28) + fr.up * (s.v - cell * 0.28) - toward * 0.012
                     appendQuad(center: toOrigin(cc), right: oRight, up: oUp, hw: cell * 0.24, hh: cell * 0.24,
                                layer: cl, tint: 16777215, v: &v, idx: &idx)
                 }
-            } else if let st = stack, !isHeld, let icon = invIconModelLayer(iconKey(st)) {
+            } else if let st = stack, shown > 0, let icon = invIconModelLayer(iconKey(st)) {
                 appendQuad(center: cq(0.005), right: oRight, up: oUp, hw: cell * 0.42, hh: cell * 0.42,
                            layer: icon, tint: 16777215, v: &v, idx: &idx)
-                if st.count > 1, let cl = invCountLayer(st.count) {
+                if shown > 1, let cl = invCountLayer(shown) {
                     let cc = fr.center + fr.right * (s.u + cell * 0.28) + fr.up * (s.v - cell * 0.28) - toward * 0.008
                     appendQuad(center: toOrigin(cc), right: oRight, up: oUp, hw: cell * 0.24, hh: cell * 0.24,
                                layer: cl, tint: 16777215, v: &v, idx: &idx)
