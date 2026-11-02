@@ -28,4 +28,43 @@ final class NodeMetaTests: XCTestCase {
         XCTAssertEqual(map.nodeFormspec(SIMD3(10, 20, 30)), "size[9,9]")
         XCTAssertNil(map.nodeFormspec(SIMD3(0, 0, 0)))
     }
+
+    private func metaPacket(_ pos: SIMD3<Int>) -> Data {
+        let w = PacketWriter()
+        w.u8(2); w.u16(1)
+        w.s16(pos.x).s16(pos.y).s16(pos.z)
+        w.u32(1); w.string16("formspec"); w.string32("size[9,9]"); w.u8(0)
+        w.raw(Data("List main 1\nWidth 1\nItem mcl_core:stone 5\nEndInventoryList\nEndInventory\n".utf8))
+        return w.data
+    }
+
+    /// Every position in the packet is reported, not only ones seen for the
+    /// first time: a smithing table's output filling in is a change to meta
+    /// that arrived with the block, and the open form has to hear about it.
+    func testApplyNodeMetaChangedReportsKnownPositions() {
+        let map = WorldMap()
+        let p = SIMD3(10, 20, 30)
+        XCTAssertEqual(map.applyNodeMetaChanged(metaPacket(p)), [p])
+        XCTAssertEqual(map.applyNodeMetaChanged(metaPacket(p)), [p], "second update of the same node")
+    }
+
+    /// The meta goes with the node: dig a furnace (REMOVENODE) or have the
+    /// server replace it (ADDNODE without keep_metadata) and the old form and
+    /// stacks must not open from the block placed in its spot.
+    func testRemoveAndAddNodeClearMeta() {
+        let map = WorldMap()
+        let p = SIMD3(10, 20, 30)
+        _ = map.applyNodeMetaChanged(metaPacket(p))
+        XCTAssertNotNil(map.nodeFormspec(p))
+        _ = map.decodeRemoveNode(PacketWriter().s16(p.x).s16(p.y).s16(p.z).data)
+        XCTAssertNil(map.nodeFormspec(p)); XCTAssertNil(map.nodeInventory(p))
+
+        _ = map.applyNodeMetaChanged(metaPacket(p))
+        _ = map.decodeAddNode(PacketWriter().s16(p.x).s16(p.y).s16(p.z).u16(7).u8(0).u8(0).u8(0).data)
+        XCTAssertNil(map.nodeFormspec(p), "ADDNODE with keep_metadata 0 clears")
+
+        _ = map.applyNodeMetaChanged(metaPacket(p))
+        _ = map.decodeAddNode(PacketWriter().s16(p.x).s16(p.y).s16(p.z).u16(7).u8(0).u8(0).u8(1).data)
+        XCTAssertEqual(map.nodeFormspec(p), "size[9,9]", "swap_node keeps the meta")
+    }
 }

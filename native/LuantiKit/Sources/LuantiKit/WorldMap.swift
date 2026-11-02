@@ -175,6 +175,12 @@ public final class WorldMap {
     /// mesher/physics read). Returns the block position.
     @discardableResult
     public func insert(_ d: DecodedBlock) -> SIMD3<Int> {
+        // A re-sent block carries the meta of every node that has some, so any
+        // entry of ours inside it that the block no longer lists is stale.
+        if blocks[d.bpos] != nil {
+            for k in nodeMeta.keys where WorldMap.blockPos(k) == d.bpos && d.meta[k] == nil { nodeMeta[k] = nil }
+            for k in nodeFormspecs.keys where WorldMap.blockPos(k) == d.bpos && d.formspecs[k] == nil { nodeFormspecs[k] = nil }
+        }
         blocks[d.bpos] = d.block
         for (k, v) in d.meta { nodeMeta[k] = v }
         for (k, v) in d.formspecs { nodeFormspecs[k] = v }
@@ -448,6 +454,9 @@ public final class WorldMap {
     }
 
     public func removeNode(_ p: SIMD3<Int>) {
+        // The meta goes with the node (a dug furnace kept its form and stacks
+        // here, so a block placed in the same spot opened the old furnace).
+        nodeMeta[p] = nil; nodeFormspecs[p] = nil
         // A dug cell becomes air. With the node registry's light tables the
         // relight in setNode fills it properly; before NODEDEF fall back
         // to the brightest neighbour minus one so a hole isn't pitch black.
@@ -462,6 +471,10 @@ public final class WorldMap {
         let r = PacketReader(payload)
         let p = SIMD3(r.s16(), r.s16(), r.s16())
         let param0 = UInt16(r.u16() & 0xFFFF); let param1 = UInt8(r.u8() & 0xFF); let param2 = UInt8(r.u8() & 0xFF)
+        // Trailing keep_metadata byte: the engine clears the node's meta unless
+        // it is set (swap_node sets it; a plain set_node/place does not).
+        let keepMeta = r.has(1) && r.u8() != 0
+        if !keepMeta { nodeMeta[p] = nil; nodeFormspecs[p] = nil }
         setNode(p, param0: param0, param1: param1, param2: param2)
         return p
     }

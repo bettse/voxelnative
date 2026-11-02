@@ -956,7 +956,19 @@ final class WorldSession {
             }
         }
         client.onInventoryLists = { [weak self] in self?.refreshInventoryTiles() }
-        client.onShowFormspec = { [weak self] spec, name in self?.openFormspec(spec, name) }
+        client.onShowFormspec = { [weak self] spec, name in
+            guard let self else { return }
+            // VoxeLibre re-shows the enchanting table form on every put/take:
+            // the same named form replacing itself keeps the stack in hand,
+            // like desktop. The slot it points at may have emptied by the
+            // put; drop it then.
+            let sameForm = self.formspecOpen && !name.isEmpty && name == self.formspecName
+            let held = self.invHeld
+            self.openFormspec(spec, name)
+            if sameForm, let h = held, let list = self.listFor(loc: h.loc, name: h.list), h.index < list.count, list[h.index] != nil {
+                self.invHeld = h
+            }
+        }
         client.onEyeOffset = { [weak self] v in self?.player.setEyeOffset(v) }
         client.onPrivileges = { [weak self] privs in
             guard let self, !privs.contains("fly") else { return }
@@ -1096,9 +1108,18 @@ final class WorldSession {
         // formspec, or a smithing table / anvil filling its output slot):
         // rebake its item icons, else a new item type shows as an empty slot
         // (the hover tooltip still named it) until the panel is reopened.
+        // Any position the open form lists counts, not just the node that was
+        // clicked: a large chest lists both halves by position, so a hopper
+        // feeding the far half showed blank slots. The node's own meta form
+        // (no formname) also re-reads its visuals; a named show_formspec form
+        // (villager trade) must not, or a furnace used earlier repainted it
+        // with furnace art every cook tick.
         client.onNodeMetaChanged = { [weak self] p in
-            guard let self, self.formspecOpen, self.formspecContext == p else { return }
-            self.refreshOpenNodeFormspec()   // fire/arrow gauge + any image[] update
+            guard let self, self.formspecOpen else { return }
+            let loc = "nodemeta:\(p.x),\(p.y),\(p.z)"
+            let ownMetaForm = self.formspecName.isEmpty && !self.formspecIsInventory && self.formspecContext == p
+            guard ownMetaForm || self.formspecElements.contains(where: { $0.loc == loc }) else { return }
+            if ownMetaForm { self.refreshOpenNodeFormspec() }   // fire/arrow gauge + any image[] update
             self.refreshInventoryTiles()
         }
         // Media streams in continuously at join; each file used to force an atlas
@@ -1139,6 +1160,10 @@ final class WorldSession {
             guard let self else { return }
             self.activeSpawners.removeAll(); self.attachedSounds.removeAll()
             self.audio.stopAll()
+            // The server forgets an open form with the session; a panel left
+            // up drew stale lists and sent moves for a form it no longer had.
+            if self.formspecOpen { self.closeFormspec(notifyServer: false) }
+            else if self.inventoryOpen { self.toggleInventory() }
         }
         client.onStopSound = { [weak self] id in self?.audio.stop(id: id); self?.attachedSounds.removeValue(forKey: id) }
         // Finished handles go back to the server in one TOSERVER_REMOVED_SOUNDS
@@ -2384,10 +2409,15 @@ final class WorldSession {
                 // Pad first: the scene before (fly) can leave the player
                 // airborne on 1 HP, and the fall killed it, dropping the cobble.
                 client.sendChat("/grantme all"); simTeleportToPad()
+                simInvPhase = 10; simInvTimer = 0
+            case 10 where simInvTimer > 5:
+                // Spaced from the join's /seed /status /whereami and the pad
+                // hop: nine chat lines inside ten seconds trip the server's
+                // flood limit and the /giveme is the one that gets dropped.
                 client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 40")
                 print("[invpick] gave cobble"); fflush(stdout)
                 simInvPhase = 1; simInvTimer = 0
-            case 1 where simInvTimer > 6:   // five paced chat commands
+            case 1 where simInvTimer > 5:
                 if !inventoryOpen { toggleInventory() }
                 print("[invpick] opened inventory, slots=\(invSlots.count)"); fflush(stdout)
                 simInvPhase = 2; simInvTimer = 0
@@ -4752,7 +4782,7 @@ final class WorldSession {
         print("[inventory] \(inventoryOpen ? "open" : "closed")"); fflush(stdout)
     }
 
-    private func closeFormspec() {
+    private func closeFormspec(notifyServer: Bool = true) {
         metaFormspecShown = nil
         invScale = 1   // the hand-built inventory grid uses the base size
         // A crafting-table form shows the player's `craft` grid. Return its input
@@ -4780,7 +4810,9 @@ final class WorldSession {
         // fields to play the lid-close animation. Sending NODEMETA_FIELDS to the
         // node (no formname) never matched "mcl_chests:", so the lid stayed open.
         // Fall back to node fields for a bare nodemeta form (no formname).
-        if !formspecName.isEmpty || formspecIsInventory {
+        if !notifyServer {
+            // A reconnect: the server forgot the form with the session.
+        } else if !formspecName.isEmpty || formspecIsInventory {
             // The inventory form's name is "" on the wire; mcl_inventory's
             // receive_fields handler (craft-grid return, creative state) keys
             // on exactly that.
@@ -4789,6 +4821,9 @@ final class WorldSession {
             client.sendNodeFields(pos: n, fields: ["quit": "true"])
         }
         formspecName = ""; formspecIsInventory = false
+        // The node this form belonged to is done with: left set, a furnace's
+        // per-tick meta changes kept matching it after a trade form opened.
+        formspecContext = nil
         releasePanelIconLayers()
         pendingButtonForm = nil; noticeText = nil
         print("[formspec] closed"); fflush(stdout)
@@ -6063,6 +6098,101 @@ final class WorldSession {
     // (imageNames parse, PNG header read, hudSpecSize string ops) is fixed, so
     // cache it. Dropped alongside the layer in forgetTexture on a re-push.
     private var hudImageCache: [String: (layer: Int, uv: SIMD2<Float>, src: SIMD2<Float>)] = [:]
+    /// A sub-rectangle of an overlay quad: `sub` is in the image's normalized
+    /// space (x right, y down), used both for where the piece sits on the quad
+    /// and which texels it samples (scaled by `uv` like appendOverlayQuadUV).
+    private func appendOverlayQuadSub(center: SIMD3<Float>, right: SIMD3<Float>, up: SIMD3<Float>,
+                                      hw: Float, hh: Float, layer: Int, uv: SIMD2<Float>,
+                                      sub: (x0: Float, y0: Float, x1: Float, y1: Float), tint: Float,
+                                      v: inout [Float], idx: inout [UInt32]) {
+        let cx = center + right * (hw * (sub.x0 + sub.x1 - 1)) + up * (hh * (1 - sub.y0 - sub.y1))
+        let shw = hw * (sub.x1 - sub.x0), shh = hh * (sub.y1 - sub.y0)
+        let corners = [cx - right * shw - up * shh, cx + right * shw - up * shh,
+                       cx + right * shw + up * shh, cx - right * shw + up * shh]
+        let uvs: [(Float, Float)] = [(sub.x0, sub.y1), (sub.x1, sub.y1), (sub.x1, sub.y0), (sub.x0, sub.y0)]
+        let base = UInt32(v.count / 9)
+        for k in 0..<4 {
+            let p = corners[k]
+            pushV(&v, p.x, p.y, p.z, uvs[k].0 * uv.x, uvs[k].1 * uv.y, Float(layer), 1.0, 255, tint)
+        }
+        pushQuad(&idx, base)
+    }
+
+    /// Split a gauge spec, `base^[lowpart:N:fg` (optionally in parens) followed
+    /// only by [resize / [transform / [verticalframe modifiers, into the base
+    /// and fill specs (each with the trailing modifiers, so the compositor
+    /// bakes them once) and the fill's clip rect in the final image. Anything
+    /// else returns nil and goes through the compositor as a whole.
+    private func gaugeParts(_ spec: String) -> (base: String, fg: String, clip: (x0: Float, y0: Float, x1: Float, y1: Float))? {
+        if let c = gaugeCache[spec] { return c }
+        let r = Self.splitGauge(spec)
+        gaugeCache[spec] = .some(r)
+        return r
+    }
+    private var gaugeCache: [String: (base: String, fg: String, clip: (x0: Float, y0: Float, x1: Float, y1: Float))?] = [:]
+    static func splitGauge(_ spec: String) -> (base: String, fg: String, clip: (x0: Float, y0: Float, x1: Float, y1: Float))? {
+        guard let lr = spec.range(of: "^[lowpart:") else { return nil }
+        var head = String(spec[..<lr.lowerBound])
+        let after = spec[lr.upperBound...]
+        guard let c1 = after.firstIndex(of: ":"), let pct = Int(after[..<c1]) else { return nil }
+        let fgStart = after.index(after: c1)
+        var fgEnd = fgStart
+        while fgEnd < after.endIndex, after[fgEnd] != "^", after[fgEnd] != ")" { fgEnd = after.index(after: fgEnd) }
+        let fg = String(after[fgStart..<fgEnd])
+        var rest = String(after[fgEnd...])
+        if head.hasPrefix("(") {
+            guard rest.hasPrefix(")") else { return nil }
+            head.removeFirst(); rest.removeFirst()
+        }
+        guard !head.isEmpty, !fg.isEmpty, !head.contains("^"), !head.contains("("), !fg.contains("(") else { return nil }
+        // The fill is the bottom N% of the un-modified image (x right, y down);
+        // walk the trailing modifiers to see where that lands.
+        var x0: Float = 0, y0: Float = 1 - Float(min(100, max(0, pct))) / 100, x1: Float = 1, y1: Float = 1
+        for part in rest.split(separator: "^") {
+            if part.hasPrefix("[resize:") { continue }
+            if part.hasPrefix("[transform") {
+                let t = String(part.dropFirst("[transform".count))
+                var ops: [String] = []
+                if let d = Int(t), (0...7).contains(d) {
+                    ops = [[], ["R90"], ["R180"], ["R270"], ["FX"], ["FX", "R90"], ["FY"], ["FY", "R90"]][d]
+                } else {
+                    var s = Substring(t.uppercased())
+                    while !s.isEmpty {
+                        if s.hasPrefix("R180") { ops.append("R180"); s = s.dropFirst(4) }
+                        else if s.hasPrefix("R270") { ops.append("R270"); s = s.dropFirst(4) }
+                        else if s.hasPrefix("R90") { ops.append("R90"); s = s.dropFirst(3) }
+                        else if s.hasPrefix("FX") { ops.append("FX"); s = s.dropFirst(2) }
+                        else if s.hasPrefix("FY") { ops.append("FY"); s = s.dropFirst(2) }
+                        else if s.hasPrefix("I") { s = s.dropFirst(1) }
+                        else { return nil }
+                    }
+                }
+                for op in ops {
+                    // Same pixel mapping as the compositor's transformNative.
+                    func map(_ x: Float, _ y: Float) -> (Float, Float) {
+                        switch op {
+                        case "R90":  return (y, 1 - x)
+                        case "R180": return (1 - x, 1 - y)
+                        case "R270": return (1 - y, x)
+                        case "FX":   return (1 - x, y)
+                        default:     return (x, 1 - y)
+                        }
+                    }
+                    let a = map(x0, y0), b = map(x1, y1)
+                    x0 = min(a.0, b.0); x1 = max(a.0, b.0); y0 = min(a.1, b.1); y1 = max(a.1, b.1)
+                }
+            } else if part.hasPrefix("[verticalframe:") {
+                let f = part.dropFirst("[verticalframe:".count).split(separator: ":")
+                guard f.count == 2, let n = Float(f[0]), let i = Float(f[1]), n > 0 else { return nil }
+                // Frame i of n rows becomes the whole image.
+                y0 = max(0, min(1, (y0 - i / n) * n)); y1 = max(0, min(1, (y1 - i / n) * n))
+            } else {
+                return nil
+            }
+        }
+        return (head + rest, fg + rest, (x0, y0, x1, y1))
+    }
+
     private func hudImage(_ spec: String) -> (layer: Int, uv: SIMD2<Float>, src: SIMD2<Float>)? {
         if let c = hudImageCache[spec] { return c }
         let imgs = NodeRegistry.imageNames(spec)
@@ -6269,6 +6399,21 @@ final class WorldSession {
             sortedHud = client.hudElements.filter { !Self.hudAlwaysSkipped($0.value) }
                 .map { ($0.key, $0.value) }.sorted { $0.1.zIndex < $1.1.zIndex }
             sortedHudGen = client.hudGeneration
+            // Server HUD ids are a per-player counter, never reused, so a
+            // removed element (boss bar name, title, award toast) kept its
+            // text layer for good and the 96-layer cap filled over a session,
+            // after which new server text drew nothing. Give them back once
+            // the caches grow; ids >= 2_000_000 are ours (clock, effects,
+            // tooltip) and stay.
+            if hudTextLayers.count + hudTextBlocks.count > 48 {
+                for (id, cur) in hudTextLayers where id < 2_000_000 && client.hudElements[id] == nil {
+                    modelTexLayer["#hud\(id)"] = nil; freeModelLayers.append(cur.layer); hudTextLayers[id] = nil
+                }
+                for (id, cur) in hudTextBlocks where id < 2_000_000 && client.hudElements[id] == nil {
+                    for (i, l) in cur.layers.enumerated() { modelTexLayer["#hudblock\(id).\(i)"] = nil; freeModelLayers.append(l) }
+                    hudTextBlocks[id] = nil
+                }
+            }
         }
         var elems = sortedHud
         #if targetEnvironment(simulator)
@@ -6433,7 +6578,9 @@ final class WorldSession {
                 }
                 drawn += 1
             case 0, 5:                                           // image / image_waypoint
-                guard !e.text.isEmpty, let img = hudImage(e.text) else { continue }
+                guard !e.text.isEmpty else { continue }
+                let gp = gaugeParts(e.text)                      // XP / boss bar fill: two layers + a clip, not one per percent
+                guard let img = hudImage(gp?.base ?? e.text) else { continue }
                 var dst = img.src * e.scale * Self.hudSizeBoost
                 if e.scale.x < 0 { dst.x = Self.hudScreen.x * (-0.01 * e.scale.x) }   // percent of screen: no boost
                 if e.scale.y < 0 { dst.y = Self.hudScreen.y * (-0.01 * e.scale.y) }
@@ -6444,6 +6591,10 @@ final class WorldSession {
                 noteAwardRect(e.name, center: base + e.align * dst / 2, size: dst)
                 appendOverlayQuadUV(center: c, right: hr, up: hu, hw: dst.x / 2 * kx * D, hh: dst.y / 2 * ky * D,
                                     layer: img.layer, uv: img.uv, tint: 16777215, v: &v, idx: &idx)
+                if let gp, gp.clip.x1 > gp.clip.x0, gp.clip.y1 > gp.clip.y0, let fg = hudImage(gp.fg) {
+                    appendOverlayQuadSub(center: c, right: hr, up: hu, hw: dst.x / 2 * kx * D, hh: dst.y / 2 * ky * D,
+                                         layer: fg.layer, uv: fg.uv, sub: gp.clip, tint: 16777215, v: &v, idx: &idx)
+                }
                 drawn += 1
             case 3:                                              // inventory list: the offhand slot's item (mcl_offhand)
                 // Desktop draws the offhand item as a flat inventory image here.
@@ -6455,7 +6606,7 @@ final class WorldSession {
                 let stacks = client.inventory[e.text] ?? []
                 let px: Float = 40 * Self.hudSizeBoost           // item size inside the ~44px slot
                 for i in 0..<max(1, e.number) where i < stacks.count {
-                    guard let st = stacks[i], !st.name.isEmpty, let layer = invIconModelLayer(st.name) else { continue }
+                    guard let st = stacks[i], !st.name.isEmpty, let layer = invIconModelLayer(iconKey(st)) else { continue }   // stack-aware key: a glinted item has no bare-name entry
                     let dst = SIMD2<Float>(px, px)
                     let cpx = anchor + SIMD2(Float(i) * px, 0) + e.align * dst / 2
                     let c = at(cpx)
@@ -6695,9 +6846,18 @@ final class WorldSession {
                 }
                 continue
             }
-            guard let hi = hudImage(im.texture) else { continue }
+            // Furnace fire/arrow and brewing gauges: `bg^[lowpart:N:fg`. The
+            // base and the fill are two stable layers and N only moves a clip,
+            // where baking each percent minted ~200 layers per cook (and a
+            // full model-texture re-upload each tick).
+            let gp = gaugeParts(im.texture)
+            guard let hi = hudImage(gp?.base ?? im.texture) else { continue }
             appendOverlayQuadUV(center: toOrigin(c), right: oRight, up: oUp, hw: im.hw, hh: im.hh,
                                 layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
+            if let gp, gp.clip.x1 > gp.clip.x0, gp.clip.y1 > gp.clip.y0, let fg = hudImage(gp.fg) {
+                appendOverlayQuadSub(center: toOrigin(c - toward * 0.001), right: oRight, up: oUp, hw: im.hw, hh: im.hh,
+                                     layer: fg.layer, uv: fg.uv, sub: gp.clip, tint: 16777215, v: &v, idx: &idx)
+            }
         }
         // model[] elements: VoxeLibre's inventory shows the player's own
         // character here. Drawn flat on the panel like the rest of the form.
@@ -6992,7 +7152,10 @@ final class WorldSession {
             if let custom = st.customDescription, let nl2 = custom.firstIndex(of: "\n") {
                 let rest = custom[custom.index(after: nl2)...].split(separator: "\n").map { ItemRegistry.stripEscapes(String($0)) }
                     .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: "\n")
-                if !rest.isEmpty, let cur = invCursor, let t = hudTextBlockLayer(id: 3_000_000 + abs(rest.hashValue % 1_000_000), text: rest) {
+                // One fixed id, re-rendered in place when the text changes: an
+                // id per distinct body leaked a layer each and the cap (shared
+                // with boss bar names and titles) filled after enough hovering.
+                if !rest.isEmpty, let cur = invCursor, let t = hudTextBlockLayer(id: 3_999_999, text: rest) {
                     // Over the hovered slot, like the widget tooltips: the name
                     // already sits at the top of the view, so above it was off-screen.
                     let lh: Float = 0.011   // cap height per line: small, like desktop's tooltip font
