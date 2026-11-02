@@ -423,6 +423,10 @@ public final class Client {
     /// A single node changed (ADDNODE/REMOVENODE): remesh now, not after the
     /// block-stream coalesce. Doors/switches only move when this lands.
     public var onNodeChanged: ((SIMD3<Int>) -> Void)?
+    /// A node's metadata (inventory lists, formspec) changed: fired for every
+    /// position in a NODEMETA_CHANGED packet. Meta never changes a node's
+    /// mesh, so this is separate from onNodeChanged (no remesh).
+    public var onNodeMetaChanged: ((SIMD3<Int>) -> Void)?
     /// All requested media (textures) have arrived; time to (re)build the atlas.
     public var onMediaReady: (() -> Void)?
     /// Server placed/moved the player; arg is node position + (yaw,pitch) radians.
@@ -1417,7 +1421,7 @@ public final class Client {
         let r = PacketReader(payload)
         let comp = r.bytes32()
         guard let raw = Zlib.inflate(comp) else { return }
-        for p in world.applyNodeMetaChanged(raw) { onNodeChanged?(p) }
+        for p in world.applyNodeMetaChanged(raw) { onNodeMetaChanged?(p) }
     }
 
     private func handleAddNode(_ payload: Data) {

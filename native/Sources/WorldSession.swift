@@ -1090,15 +1090,16 @@ final class WorldSession {
         client.onNodeChanged = { [weak self] p in
             guard let self else { return }
             self.markNodeDirty(p); self.remeshCooldown = 0
-            // A container we have open just changed its metadata (items moved in
-            // by a hopper, another player, or the initial contents arriving after
-            // the formspec): rebake its item icons, else new item types show as
-            // empty slots until the panel is reopened. onNodeChanged only
-            // remeshed before, which never touched the inventory tile cache.
-            if self.formspecOpen, self.formspecContext == p {
-                self.refreshOpenNodeFormspec()   // fire/arrow gauge + any image[] update
-                self.refreshInventoryTiles()
-            }
+        }
+        // A container we have open just changed its metadata (items moved in
+        // by a hopper, another player, the initial contents arriving after the
+        // formspec, or a smithing table / anvil filling its output slot):
+        // rebake its item icons, else a new item type shows as an empty slot
+        // (the hover tooltip still named it) until the panel is reopened.
+        client.onNodeMetaChanged = { [weak self] p in
+            guard let self, self.formspecOpen, self.formspecContext == p else { return }
+            self.refreshOpenNodeFormspec()   // fire/arrow gauge + any image[] update
+            self.refreshInventoryTiles()
         }
         // Media streams in continuously at join; each file used to force an atlas
         // rebuild + full-world remesh. Coalesce to at most ~1/s (first is prompt),

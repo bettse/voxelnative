@@ -233,15 +233,17 @@ public final class WorldMap {
     /// and including the terminating "EndInventory\n", so the cursor lands on
     /// the next node's record.
     /// TOCLIENT_NODEMETA_CHANGED: an inflated NodeMetadataList with absolute
-    /// node positions. Returns the world positions whose inventories changed so
-    /// the caller can remesh/refresh any open container.
+    /// node positions. Returns every position the packet carried so the caller
+    /// can refresh an open container. It used to return only positions seen
+    /// for the first time, so a smithing table or anvil (whose meta arrived
+    /// with the block) never reported its output filling in: the slot stayed
+    /// blank until the form was reopened.
     @discardableResult
     public func applyNodeMetaChanged(_ inflated: Data) -> [SIMD3<Int>] {
-        let before = Set(nodeMeta.keys)
         let (meta, fs) = WorldMap.parseNodeMeta(PacketReader(inflated), bpos: .zero, absolute: true)
         for (k, v) in meta { nodeMeta[k] = v }
         for (k, v) in fs { nodeFormspecs[k] = v }
-        return Array(Set(nodeMeta.keys).subtracting(before))
+        return Array(Set(meta.keys).union(fs.keys))
     }
 
     private static func readInventoryBlob(_ d: PacketReader) -> String {
