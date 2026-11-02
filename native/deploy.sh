@@ -90,7 +90,11 @@ PY
 fi
 
 echo "installing..."
-xcrun devicectl device install app --device "$DEV" "$APP" 2>&1 | grep -E 'App installed|error|Error' || true
+# devicectl exits 0 even when the device is locked (DDI can't mount, error
+# 12040/10003) and nothing got installed, so look for its success line.
+INST=$(xcrun devicectl device install app --device "$DEV" "$APP" 2>&1)
+echo "$INST" | grep -E 'App installed|error|Error' || true
+echo "$INST" | grep -q 'App installed' || { echo "install FAILED (headset locked or not on? unlock it and re-run)"; exit 1; }
 # Never auto-launch: the launch handshake hangs on this device connection, and
 # Eric launches from the headset himself. Install-only is the whole job now.
 echo "installed. Launch it from the headset when ready."
