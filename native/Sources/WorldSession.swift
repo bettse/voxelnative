@@ -716,6 +716,7 @@ final class WorldSession {
                 var d: [String: Any] = ["i": i, "list": sl.list, "index": sl.index, "u": r2(sl.u), "v": r2(sl.v)]
                 if sl.loc != "current_player" { d["loc"] = sl.loc }
                 if let it = simStackDesc(inventoryStack(sl)) { d["item"] = it }
+                if let cd = inventoryStack(sl)?.customDescription { d["desc"] = String(cd.prefix(160)) }   // stack meta (enchant lines)
                 return d
             })
         case "entities":
@@ -6983,6 +6984,29 @@ final class WorldSession {
             let nh: Float = 0.05, nw = nh * max(0.4, nl.aspect)
             appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: nw, hh: nh,
                        layer: nl.layer, tint: nl.color ?? 16777215, v: &v, idx: &idx)
+            // The rest of the stack's description: VoxeLibre's tt mod puts the
+            // enchantments (and other notes) on the lines after the name, which
+            // desktop shows in the tooltip. We showed the name alone, so an
+            // enchanted book said only "Enchanted Book" (Eric). Grey, above the name.
+            if let custom = st.customDescription, let nl2 = custom.firstIndex(of: "\n") {
+                let rest = custom[custom.index(after: nl2)...].split(separator: "\n").map { ItemRegistry.stripEscapes(String($0)) }
+                    .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: "\n")
+                if !rest.isEmpty, let cur = invCursor, let t = hudTextBlockLayer(id: 3_000_000 + abs(rest.hashValue % 1_000_000), text: rest) {
+                    // Over the hovered slot, like the widget tooltips: the name
+                    // already sits at the top of the view, so above it was off-screen.
+                    let lh: Float = 0.011   // cap height per line: small, like desktop's tooltip font
+                    let bh = lh * Float(t.lines) * t.lineToCap * 0.5, bw = bh * max(0.4, t.aspect)   // half-heights
+                    let bc = cur + fr.up * (invCell * 0.7 + bh) + toward * 0.02
+                    appendQuad(center: toOrigin(bc), right: oRight, up: oUp, hw: bw + 0.008, hh: bh + 0.006,
+                               layer: highlightLayer, tint: Self.packTint(20, 20, 25), v: &v, idx: &idx)
+                    let sw = bw * 2 / Float(t.layers.count)             // one strip per tile, left to right
+                    for (i, l) in t.layers.enumerated() {
+                        let sc = bc + fr.right * (-bw + sw * (Float(i) + 0.5)) + toward * 0.002
+                        appendQuad(center: toOrigin(sc), right: oRight, up: oUp, hw: sw * 0.5, hh: bh,
+                                   layer: l, tint: Self.packTint(200, 200, 210), v: &v, idx: &idx)
+                    }
+                }
+            }
         }
     }
 
@@ -7156,7 +7180,19 @@ final class WorldSession {
             // ObjectProperties.glow self-illuminates: raise each light bank to at
             // least `glow` (glow < 0 = full bright). Glow squid/blaze, dropped
             // light blocks, TNT minecart, burning mobs render lit in the dark.
-            let base = Int(client.world.nodeLight(node, &lightCur))
+            var base = Int(client.world.nodeLight(node, &lightCur))
+            let rawBase = base
+            // An origin inside a solid block reads light 0 and the whole thing
+            // draws black. VoxeLibre's hanging banner puts its origin 1.7 nodes
+            // under the banner node, which is the floor when it hangs low (Eric:
+            // the ominous banner was "weirdly dark"). Only when fully dark, take
+            // the brightest of the nodes just above (and one below).
+            if base == 0 {
+                for dy in [1, 2, -1] {
+                    let b2 = Int(client.world.nodeLight(node &+ SIMD3(0, dy, 0), &lightCur))
+                    if b2 > base { base = b2 }
+                }
+            }
             var light = Float(base)
             if e.glow < 0 { light = 255 }
             else if e.glow > 0 {
@@ -7194,7 +7230,7 @@ final class WorldSession {
             // One-time identity log per mob: the pink creeper tint wasn't showing
             // on device, so surface each mob's real name/mesh + whether it matched.
             if loggedMobNames.insert(e.name).inserted {
-                print("[mob] id=\(e.id) name=\(e.name) mesh=\(e.mesh) creeper=\(isCreeper) tint=\(Int(tint))"); fflush(stdout)
+                print("[mob] id=\(e.id) name=\(e.name) mesh=\(e.mesh) creeper=\(isCreeper) tint=\(Int(tint)) light=\(base) raw=\(rawBase) at=\(node) glow=\(e.glow) box=\(e.cbMin.y)..\(e.cbMax.y)"); fflush(stdout)
             }
             if isCreeper {
                 let d = simd_distance(e.pos, s.feet)
