@@ -92,7 +92,7 @@ fi
 echo "installing..."
 # devicectl exits 0 even when the device is locked (DDI can't mount, error
 # 12040/10003) and nothing got installed, so look for its success line.
-INST=$(xcrun devicectl device install app --device "$DEV" "$APP" 2>&1)
+INST=$(xcrun devicectl device install app --device "$DEV" "$APP" 2>&1 || true)   # non-zero exit would end the script under set -e before the message
 echo "$INST" | grep -E 'App installed|error|Error' || true
 echo "$INST" | grep -q 'App installed' || { echo "install FAILED (headset locked or not on? unlock it and re-run)"; exit 1; }
 # Never auto-launch: the launch handshake hangs on this device connection, and
