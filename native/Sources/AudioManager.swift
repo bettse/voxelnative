@@ -609,6 +609,7 @@ final class AudioManager: NSObject {
     func stopAll() {
         q.async { [weak self] in
             guard let self else { return }
+            if !self.sources.isEmpty { print("[audio] stopAll: \(self.sources.count) sounds"); fflush(stdout) }
             for src in self.sources.values { self.tearDown(src) }
             self.sources.removeAll()
         }

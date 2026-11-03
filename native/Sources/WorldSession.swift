@@ -1329,6 +1329,12 @@ final class WorldSession {
             self.reconnectPending = false
             self.connEpoch += 1          // invalidate any pending reconnect from this epoch (F1)
             self.client.disconnect("app exited")
+            // The server's looping sounds (rain, lava, a furnace, cave
+            // ambience) kept playing in the launcher after Exit to menu: the
+            // disconnect stops the packets, not the players already running.
+            // They were only cleared on the next connect's session reset.
+            self.audio.stopAll()
+            self.attachedSounds.removeAll(); self.activeSpawners.removeAll()
         }
     }
 
