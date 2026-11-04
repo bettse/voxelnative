@@ -11024,6 +11024,26 @@ final class WorldSession {
             under.y = overhead.map(\.lo.y).min()! - playerHeight - 1e-3
             if under.y < feet.y, !solids.contains(where: { $0.overlaps(playerBox(under)) }) { feet = under }
         }
+        // A block that just formed around the feet: frost walker boots freeze
+        // the water node you land in when you jump ahead of the ice sheet, so
+        // the feet are suddenly inside a full cube whose top is up to a node
+        // above them. Minecraft pushes you out on top. The embedded path below
+        // held height and refused every step into the surrounding ice, and a
+        // shallower overlap fell straight through (the 0.2 inner margin), so
+        // you were stuck in the ice (Eric). When every solid overlapping the
+        // box is floor-like (its top within a node of the feet) and there is
+        // room to stand on it, pop up onto it.
+        let overlapping = solids.filter { $0.overlaps(playerBox(feet)) }
+        if !overlapping.isEmpty, !climbing,
+           overlapping.allSatisfy({ $0.hi.y > feet.y + 0.2 && $0.hi.y <= feet.y + 1.0 + 1e-3 }) {
+            let top = overlapping.map(\.hi.y).max()! + 1e-3
+            let up = SIMD3(feet.x, top, feet.z)
+            let ub = playerBox(up)
+            if !solids.contains(where: { $0.overlaps(ub) }), !anySolidBox(around: ub) {
+                print("[unstick] feet=\(feet) -> y=\(top)"); fflush(stdout)
+                return (up, true, false)
+            }
+        }
         let embedBox = playerBox(feet)
         if solids.contains(where: { $0.overlaps(embedBox) && $0.hi.y > feet.y + playerStep }) {
             func embeddedCount(_ f: SIMD3<Float>) -> Int {
