@@ -2089,7 +2089,7 @@ actor Renderer {
             if videoTargets == nil {
                 videoTargets = makeCameraTargets(w: VideoRecorder.width, h: VideoRecorder.height, shared: false)
             }
-            recorder = VideoRecorder(device: device)
+            recorder = VideoRecorder(device: device, note: appModel.screenshotFlag.note)
             if recorder == nil { appModel.screenshotFlag.recording = false; videoDone(ok: false, denied: false) }
         } else if !want, let r = recorder {
             recorder = nil
@@ -2133,7 +2133,16 @@ actor Renderer {
         guard let img = Self.srgbImage(tex, w, h) else { return }
         let data = NSMutableData()
         guard let dst = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return }
-        CGImageDestinationAddImage(dst, img, nil)
+        // Position, dimension, biome, server and build in the file's metadata
+        // (PNG description, TIFF description, EXIF comment: whichever a viewer
+        // or exporter keeps), so a bug report photo says where it was taken.
+        let note = appModel.screenshotFlag.note
+        let props: [CFString: Any]? = note.isEmpty ? nil : [
+            kCGImagePropertyPNGDictionary: [kCGImagePropertyPNGDescription: note],
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFImageDescription: note],
+            kCGImagePropertyExifDictionary: [kCGImagePropertyExifUserComment: note],
+        ]
+        CGImageDestinationAddImage(dst, img, props as CFDictionary?)
         guard CGImageDestinationFinalize(dst) else { return }
         #if targetEnvironment(simulator)
         // The sim can't answer the Photos prompt headless; keep a copy to inspect.

@@ -17,4 +17,15 @@ final class ScreenshotFlag {
         get { lock.lock(); defer { lock.unlock() }; return _recording }
         set { lock.lock(); _recording = newValue; lock.unlock() }
     }
+
+    /// Where and when the capture was taken (position, dimension, biome,
+    /// server, build), set by the session as it requests a photo or starts a
+    /// clip and written into the file's metadata by the renderer, so a bug
+    /// report photo carries its own coordinates whether or not the HUD shows
+    /// them. Not burned into the picture.
+    private var _note = ""
+    var note: String {
+        get { lock.lock(); defer { lock.unlock() }; return _note }
+        set { lock.lock(); _note = newValue; lock.unlock() }
+    }
 }

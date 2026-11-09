@@ -20,10 +20,19 @@ final class VideoRecorder {
     private(set) var frames = 0
     private var finished = false
 
-    init?(device: MTLDevice) {
+    init?(device: MTLDevice, note: String = "") {
         url = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(Int(Date().timeIntervalSince1970)).mov")
         guard let w = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return nil }
         writer = w
+        // Where the clip started (position, dimension, server, build), as the
+        // movie's description, like the photos' metadata.
+        if !note.isEmpty {
+            let item = AVMutableMetadataItem()
+            item.identifier = .commonIdentifierDescription
+            item.value = note as NSString
+            item.extendedLanguageTag = "und"
+            w.metadata = [item]
+        }
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Self.width, AVVideoHeightKey: Self.height,

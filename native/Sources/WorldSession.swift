@@ -3840,6 +3840,7 @@ final class WorldSession {
         if videoStage == 1, videoClock >= Self.videoLead {
             // Clear the notice first so the clip opens on the world.
             videoStage = 2; videoClock = 0; noticeText = nil
+            screenshotFlag.note = captureNote("video")
             screenshotFlag.recording = true
         } else if videoStage == 2, videoClock >= Self.videoMax {
             stopVideo()
@@ -3883,12 +3884,36 @@ final class WorldSession {
         noticeText = seconds > 1 ? "\(seconds)" : "Hold still"; noticeExpiry = 0
         input.rumble(intensity: 0.3, sharpness: 0.8)
     }
+    /// One line describing where a capture was taken, for the file's metadata
+    /// and the log: "VoxelNative 225 | server | pos 12.3,64.0,-5.1 | overworld
+    /// | Plains | 2026-11-09T10:11:12Z". The biome comes from mcl_info's HUD
+    /// readout when the Biome option is on; the dimension from VoxeLibre's
+    /// fixed y bands (Nether around -29000, End around -27000).
+    private func captureNote(_ kind: String) -> String {
+        let f = player.snapshot().feet
+        let dim = f.y < -28000 ? "nether" : (f.y < -26000 ? "end" : "overworld")
+        var biome = ""
+        if let text = client.hudElements.values.first(where: { $0.type == 1 && $0.text.contains("Biome:") })?.text,
+           let line = text.split(separator: "\n").first(where: { $0.hasPrefix("Biome:") }) {
+            biome = String(line.dropFirst("Biome:".count)).split(separator: ",").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        }
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let hash = (Bundle.main.infoDictionary?["GitHash"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        var parts = ["VoxelNative \(build) (\(hash))", Self.host, String(format: "pos %.1f,%.1f,%.1f", f.x, f.y, f.z), dim]
+        if !biome.isEmpty { parts.append(biome) }
+        parts.append(stamp)
+        let note = parts.joined(separator: " | ")
+        print("[capture] \(kind): \(note)"); fflush(stdout)
+        return note
+    }
     private func stepPhoto(dt: Float) {
         guard photoStage != 0 else { return }
         // The menu, the keyboard or death cancels a pending photo.
         if koganeMenuOpen || keyboardOpen || dead { photoStage = 0; noticeText = nil; return }
         if photoStage == 2 {
             photoStage = 0
+            screenshotFlag.note = captureNote("photo")
             screenshotFlag.request()
             input.rumble(intensity: 0.8, sharpness: 1.0)   // shutter
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) { [weak self] in self?.input.rumble(intensity: 0.8, sharpness: 1.0) }
@@ -3918,6 +3943,7 @@ final class WorldSession {
         switch opt {
         case "Bug note":
             koganeMenuOpen = false
+            screenshotFlag.note = captureNote("bug note")
             screenshotFlag.request()               // capture the bug as seen, before the keyboard covers it
             let ctx = bugNoteContext()               // pos/look/wield/shot, gathered now
             openKeyboard(prefill: "", saveOnDismiss: true, simple: true) { [weak self] t in self?.appendBugNote(t, context: ctx) }
