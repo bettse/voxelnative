@@ -74,9 +74,12 @@ cat > "$OPTS" <<EOF
 EOF
 
 echo "${DEST}ing..."
-xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist "$OPTS" \
+# System PATH only: the packaging step runs /usr/bin/rsync, which spawns a
+# second rsync via PATH, and Homebrew's rsync 3.4.1 rejects openrsync's
+# --extended-attributes ("Copy failed" with nothing else said).
+PATH=/usr/bin:/bin:/usr/sbin:/sbin xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist "$OPTS" \
   -exportPath "$OUT/export-$BUILD_NUMBER" -allowProvisioningUpdates "${AUTH[@]}" 2>&1 \
-  | grep -E 'error:|EXPORT|Upload|upload' | tee "$OUT/export.txt" || true
+  | tee "$OUT/export-full.txt" | grep -E -A2 'error:|EXPORT|Upload|upload' | tee "$OUT/export.txt" || true   # -A2: the detail lines under an error (the first error alone read "Copy failed" when the real one was a signing permission)
 grep -q 'EXPORT SUCCEEDED' "$OUT/export.txt" || { echo "export/upload FAILED (errors above)"; exit 1; }
 
 if (( UPLOAD )); then
