@@ -638,6 +638,16 @@ public enum WorldMesher {
                 let eps: Float = 0.0025
                 lo += SIMD3(repeating: eps); hi -= SIMD3(repeating: eps)
             }
+            // A zero-thickness box (the cactus's four spike planes, flush with
+            // the body's side faces): its two big faces are coplanar with each
+            // other and with the body face. The back one is lit from the node
+            // behind it, and this pass draws both sides, so it z-fought the body
+            // (Eric's "thorns" clip). Push each big face a hair along its own
+            // normal: the front face lands just in front of the body face with
+            // the same texels, the back face just behind, and the four
+            // zero-area edge faces are skipped.
+            let flat = SIMD3<Int>((hi.x - lo.x) < 1e-4 ? 1 : 0, (hi.y - lo.y) < 1e-4 ? 1 : 0, (hi.z - lo.z) < 1e-4 ? 1 : 0)
+            let isFlat = flat != .zero
             // A blended nodebox (nether portal: translucent animated purple) must
             // go to the alpha-BLEND (liquid) stream, not the cutout/discard pass
             // where its low-alpha pixels vanish -- same routing glass cubes use
@@ -655,6 +665,12 @@ public enum WorldMesher {
                 || (n.z > 0 && hi.z >= 0.999) || (n.z < 0 && lo.z <= 0.001)
             }
             for f in faces {
+                var nudge = SIMD3<Float>(repeating: 0)
+                if isFlat {
+                    // Only the two faces across the flat axis have area.
+                    if (flat.x == 1 && f.n.x == 0) || (flat.y == 1 && f.n.y == 0) || (flat.z == 1 && f.n.z == 0) { continue }
+                    nudge = SIMD3<Float>(Float(f.n.x), Float(f.n.y), Float(f.n.z)) * 0.0015
+                }
                 if facedir == 0, flushBoundary(f.n),
                    WorldMesher.occludesBoundary(cNodeId(b &+ f.n), ms) { continue }
                 let vbase = UInt32((blended ? lv.count : ov.count) / 9)
@@ -683,6 +699,7 @@ public enum WorldMesher {
                     // door faces the way it was placed and visibly swings when it
                     // opens (the server rotates param2). Rotate in centred space.
                     if facedir != 0 { l = WorldMesher.rotateFacedir(l - 0.5, facedir) + 0.5 }
+                    l += nudge
                     let px = (Float(b.x) + l.x - origin.x) * scale
                     let py = (Float(b.y) + l.y - origin.y) * scale
                     let pz = (Float(b.z) + l.z - origin.z) * scale
