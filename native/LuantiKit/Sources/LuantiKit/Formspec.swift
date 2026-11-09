@@ -115,7 +115,12 @@ public enum Formspec {
         let parts = spec.split(separator: "]", omittingEmptySubsequences: false).map(String.init)
         for (i, part) in parts.enumerated() {
             let close = i < parts.count - 1 ? "]" : ""
-            guard let br = part.lastIndex(of: "[") else { out += part; continue }
+            // The element's own bracket is the FIRST one: a texture argument can
+            // carry modifiers with brackets of their own ("glyph.png^[colorize:
+            // #675D49:255"), and taking the last bracket made that the element,
+            // so the enchanting table's glyph rows lost their container offset
+            // and piled up along the top of the panel.
+            guard let br = part.firstIndex(of: "[") else { out += part; continue }
             var ni = br
             while ni > part.startIndex {
                 let p = part.index(before: ni)
@@ -250,6 +255,11 @@ public enum Formspec {
         public let texture: String
         public let isItem: Bool   // true: `texture` is an item name to draw as an icon (item_image[])
         public var count = 1      // item_image[]'s stack count, drawn like a slot's when > 1
+        /// Declared after a button in the spec. Desktop draws elements in spec
+        /// order, so such an image sits over the button plates (the enchanting
+        /// table's level numbers), while one declared before stays behind them
+        /// (the same form's big button background).
+        public var front = false
     }
 
     /// Parse `image[x,y;w,h;texture]`. The texture field is taken whole (it may
@@ -266,7 +276,11 @@ public enum Formspec {
 
     private static func parseImageLike(_ spec: String, token: String, isItem: Bool) -> [Image] {
         var out: [Image] = []
+        var buttonSeen = false
         for chunk in spec.split(separator: "]") {
+            // "button[" also ends image_button[/button_exit[; style[button_1;..]
+            // and tooltip[button_1;..] have no bracket after the name.
+            if chunk.contains("button[") { buttonSeen = true }
             guard let r = chunk.range(of: token) else { continue }
             // The token must start the element, not be the tail of a longer one:
             // "image[" inside "item_image["/"background9[", or "item_image[" inside
@@ -295,7 +309,7 @@ public enum Formspec {
             }
             if !tex.isEmpty {
                 var im = Image(gx: gx, gy: gy, w: w, h: h, texture: tex, isItem: isItem)
-                im.count = count
+                im.count = count; im.front = buttonSeen
                 out.append(im)
             }
         }
@@ -895,7 +909,7 @@ public enum Formspec {
         }
         public static func convert(_ i: Image) -> Image {
             var o = Image(gx: x(i.gx), gy: y(i.gy), w: i.w, h: i.h, texture: i.texture, isItem: i.isItem)
-            o.count = i.count
+            o.count = i.count; o.front = i.front
             return o
         }
         public static func convert(_ m: Model) -> Model {

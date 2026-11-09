@@ -2368,10 +2368,15 @@ final class WorldSession {
             let cobble = m.reduce(0) { $0 + (($1?.name == "mcl_core:cobble") ? ($1?.count ?? 0) : 0) }
             switch simDigPhase {
             case 0 where simDigTimer > 2:
-                client.sendChat("/grantme all"); client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 10")
-                simTeleportToPad()
+                client.sendChat("/grantme all"); simTeleportToPad()
+                simDigPhase = 10; simDigTimer = 0
+            case 10 where simDigTimer > 5:
+                // Spaced from the join's three commands and the pad hop: nine
+                // chat lines in ten seconds trip the server's flood limit and
+                // the /giveme was the one dropped (same as the invpick scene).
+                client.sendChat("/clearinv"); client.sendChat("/giveme mcl_core:cobble 10")
                 simDigPhase = 1; simDigTimer = 0
-            case 1 where simDigTimer > 6 && player.physics().grounded:
+            case 1 where simDigTimer > 5 && player.physics().grounded:
                 guard let slot = m.firstIndex(where: { $0?.name == "mcl_core:cobble" }) else {
                     if simDigTimer > 15 { print("[chorddrop] RESULT no cobble given pass=false"); fflush(stdout); simDigPhase = 9 }
                     break
@@ -4645,7 +4650,7 @@ final class WorldSession {
     // changes while the panel is open, so skin and sort it once.
     private var formModelCache: [String: (pos: [SIMD3<Float>], tris: [UInt32])] = [:]
     private var formspecBackgrounds: [Formspec.Background] = []          // background[]/background9[] panels
-    private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool, count: Int)] = []   // laid-out image quads (isItem: draw as an item icon)
+    private var invImages: [(u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool, count: Int, front: Bool)] = []   // laid-out image quads (isItem: draw as an item icon)
     private var invBackgrounds: [(u: Float, v: Float, hw: Float, hh: Float, texture: String)] = []   // laid-out background[] station art at its own coords
     private var formspecTooltips: [String: (text: String, color: Float?)] = [:]  // element name -> hover text + color (enchant cost)
     private var formspecCheckboxes: [Formspec.Checkbox] = []             // checkbox[] toggles
@@ -5235,15 +5240,18 @@ final class WorldSession {
                                 hw: f.w * p * 0.5, hh: p * 0.42, field: f, button: nil))
             }
             for b in formspecButtons {
-                widgets.append((u: (b.gx + b.w * 0.5) * p - cu, v: -(b.gy + 0.5) * p - cv,
-                                hw: b.w * p * 0.5, hh: p * 0.42, field: nil, button: b))
+                // The element's own height: the enchanting table's option rows
+                // are 1.3 tall, and a fixed one-row plate left their glyph line
+                // floating in the gap above a short bar.
+                widgets.append((u: (b.gx + b.w * 0.5) * p - cu, v: -(b.gy + b.h * 0.5) * p - cv,
+                                hw: b.w * p * 0.5, hh: b.h * p * 0.42, field: nil, button: b))
             }
             invWidgets = widgets
             // Static image[] quads (furnace fire gauge + cook arrow), centered on
             // their grid rect the same way as slots/widgets.
             invImages = formspecImages.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
-                 hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture, isItem: $0.isItem, count: $0.count)
+                 hw: $0.w * p * 0.5, hh: $0.h * p * 0.5, texture: $0.texture, isItem: $0.isItem, count: $0.count, front: $0.front)
             }
             invModels = formspecModels.map {
                 (u: ($0.gx + $0.w * 0.5) * p - cu, v: -($0.gy + $0.h * 0.5) * p - cv,
@@ -6210,7 +6218,10 @@ final class WorldSession {
                 // empty set fires onComplete, and doing that every frame churns
                 // the texture rebuild. A never-announced name will never come.
                 let fetchable = missing.filter { client.media.announced.contains($0) }
-                if fetchable.count < missing.count { modelFailed.insert(spec); return nil }
+                if fetchable.count < missing.count {
+                    print("[hud] image '\(spec.prefix(80))' dropped: never announced \(missing.filter { !client.media.announced.contains($0) })"); fflush(stdout)
+                    modelFailed.insert(spec); return nil
+                }
                 client.media.request(Set(fetchable))
                 return nil
             }
@@ -6832,8 +6843,15 @@ final class WorldSession {
         // emission order is draw order, and VoxeLibre puts 27 image[] slot
         // backgrounds ahead of each list[]. Drawing them after the icons hid
         // every item in the chest form on device.
-        for im in invImages {
-            let c = fr.center + fr.right * im.u + fr.up * im.v - toward * 0.005
+        // Drawn in two passes around the widgets, like desktop's spec order:
+        // images declared before any button go under the plates, ones after
+        // go over them (the panel is draw-ordered, not depth-sorted).
+        func drawFormImage(_ im: (u: Float, v: Float, hw: Float, hh: Float, texture: String, isItem: Bool, count: Int, front: Bool)) {
+            // Widget plates sit at 0.005 and are drawn after this loop, so an
+            // image at the same depth vanished behind them: the enchanting
+            // table's level-cost numbers, declared after their buttons, never
+            // showed. Spec order decides: images after a button draw in front.
+            let c = fr.center + fr.right * im.u + fr.up * im.v - toward * (im.front ? 0.0065 : 0.005)
             if im.isItem {
                 // item_image[]: draw the item's icon (3D node cube/chest, else its
                 // flat inventory_image) so beacon payment rows / trade hints show
@@ -6845,19 +6863,19 @@ final class WorldSession {
                                layer: cl, tint: 16777215, v: &v, idx: &idx)
                 }
                 if nodeIcon3D(im.texture, center: toOrigin(c - toward * 0.006), oRight: oRight, oUp: oUp,
-                              oToward: toOriginDir(toward), size: sz, v: &v, idx: &idx) { continue }
+                              oToward: toOriginDir(toward), size: sz, v: &v, idx: &idx) { return }
                 if let flat = client.items.image(for: im.texture), let hi = hudImage(flat) {
                     appendOverlayQuadUV(center: toOrigin(c), right: oRight, up: oUp, hw: im.hw, hh: im.hh,
                                         layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
                 }
-                continue
+                return
             }
             // Furnace fire/arrow and brewing gauges: `bg^[lowpart:N:fg`. The
             // base and the fill are two stable layers and N only moves a clip,
             // where baking each percent minted ~200 layers per cook (and a
             // full model-texture re-upload each tick).
             let gp = gaugeParts(im.texture)
-            guard let hi = hudImage(gp?.base ?? im.texture) else { continue }
+            guard let hi = hudImage(gp?.base ?? im.texture) else { return }
             appendOverlayQuadUV(center: toOrigin(c), right: oRight, up: oUp, hw: im.hw, hh: im.hh,
                                 layer: hi.layer, uv: hi.uv, tint: 16777215, v: &v, idx: &idx)
             if let gp, gp.clip.x1 > gp.clip.x0, gp.clip.y1 > gp.clip.y0, let fg = hudImage(gp.fg) {
@@ -6865,6 +6883,7 @@ final class WorldSession {
                                      layer: fg.layer, uv: fg.uv, sub: gp.clip, tint: 16777215, v: &v, idx: &idx)
             }
         }
+        for im in invImages where !im.front { drawFormImage(im) }
         // model[] elements: VoxeLibre's inventory shows the player's own
         // character here. Drawn flat on the panel like the rest of the form.
         for fm in invModels {
@@ -6936,29 +6955,6 @@ final class WorldSession {
         // Static station labels (name + slot captions) float just off the backdrop.
         // Height under a third of a cell: 0.55 then 0.36 still read as oversized on
         // small station formspecs like the furnace (few slots, crisp filled text).
-        for lab in invLabels {
-            // A wide form is scaled down to fit (invScale); keep its text near the
-            // normal size anyway, or Player Settings / Help read as specks.
-            // 0.42 of a cell: the line renderer's quad spans the font's full
-            // ascent+descent plus margins, so this matches the old ink-fitted 0.30.
-            let th = max(cell, 0.054 * 0.85) * 0.42
-            // label[] doesn't wrap in Luanti, but one text layer is 256 px wide:
-            // a long line ("mcl_inventory:clear_inventory_confirmation (Default:
-            // true)") was cut at 48 chars. Draw it as consecutive <=40-char
-            // pieces, each crisp in its own layer.
-            // Luanti labels are LEFT-anchored at their x. Centering them pushed a
-            // long label (e.g. "Inventory") half its width off the panel's left
-            // edge, so it read as "Inve". Anchor the left edge at lab.u.
-            var x = lab.u
-            for piece in Self.labelPieces(lab.text) {
-                guard let t = formspecLabelLayer(piece) else { continue }
-                let tw = th * max(0.4, t.aspect)
-                let lc = fr.center + fr.right * (x + tw * 0.5) + fr.up * lab.v - toward * 0.006
-                appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
-                           layer: t.layer, tint: lab.color ?? 16777215, v: &v, idx: &idx)
-                x += tw
-            }
-        }
         // Tappable field/button boxes: a framed plate, brighter when the
         // pointer is over it, with the field's current value or the button label.
         var tipText: (text: String, color: Float?)? = nil   // hover tooltip for the widget under the pointer
@@ -7015,6 +7011,32 @@ final class WorldSession {
                 let tc = fr.center + fr.right * w.u + fr.up * w.v - toward * 0.007
                 appendQuad(center: toOrigin(tc), right: oRight, up: oUp, hw: min(tw, w.hw * 0.95) * 0.5, hh: th * 0.5,
                            layer: t.layer, tint: textColor ?? 16777215, v: &v, idx: &idx)
+            }
+        }
+        for im in invImages where im.front { drawFormImage(im) }   // level numbers, glyph rows: over the plates
+        // Labels after the plates: a label inside a button (the enchanting
+        // table's level cost) was hidden once plates took their full height.
+        for lab in invLabels {
+            // A wide form is scaled down to fit (invScale); keep its text near the
+            // normal size anyway, or Player Settings / Help read as specks.
+            // 0.42 of a cell: the line renderer's quad spans the font's full
+            // ascent+descent plus margins, so this matches the old ink-fitted 0.30.
+            let th = max(cell, 0.054 * 0.85) * 0.42
+            // label[] doesn't wrap in Luanti, but one text layer is 256 px wide:
+            // a long line ("mcl_inventory:clear_inventory_confirmation (Default:
+            // true)") was cut at 48 chars. Draw it as consecutive <=40-char
+            // pieces, each crisp in its own layer.
+            // Luanti labels are LEFT-anchored at their x. Centering them pushed a
+            // long label (e.g. "Inventory") half its width off the panel's left
+            // edge, so it read as "Inve". Anchor the left edge at lab.u.
+            var x = lab.u
+            for piece in Self.labelPieces(lab.text) {
+                guard let t = formspecLabelLayer(piece) else { continue }
+                let tw = th * max(0.4, t.aspect)
+                let lc = fr.center + fr.right * (x + tw * 0.5) + fr.up * lab.v - toward * 0.006
+                appendQuad(center: toOrigin(lc), right: oRight, up: oUp, hw: tw * 0.5, hh: th * 0.5,
+                           layer: t.layer, tint: lab.color ?? 16777215, v: &v, idx: &idx)
+                x += tw
             }
         }
         // Sliders: a dark track, the filled part in green, the value on top.
@@ -8623,6 +8645,7 @@ final class WorldSession {
         // early would cache a base-only skin forever (the overlay never re-applies).
         guard imgs.allSatisfy({ client.media.store[$0] != nil }) else { return false }
         guard let img = TextureAtlas.evaluateModifiedFit(spec, media: client.media, canvas: ModelTextureHandoff.size) else {
+            print("[modeltex] bake failed: \(spec.prefix(80))"); fflush(stdout)
             modelFailed.insert(spec); return false
         }
         modelTexLayer[spec] = modelTexCount; modelTexUV[spec] = img.uv

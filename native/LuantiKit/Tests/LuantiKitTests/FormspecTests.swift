@@ -223,6 +223,34 @@ final class FormspecLabelTests: XCTestCase {
         XCTAssertEqual(labels.first(where: { $0.text == "deep" })?.gy ?? -1, 4, accuracy: 1e-4)
         XCTAssertEqual(labels.first(where: { $0.text == "shallow" })?.gx ?? -1, 1, accuracy: 1e-4)
     }
+    // A texture argument with a bracketed modifier (the enchanting table's
+    // glyph rows: "glyph.png^[colorize:#675D49:255") must not be mistaken
+    // for the element's own bracket; the image still gets the offset.
+    func testFlattenContainerWithModifierBracketInTexture() {
+        let spec = "container[4.125,1.86]image[1.3,0.1;0.5,0.5;mcl_enchanting_glyph_5.png^[colorize:#675D49:255]container_end[]"
+        let flat = Formspec.flattenContainers(spec)
+        let im = Formspec.parseImages(flat).first
+        XCTAssertEqual(im?.gx ?? -1, 5.425, accuracy: 1e-3); XCTAssertEqual(im?.gy ?? -1, 1.96, accuracy: 1e-3)
+        XCTAssertTrue(flat.contains("^[colorize:#675D49:255"))
+    }
+    // The enchanting table's option row as VoxeLibre builds it: tooltip, style,
+    // button, number image, level label and nine glyph images in one container.
+    func testEnchantingRowKeepsEveryImage() {
+        let esc = "\u{1b}(c@#818181)"
+        var spec = "container[4.125,0.56]tooltip[button_1;\(esc)Smite I \u{1b}(c@#FFFFFF) . . . ?\n\n\(esc)1 Lapis Lazuli\n\(esc)1 Enchantment Levels]"
+        spec += "style[button_1;bgimg=mcl_enchanting_button.png;bgimg_hovered=mcl_enchanting_button_hovered.png;bgimg_pressed=mcl_enchanting_button_hovered.png]"
+        spec += "button[0,0;7.25,1.3;button_1;]image[0,0;1.3,1.3;mcl_enchanting_number_1.png]label[6.8,1;\u{1b}(c@#80FF20)1]"
+        var x: Float = 1.3
+        for i in 1...9 { spec += "image[\(x),0.1;0.5,0.5;mcl_enchanting_glyph_\(i).png^[colorize:#675D49:255]"; x += 0.6 }
+        spec += "container_end[]"
+        let flat = Formspec.flattenContainers(spec)
+        let imgs = Formspec.parseImages(flat)
+        XCTAssertEqual(imgs.count, 10, "number + nine glyphs")
+        XCTAssertEqual(imgs.first?.texture, "mcl_enchanting_number_1.png")
+        XCTAssertEqual(imgs.first?.gx ?? -1, 4.125, accuracy: 1e-3); XCTAssertEqual(imgs.first?.gy ?? -1, 0.56, accuracy: 1e-3)
+        XCTAssertTrue(imgs.allSatisfy { $0.front }, "declared after the button: drawn over its plate")
+        XCTAssertEqual(Formspec.parseButtonsPositioned(flat).first?.h ?? 0, 1.3, accuracy: 1e-3)
+    }
     func testFlattenNoContainerIsUnchanged() {
         let spec = "list[current_player;main;0,5;9,3;9]label[0.5,0.5;Hi]"
         XCTAssertEqual(Formspec.flattenContainers(spec), spec)
