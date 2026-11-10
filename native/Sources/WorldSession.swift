@@ -364,6 +364,7 @@ final class WorldSession {
     private var simScratchInt = Int.max                  // per-scene scratch: a low-water mark or a start value x100
     private var simInvPhase = 0                         // -vrdev.invPickTest state machine
     private var simZooDone = false                      // -vrdev.nodeZoo: audit + grid placed once
+    private var ezooFirstSeen: [String: TimeInterval] = [:], ezooLogged = Set<String>()   // -vrdev.entityZoo
     private var simInvCyclePhase = 0                    // -vrdev.invCycle
     private var simInvTimer: Double = 0
     private var simInvHoverOverride: Int? = nil         // sim: force invHover to a slot (no ray)
@@ -7408,6 +7409,33 @@ final class WorldSession {
         let pe0 = perf.now()
         let ents = client.objects.snapshot()
         ensureModelTextures(ents)
+        #if targetEnvironment(simulator)
+        // -vrdev.entityZoo 1 (tools/entityzoo.sh spawns every mob): one [ezoo]
+        // line per entity kind, two seconds after it first appears so its
+        // textures have had their rescan: visual, model file and whether it
+        // loaded, texture count, how many got a layer, any missing images.
+        if UserDefaults.standard.bool(forKey: "vrdev.entityZoo") {
+            for e in ents where !ezooLogged.contains(e.name) {
+                let first = ezooFirstSeen[e.name] ?? frameUptime
+                ezooFirstSeen[e.name] = first
+                guard frameUptime - first >= 2 else { continue }
+                ezooLogged.insert(e.name)
+                var missing: [String] = [], layers = 0, total = 0
+                for t in e.textures where !Self.isBlankSpec(t) {
+                    total += 1
+                    if modelTexLayer[t] != nil { layers += 1 }
+                    for img in NodeRegistry.imageNames(t) where client.media.store[img] == nil { missing.append(img) }
+                }
+                var modelNote = "-"
+                if e.visual == "mesh" {
+                    if let m = model(for: e.mesh) { modelNote = "ok(\(m.surfaces.count) surfaces, \(m.joints.count) joints)" }
+                    else { modelNote = client.media.store[e.mesh] == nil ? "MISSING \(e.mesh)" : "FAILED \(e.mesh)" }
+                }
+                let anim = e.animRange.map { "\(Int($0.x))-\(Int($0.y))" } ?? "-"
+                print("[ezoo] \(e.name) visual=\(e.visual) model=\(modelNote) textures=\(total) layers=\(layers) missing=\(missing) anim=\(anim) glow=\(e.glow)"); fflush(stdout)
+            }
+        }
+        #endif
         stepEntityFootsteps(ents)
         let pe1 = perf.now(); perf.add("e.snap", pe0, pe1)
         let s = player.snapshot()
