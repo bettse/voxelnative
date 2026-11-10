@@ -248,6 +248,17 @@ final class MeshHandoff {
         guard hasPending else { return nil }
         let p = pending; pending = Delta(); hasPending = false; return p
     }
+
+    /// The renderer is gone (the immersive space closed): forget the device so
+    /// postDelta stops building GPU buffers nobody will take (the session keeps
+    /// streaming and remeshing in the launcher, and a whole second world mesh
+    /// piled up here, ~50-70 MB, exactly while the headset was short of
+    /// memory), and drop what was already waiting. A new renderer sets the
+    /// device again and the session reposts everything for it.
+    func rendererGone() {
+        device = nil
+        lock.lock(); pending = Delta(); hasPending = false; lock.unlock()
+    }
 }
 
 /// Mip chain for one premultiplied RGBA node tile (64 -> 32 -> ... -> 1),

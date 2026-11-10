@@ -3112,6 +3112,7 @@ actor Renderer {
             if layerRenderer.state == .invalidated {
                 print("Layer is invalidated \(Date()) \(WorldSession.healthNote())")
                 let health = WorldSession.healthNote()
+                appModel.meshHandoff.rendererGone()
                 Task { @MainActor in
                     appModel.immersiveSpaceState = .closed
                     if !appModel.exitingByUser {
