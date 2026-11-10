@@ -273,11 +273,11 @@ actor Renderer {
             if let l = b.liquid { liquid += l.bytes }   // inside opaqueVerts' buffer, counted in mesh too
         }
         let atlas = tex(textureArray) + tex(textureArrayBig)
-        let model = tex(modelTextureArray) + tex(appModel.modelTextureHandoff.gpuSmall)
+        let model = tex(modelTextureArray) + tex(appModel.modelTextureHandoff.gpuSmall) + tex(appModel.modelTextureHandoff.gpuMedium)
         let sky = tex(skyboxTexture)
         let ents = entityVertexBuffer.length + modelVertexBuffer.length + modelBlendVertexBuffer.length
         print("[mem] gpu=\(mb(device.currentAllocatedSize))MB meshes=\(mb(mesh))MB/\(worldBlocks.count) blocks liquid=\(mb(liquid))MB " +
-              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)+\(textureArrayBig?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)+\(appModel.modelTextureHandoff.gpuSmall?.arrayLength ?? 0)) " +
+              "atlas=\(mb(atlas))MB(\(textureArray?.arrayLength ?? 0)+\(textureArrayBig?.arrayLength ?? 0)) model=\(mb(model))MB(\(modelTextureArray?.arrayLength ?? 0)+\(appModel.modelTextureHandoff.gpuMedium?.arrayLength ?? 0)+\(appModel.modelTextureHandoff.gpuSmall?.arrayLength ?? 0)) " +
               "sky=\(mb(sky))MB ents=\(mb(ents))MB \(WorldSession.healthNote())"); fflush(stdout)
     }
     // Sun (layer 0) and moon (layer 1) textures, SkyboxHandoff.bodySize square.
@@ -2355,7 +2355,7 @@ actor Renderer {
             for i in from..<texs.count where texs[i].rgba.count == need { placeModelLayer(i, texs[i].rgba, fresh: true) }
             modelArrayLogical = texs.count
             h.reportBuilt(texs.count)   // ack so the producer knows the array actually grew
-            print("[model] \(texs.count) layers: \(h.bigUsed) full-size, \(h.smallUsed) small (capacity \(modelTextureArray?.arrayLength ?? 0)+\(h.gpuSmall?.arrayLength ?? 0))"); fflush(stdout)
+            print("[model] \(texs.count) layers: \(h.bigUsed) full-size, \(h.mediumUsed) medium, \(h.smallUsed) small (capacity \(modelTextureArray?.arrayLength ?? 0)+\(h.gpuMedium?.arrayLength ?? 0)+\(h.gpuSmall?.arrayLength ?? 0))"); fflush(stdout)
         }
         // In-place patches (chat, HUD timer, counts, XP, a reused icon layer),
         // applied AFTER any full above, so an edit queued alongside a grow lands.
@@ -2364,56 +2364,68 @@ actor Renderer {
         }
     }
 
-    /// Store one model layer's pixels in the 32px array when they're a blow-up
-    /// of a 32px image (item icons), else the full-size one, moving it between
-    /// the two if a patch changed which it needs. Updates gpuMap.
+    /// Where a model layer lives on the GPU: a full 256px slot, a 128px slot
+    /// (mob skins, item art placed at their own size in the corner of a clear
+    /// layer), or a 32px slot (icons: a blow-up of a 32px image, or a tiny
+    /// image in the corner). See ModelTextureHandoff.
+    private enum ModelTier { case big, medium, small }
+    private func modelTier(of code: Int) -> ModelTier {
+        code >= ModelTextureHandoff.smallBit ? .small : (code >= ModelTextureHandoff.mediumBit ? .medium : .big)
+    }
+
+    /// Store one model layer's pixels in the tier its content fits, moving it
+    /// between tiers if a patch changed which it needs. Updates gpuMap.
     private func placeModelLayer(_ i: Int, _ px: [UInt8], fresh: Bool) {
         typealias H = ModelTextureHandoff
         let h = appModel.modelTextureHandoff
-        // Small when it's a blow-up of a 32px image (item icons from the node
-        // atlas) or a small image in the top-left corner of a clear layer
-        // (inventory images placed at their own size).
-        var small = TileMips.compact(px, from: H.size, to: H.smallSize)
-        var cornerFlag = 0
-        if small == nil, let c = TileMips.corner(px, from: H.size, to: H.smallSize) { small = c; cornerFlag = H.cornerBit }
+        // Smallest tier first: a blow-up of a 32px image (item icons from the
+        // node atlas), a 32px corner, a 128px corner, else the whole layer.
+        var tier: ModelTier = .big
+        var bytes = px, flag = 0
+        if let c = TileMips.compact(px, from: H.size, to: H.smallSize) { tier = .small; bytes = c }
+        else if let c = TileMips.corner(px, from: H.size, to: H.smallSize) { tier = .small; bytes = c; flag = H.cornerBit }
+        else if let c = TileMips.corner(px, from: H.size, to: H.mediumSize) { tier = .medium; bytes = c }
         let cur = fresh ? nil : Int(h.gpuMap[i])
-        let curSmall = cur.map { $0 >= H.smallBit }
-        let curSmallSlot = cur.map { $0 & (H.cornerBit - 1) }
+        let curTier = cur.map { modelTier(of: $0) }
+        let curSlot = cur.map { $0 & (H.cornerBit - 1) }
         var slot: Int
-        if let small {
-            if curSmall == true { slot = curSmallSlot! }
-            else {
-                if let c = cur { h.bigFree.append(c) }
-                slot = h.smallFree.popLast() ?? { h.smallUsed += 1; return h.smallUsed - 1 }()
-            }
-            guard slot < H.cornerBit, let tex = growModelArray(small: true, slots: slot + 1) else { return }
-            let e = H.smallSize
-            small.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, e, e), mipmapLevel: 0, slice: slot,
-                                                withBytes: $0.baseAddress!, bytesPerRow: e * 4, bytesPerImage: e * e * 4) }
-            h.gpuMap[i] = UInt16(H.smallBit + cornerFlag + slot)
+        if let curTier, curTier == tier {
+            slot = curSlot!
         } else {
-            if curSmall == false { slot = cur! }
-            else {
-                if let c = curSmallSlot { h.smallFree.append(c) }
-                slot = h.bigFree.popLast() ?? { h.bigUsed += 1; return h.bigUsed - 1 }()
+            if let curTier, let curSlot {
+                switch curTier {
+                case .big: h.bigFree.append(curSlot)
+                case .medium: h.mediumFree.append(curSlot)
+                case .small: h.smallFree.append(curSlot)
+                }
             }
-            guard let tex = growModelArray(small: false, slots: slot + 1) else { return }
-            let e = H.size
-            px.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, e, e), mipmapLevel: 0, slice: slot,
-                                             withBytes: $0.baseAddress!, bytesPerRow: e * 4, bytesPerImage: e * e * 4) }
-            h.gpuMap[i] = UInt16(slot)
+            switch tier {
+            case .big: slot = h.bigFree.popLast() ?? { h.bigUsed += 1; return h.bigUsed - 1 }()
+            case .medium: slot = h.mediumFree.popLast() ?? { h.mediumUsed += 1; return h.mediumUsed - 1 }()
+            case .small: slot = h.smallFree.popLast() ?? { h.smallUsed += 1; return h.smallUsed - 1 }()
+            }
+        }
+        guard slot < H.cornerBit, let tex = growModelArray(tier: tier, slots: slot + 1) else { return }
+        let e = tier == .big ? H.size : (tier == .medium ? H.mediumSize : H.smallSize)
+        bytes.withUnsafeBytes { tex.replace(region: MTLRegionMake2D(0, 0, e, e), mipmapLevel: 0, slice: slot,
+                                            withBytes: $0.baseAddress!, bytesPerRow: e * 4, bytesPerImage: e * e * 4) }
+        switch tier {
+        case .big: h.gpuMap[i] = UInt16(slot)
+        case .medium: h.gpuMap[i] = UInt16(H.mediumBit + slot)
+        case .small: h.gpuMap[i] = UInt16(H.smallBit + flag + slot)
         }
     }
 
-    /// The full-size or 32px model array, grown to hold `slots` slices. A grow
-    /// allocates headroom (64 slices) and copies the old slices GPU to GPU, so
-    /// it happens once per 64 new layers, not per layer.
-    private func growModelArray(small: Bool, slots: Int) -> MTLTexture? {
+    /// One tier's model array, grown to hold `slots` slices. A grow allocates
+    /// headroom (64 slices) and copies the old slices GPU to GPU, so it happens
+    /// once per 64 new layers, not per layer.
+    private func growModelArray(tier: ModelTier, slots: Int) -> MTLTexture? {
         let h = appModel.modelTextureHandoff
-        let old = small ? h.gpuSmall : modelTextureArray
+        let old: MTLTexture?
+        switch tier { case .big: old = modelTextureArray; case .medium: old = h.gpuMedium; case .small: old = h.gpuSmall }
         if let old, old.arrayLength >= slots { return old }
         guard slots <= WorldSession.maxTextureLayers else { return nil }
-        let e = small ? ModelTextureHandoff.smallSize : ModelTextureHandoff.size
+        let e = tier == .big ? ModelTextureHandoff.size : (tier == .medium ? ModelTextureHandoff.mediumSize : ModelTextureHandoff.smallSize)
         let desc = MTLTextureDescriptor()
         desc.textureType = .type2DArray
         desc.pixelFormat = .rgba8Unorm_srgb
@@ -2430,7 +2442,7 @@ actor Renderer {
             // the old picture (a count badge showed "Blo"/"ck" once).
             cb.waitUntilCompleted()
         }
-        if small { h.gpuSmall = tex } else { modelTextureArray = tex }
+        switch tier { case .big: modelTextureArray = tex; case .medium: h.gpuMedium = tex; case .small: h.gpuSmall = tex }
         return tex
     }
 
@@ -2440,6 +2452,7 @@ actor Renderer {
         let h = appModel.modelTextureHandoff
         enc.setFragmentTexture(big, index: TextureIndex.color.rawValue)
         enc.setFragmentTexture(h.gpuSmall ?? atlasBigPlaceholder, index: TextureIndex.colorBig.rawValue)
+        enc.setFragmentTexture(h.gpuMedium ?? atlasBigPlaceholder, index: TextureIndex.colorMedium.rawValue)
         var n = UInt32(min(h.gpuMap.count, 2048))
         if n > 0 {
             h.gpuMap.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: Int(n) * 2, index: BufferIndex.modelMap.rawValue) }
@@ -3028,6 +3041,7 @@ actor Renderer {
         if let tex = textureArrayBig { perFrame.append(tex) }
         if let mtex = modelTextureArray { perFrame.append(mtex) }
         if let s = appModel.modelTextureHandoff.gpuSmall { perFrame.append(s) }
+        if let m = appModel.modelTextureHandoff.gpuMedium { perFrame.append(m) }
         if capture {
             ensurePhotoTargets()
             perFrame.append(contentsOf: photoTargets?.allocations ?? [])

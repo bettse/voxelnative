@@ -35,6 +35,7 @@ typedef NS_ENUM(EnumBackingType, TextureIndex)
 {
     TextureIndexColor         = 0,
     TextureIndexColorBig      = 4,   // 64px node atlas layers (see sampleAtlas)
+    TextureIndexColorMedium   = 5,   // 128px model-texture tier (mob skins; see sampleModel)
 };
 
 typedef struct

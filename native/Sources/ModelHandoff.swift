@@ -104,10 +104,17 @@ final class ModelTextureHandoff {
     /// placed at its own size, the rest clear), so the shader scales uv by
     /// size/smallSize. Small slots stay below cornerBit.
     static let cornerBit = 16384
+    /// A third tier for mob skins and item art (64 or 128px placed in the
+    /// corner of a clear layer): 128px slots, a quarter of a full slice, coded
+    /// as cornerBit WITHOUT smallBit (the only code that was unused). The
+    /// headset had ~285 full-size slices (73 MB), most of them skins.
+    static let mediumSize = 128
+    static let mediumBit = cornerBit
     var gpuSmall: MTLTexture?
+    var gpuMedium: MTLTexture?
     var gpuMap: [UInt16] = []
-    var bigUsed = 0, smallUsed = 0
-    var bigFree: [Int] = [], smallFree: [Int] = []
+    var bigUsed = 0, smallUsed = 0, mediumUsed = 0
+    var bigFree: [Int] = [], smallFree: [Int] = [], mediumFree: [Int] = []
     var builtCount: Int { lock.lock(); defer { lock.unlock() }; return _builtCount }
 
     /// Queue a full layer set. Patches queued alongside are KEPT, not folded
