@@ -1421,7 +1421,7 @@ actor Renderer {
     static func buildWorldVertexDescriptor() -> MTLVertexDescriptor {
         let d = MTLVertexDescriptor()
         let b = BufferIndex.meshPositions.rawValue
-        let fields: [(MTLVertexFormat, Int)] = [(.float3, 0), (.half2, 12), (.ushort, 16), (.half, 18), (.uchar4, 20)]
+        let fields: [(MTLVertexFormat, Int)] = [(.ushort3, 0), (.half2, 6), (.ushort, 10), (.half, 12), (.uchar4, 14)]
         for (i, f) in fields.enumerated() {
             d.attributes[i].format = f.0; d.attributes[i].offset = f.1; d.attributes[i].bufferIndex = b
         }
@@ -2700,9 +2700,18 @@ actor Renderer {
             renderEncoder.setCullMode(.back)     // opaque world only (see the winding note above)
             // Solid pass: all blocks through the early-Z pipeline.
             renderEncoder.setRenderPipelineState(worldOpaquePipelineState)
+            // Block-local vertices: each draw passes its block's origin in mesh
+            // space ((block node origin - meshRef) * scale, what the mesher
+            // used to bake into every vertex).
+            let mref = worldMeshRef, sc = PlayerState.scale
+            @inline(__always) func setOrigin(_ e: BlockEntry) {
+                var o = (e.loN - mref) * sc
+                renderEncoder.setVertexBytes(&o, length: MemoryLayout<SIMD3<Float>>.size, index: BufferIndex.blockOrigin.rawValue)
+            }
             for vb in visibleBlocks {
-                let b = blockList[vb.idx].gpu
+                let e = blockList[vb.idx], b = e.gpu
                 guard let v = b.opaqueVerts, let s = b.solid else { continue }
+                setOrigin(e)
                 renderEncoder.setVertexBuffer(v, offset: 0, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: s.count,
                                                     indexType: s.type, indexBuffer: s.buffer, indexBufferOffset: s.offset)
@@ -2714,8 +2723,9 @@ actor Renderer {
             renderEncoder.setCullMode(.none)
             renderEncoder.setRenderPipelineState(pipelineState)
             for vb in visibleBlocks {
-                let b = blockList[vb.idx].gpu
+                let e = blockList[vb.idx], b = e.gpu
                 guard let v = b.opaqueVerts, let c = b.cutout else { continue }
+                setOrigin(e)
                 renderEncoder.setVertexBuffer(v, offset: 0, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: c.count,
                                                     indexType: c.type, indexBuffer: c.buffer, indexBufferOffset: c.offset)
@@ -2744,9 +2754,12 @@ actor Renderer {
         if textureArray != nil, !worldBlocks.isEmpty {
             renderEncoder.setRenderPipelineState(liquidPipelineState)
             renderEncoder.setDepthStencilState(liquidDepthState)
+            let mref = worldMeshRef, sc = PlayerState.scale
             for vb in visibleBlocks {
-                let b = blockList[vb.idx].gpu
+                let e = blockList[vb.idx], b = e.gpu
                 guard let v = b.opaqueVerts, let l = b.liquid else { continue }
+                var o = (e.loN - mref) * sc
+                renderEncoder.setVertexBytes(&o, length: MemoryLayout<SIMD3<Float>>.size, index: BufferIndex.blockOrigin.rawValue)
                 renderEncoder.setVertexBuffer(v, offset: l.vertexOffset, index: BufferIndex.meshPositions.rawValue)
                 renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: l.range.count,
                                                     indexType: l.range.type, indexBuffer: l.range.buffer, indexBufferOffset: l.range.offset)

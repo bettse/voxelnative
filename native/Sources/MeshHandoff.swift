@@ -67,13 +67,19 @@ final class MeshHandoff {
     private var hasPending = false
 
     /// Bytes per world vertex on the GPU (WorldVertex in Shaders.metal).
-    static let worldVertexStride = 24
+    static let worldVertexStride = 20
+    /// Block-local positions quantised to 1/512 node with a 16-node offset
+    /// (range -16..112), so a nodebox or mesh node that pokes past its block
+    /// still fits and every node-aligned coordinate is exact (no cracks
+    /// between neighbouring blocks).
+    static let positionScale: Float = 512, positionOffset: Float = 16
 
     /// The mesher's 9-float vertices (x,y,z, u,v, layer, shade, light, tint)
-    /// packed to 24 bytes each: position float3, uv half2, layer UInt16, shade
-    /// half, then the day and night light in 1/16-bank steps (a byte each) and
-    /// the tint as RGB565. A third less than the 36 we uploaded, and the world
-    /// meshes were the biggest thing in memory. The light needs both bytes:
+    /// packed to 20 bytes each: position as three UInt16 fixed-point
+    /// block-local coordinates, uv half2, layer UInt16, shade half, then the
+    /// day and night light in 1/16-bank steps (a byte each) and the tint as
+    /// RGB565. The world meshes were the biggest thing in memory (36 bytes a
+    /// vertex originally, then 24 with floats). The light needs both bytes:
     /// smooth light is a 16-bit value (WorldMesher.packSmoothLight), and
     /// clamping it to one byte read as full daylight, so caves never got dark.
     static func packWorld(_ f: [Float]) -> [UInt8] {
@@ -81,19 +87,20 @@ final class MeshHandoff {
         var out = [UInt8](repeating: 0, count: n * worldVertexStride)
         out.withUnsafeMutableBytes { raw in
             guard let base = raw.baseAddress else { return }
+            @inline(__always) func q(_ v: Float) -> UInt16 { UInt16(clamping: Int(((v + positionOffset) * positionScale).rounded())) }
             for i in 0..<n {
                 let s = i * 9, d = base + i * worldVertexStride
-                d.storeBytes(of: f[s], toByteOffset: 0, as: Float.self)
-                d.storeBytes(of: f[s + 1], toByteOffset: 4, as: Float.self)
-                d.storeBytes(of: f[s + 2], toByteOffset: 8, as: Float.self)
-                d.storeBytes(of: Float16(f[s + 3]), toByteOffset: 12, as: Float16.self)
-                d.storeBytes(of: Float16(f[s + 4]), toByteOffset: 14, as: Float16.self)
-                d.storeBytes(of: UInt16(clamping: Int(f[s + 5].rounded())), toByteOffset: 16, as: UInt16.self)
-                d.storeBytes(of: Float16(f[s + 6]), toByteOffset: 18, as: Float16.self)
+                d.storeBytes(of: q(f[s]), toByteOffset: 0, as: UInt16.self)
+                d.storeBytes(of: q(f[s + 1]), toByteOffset: 2, as: UInt16.self)
+                d.storeBytes(of: q(f[s + 2]), toByteOffset: 4, as: UInt16.self)
+                d.storeBytes(of: Float16(f[s + 3]), toByteOffset: 6, as: Float16.self)
+                d.storeBytes(of: Float16(f[s + 4]), toByteOffset: 8, as: Float16.self)
+                d.storeBytes(of: UInt16(clamping: Int(f[s + 5].rounded())), toByteOffset: 10, as: UInt16.self)
+                d.storeBytes(of: Float16(f[s + 6]), toByteOffset: 12, as: Float16.self)
                 let (day, night) = lightBytes(f[s + 7])
-                d.storeBytes(of: day, toByteOffset: 20, as: UInt8.self)
-                d.storeBytes(of: night, toByteOffset: 21, as: UInt8.self)
-                d.storeBytes(of: tint565(f[s + 8]), toByteOffset: 22, as: UInt16.self)
+                d.storeBytes(of: day, toByteOffset: 14, as: UInt8.self)
+                d.storeBytes(of: night, toByteOffset: 15, as: UInt8.self)
+                d.storeBytes(of: tint565(f[s + 8]), toByteOffset: 16, as: UInt16.self)
             }
         }
         return out

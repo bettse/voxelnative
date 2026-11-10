@@ -14,17 +14,25 @@ typedef struct
     float4 params   [[attribute(VertexAttributeParams)]];   // x=layer, y=shade, z=light, w=packed biome tint
 } Vertex;
 
-// World mesh vertex, packed to 24 bytes at upload (MeshHandoff.packWorld)
+// World mesh vertex, packed to 20 bytes at upload (MeshHandoff.packWorld)
 // from the mesher's 9 floats: the block meshes were the biggest thing in
-// the game's memory, and the headset was running out.
+// the game's memory, and the headset was running out. The position is
+// block-local fixed point (1/512 node, offset 16 nodes so a nodebox or
+// mesh node poking past the block still fits); the draw passes the block's
+// origin in mesh space, which also means the meshes no longer depend on
+// the mesh reference point and don't all rebuild when it moves.
 typedef struct
 {
-    float3 position [[attribute(0)]];
+    ushort3 qpos    [[attribute(0)]];
     float2 uv       [[attribute(1)]];   // half2
     ushort layer    [[attribute(2)]];
     float shade     [[attribute(3)]];   // half; shade + 2*waving class, lava negative
     uchar4 lightTint [[attribute(4)]];  // day, night (1/16 banks), tint RGB565 low, high
 } WorldVertex;
+
+static inline float3 worldPosition(WorldVertex in, float3 blockOrigin) {
+    return float3(in.qpos) * (1.0 / 512.0) - 16.0 + blockOrigin;
+}
 
 // The mesher's float4 params (layer, shade, light, packed tint) back from a
 // WorldVertex, so the world shaders read exactly what they used to. Light
@@ -144,11 +152,12 @@ static inline float smoothTriangleWave(float x)
 vertex ColorInOut vertexShader(WorldVertex win [[stage_in]],
                                ushort amp_id [[amplification_id]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]])
+                               constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]],
+                               constant float3 & blockOrigin [[ buffer(BufferIndexBlockOrigin) ]])
 {
     ColorInOut out;
     const float4 params = worldParams(win);
-    float4 position = float4(win.position, 1.0);
+    float4 position = float4(worldPosition(win, blockOrigin), 1.0);
     // nodedef waving, packed by the mesher as shade + 2*class. The
     // engine's nodes shader: plants (1) sway only their top vertices (uv.y
     // near 0), leaves (2) wobble the whole node on all three axes, both as
@@ -190,11 +199,12 @@ vertex ColorInOut vertexShader(WorldVertex win [[stage_in]],
 vertex ColorInOut liquidVertex(WorldVertex win [[stage_in]],
                                ushort amp_id [[amplification_id]],
                                constant Uniforms & uniforms [[ buffer(BufferIndexUniforms) ]],
-                               constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]])
+                               constant ViewProjectionArray & viewProjectionArray [[ buffer(BufferIndexViewProjection) ]],
+                               constant float3 & blockOrigin [[ buffer(BufferIndexBlockOrigin) ]])
 {
     ColorInOut out;
     const float4 params = worldParams(win);
-    float4 position = float4(win.position, 1.0);
+    float4 position = float4(worldPosition(win, blockOrigin), 1.0);
     float t = uniforms.sunDir.w;
     // Lava (negative shade sentinel) waves slower and shallower than water.
     // Stained glass / blended nodeboxes share this stream but are flagged with

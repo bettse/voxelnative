@@ -22,6 +22,7 @@ typedef NS_ENUM(EnumBackingType, BufferIndex)
     BufferIndexViewProjection = 3,
     BufferIndexEntityFix      = 4,
     BufferIndexModelMap       = 5,   // fragment: model layer -> array slot (see sampleModel)
+    BufferIndexBlockOrigin    = 6,   // vertex: the drawn block's origin in mesh space (WorldVertex positions are block-local)
 };
 
 typedef NS_ENUM(EnumBackingType, VertexAttribute)

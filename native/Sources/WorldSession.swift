@@ -11562,12 +11562,16 @@ final class WorldSession {
         mesherQueue.async { [weak self] in
             guard let self else { return }
             let live = Set(snap.blocks.keys)
-            let rebuildAll = doFull || self.blockCache.isEmpty || self.cachedMeshRef != meshRef
+            let rebuildAll = doFull || self.blockCache.isEmpty   // meshRef no longer baked into vertices
             self.cachedMeshRef = meshRef
 
             @inline(__always)
             func mesh(_ bpos: SIMD3<Int>) -> BlockGeom {
-                let m = WorldMesher.build(snap, atlas: atlas, nodes: nodes, origin: meshRef,
+                // Block-local vertices (origin = the block's own node origin):
+                // the renderer adds each block's offset per draw, so meshes no
+                // longer bake in meshRef and don't all rebuild when it moves.
+                let m = WorldMesher.build(snap, atlas: atlas, nodes: nodes,
+                                          origin: SIMD3<Float>(Float(bpos.x * 16), Float(bpos.y * 16), Float(bpos.z * 16)),
                                           scale: PlayerState.scale, models: models, only: [bpos])
                 return ((m.opaque.vertices, m.opaque.solid, m.opaque.cutout), (m.liquid.vertices, m.liquid.indices))
             }
