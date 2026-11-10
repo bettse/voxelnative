@@ -13,8 +13,10 @@ import LuantiKit
 /// edit. The renderer keeps its own block->buffers dict and draws one indexed
 /// call per block per pass.
 final class MeshHandoff {
-    struct GPUMesh { let vertices: MTLBuffer; let indices: MTLBuffer; let indexCount: Int }
     typealias IndexRange = (buffer: MTLBuffer, offset: Int, count: Int, type: MTLIndexType)
+    /// The liquid stream: its vertices start `vertexOffset` bytes into the
+    /// block's one buffer, its indices are an IndexRange in the same buffer.
+    typealias LiquidRange = (vertexOffset: Int, range: IndexRange, bytes: Int)
     // One block's GPU geometry: the opaque vertices with the solid and cutout
     // index streams packed after them in the SAME buffer, plus an optional
     // liquid mesh. Any field may be nil (an all-air or all-solid-interior block
@@ -27,7 +29,10 @@ final class MeshHandoff {
         // half the index bytes the GPU reads every frame.
         let solid: IndexRange?
         let cutout: IndexRange?
-        let liquid: GPUMesh?
+        // Liquid vertices and indices live in the SAME buffer after the cutout
+        // indices: a separate pair of MTLBuffers cost two 16 KB pages per
+        // puddle (10-15 MB of rounding on the headset).
+        let liquid: LiquidRange?
     }
     // One block's raw geometry as the mesher produced it (CPU side); built into
     // a BlockGPU here on the background queue.
@@ -113,15 +118,6 @@ final class MeshHandoff {
         return UInt16((r * 31 + 127) / 255) | UInt16((g * 63 + 127) / 255) << 5 | UInt16((b * 31 + 127) / 255) << 11
     }
 
-    private func makeMesh(_ device: MTLDevice, _ verts: [Float], _ indices: [UInt32]) -> GPUMesh? {
-        guard !indices.isEmpty, !verts.isEmpty else { return nil }
-        let packed = Self.packWorld(verts)
-        guard let vb = device.makeBuffer(bytes: packed, length: packed.count, options: [.storageModeShared]),
-              let ib = device.makeBuffer(bytes: indices, length: indices.count * 4, options: [.storageModeShared])
-        else { return nil }
-        return GPUMesh(vertices: vb, indices: ib, indexCount: indices.count)
-    }
-
     // The node texture array is kept and grown in place: the atlas is
     // append-only, so a rebuild usually just adds layers, and re-creating a
     // ~1400-slice array and re-uploading every slice (~23 MB) per generation
@@ -201,21 +197,27 @@ final class MeshHandoff {
         built.reserveCapacity(changed.count)
         var anyOpaque = false
         for (bp, r) in changed {
-            let liquid = makeMesh(device, r.lv, r.li)
-            guard !r.ov.isEmpty else {
-                built[bp] = BlockGPU(opaqueVerts: nil, solid: nil, cutout: nil, liquid: liquid); continue
+            let hasLiquid = !r.lv.isEmpty && !r.li.isEmpty
+            guard !r.ov.isEmpty || hasLiquid else {
+                built[bp] = BlockGPU(opaqueVerts: nil, solid: nil, cutout: nil, liquid: nil); continue
             }
+            // One buffer: [opaque verts][solid idx][cutout idx][liquid verts][liquid idx].
             let packed = Self.packWorld(r.ov)
             let wide = r.ov.count / 9 > 65536
             let isz = wide ? 4 : 2
+            let lpacked = hasLiquid ? Self.packWorld(r.lv) : []
+            let lwide = r.lv.count / 9 > 65536
+            let lisz = lwide ? 4 : 2
             // Index offsets 4-byte aligned (Metal's rule for index buffer offsets).
             let solidAt = (packed.count + 3) & ~3
             let cutoutAt = (solidAt + r.solid.count * isz + 3) & ~3
-            let total = cutoutAt + r.cutout.count * isz
-            guard let buf = device.makeBuffer(length: total, options: [.storageModeShared]) else { continue }
+            let lvertsAt = (cutoutAt + r.cutout.count * isz + 3) & ~3
+            let lidxAt = (lvertsAt + lpacked.count + 3) & ~3
+            let total = hasLiquid ? lidxAt + r.li.count * lisz : cutoutAt + r.cutout.count * isz
+            guard let buf = device.makeBuffer(length: max(total, 4), options: [.storageModeShared]) else { continue }
             let base = buf.contents()
-            packed.withUnsafeBytes { _ = memcpy(base, $0.baseAddress!, $0.count) }
-            func put(_ a: [UInt32], at off: Int) -> IndexRange? {
+            packed.withUnsafeBytes { if $0.count > 0 { _ = memcpy(base, $0.baseAddress!, $0.count) } }
+            func put(_ a: [UInt32], at off: Int, wide: Bool) -> IndexRange? {
                 guard !a.isEmpty else { return nil }
                 if wide {
                     a.withUnsafeBytes { _ = memcpy(base + off, $0.baseAddress!, $0.count) }
@@ -225,8 +227,13 @@ final class MeshHandoff {
                 }
                 return (buf, off, a.count, wide ? .uint32 : .uint16)
             }
-            let solid = put(r.solid, at: solidAt), cutout = put(r.cutout, at: cutoutAt)
+            let solid = put(r.solid, at: solidAt, wide: wide), cutout = put(r.cutout, at: cutoutAt, wide: wide)
             if solid != nil || cutout != nil { anyOpaque = true }
+            var liquid: LiquidRange? = nil
+            if hasLiquid {
+                lpacked.withUnsafeBytes { _ = memcpy(base + lvertsAt, $0.baseAddress!, $0.count) }
+                if let lr = put(r.li, at: lidxAt, wide: lwide) { liquid = (lvertsAt, lr, total - lvertsAt) }
+            }
             built[bp] = BlockGPU(opaqueVerts: buf, solid: solid, cutout: cutout, liquid: liquid)
         }
         let a = atlasLayers.flatMap { makeAtlas(device, $0.small, smallAtlas) }

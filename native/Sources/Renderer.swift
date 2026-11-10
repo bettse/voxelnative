@@ -270,7 +270,7 @@ actor Renderer {
         var mesh = 0, liquid = 0
         for (_, b) in worldBlocks {
             mesh += b.opaqueVerts?.length ?? 0   // vertices and both index streams
-            if let l = b.liquid { liquid += l.vertices.length + l.indices.length }
+            if let l = b.liquid { liquid += l.bytes }   // inside opaqueVerts' buffer, counted in mesh too
         }
         let atlas = tex(textureArray) + tex(textureArrayBig)
         let model = tex(modelTextureArray) + tex(appModel.modelTextureHandoff.gpuSmall)
@@ -2732,11 +2732,12 @@ actor Renderer {
             renderEncoder.setRenderPipelineState(liquidPipelineState)
             renderEncoder.setDepthStencilState(liquidDepthState)
             for vb in visibleBlocks {
-                guard let l = blockList[vb.idx].gpu.liquid else { continue }
-                renderEncoder.setVertexBuffer(l.vertices, offset: 0, index: BufferIndex.meshPositions.rawValue)
-                renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: l.indexCount,
-                                                    indexType: .uint32, indexBuffer: l.indices, indexBufferOffset: 0)
-                idxLiquid += l.indexCount
+                let b = blockList[vb.idx].gpu
+                guard let v = b.opaqueVerts, let l = b.liquid else { continue }
+                renderEncoder.setVertexBuffer(v, offset: l.vertexOffset, index: BufferIndex.meshPositions.rawValue)
+                renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: l.range.count,
+                                                    indexType: l.range.type, indexBuffer: l.range.buffer, indexBufferOffset: l.range.offset)
+                idxLiquid += l.range.count
             }
         }
 
@@ -3049,8 +3050,7 @@ actor Renderer {
             var world: [any MTLAllocation] = []
             world.reserveCapacity(worldBlocks.count * 4)
             for (_, b) in worldBlocks {
-                if let v = b.opaqueVerts { world.append(v) }   // holds the index streams too
-                if let l = b.liquid { world.append(l.vertices); world.append(l.indices) }
+                if let v = b.opaqueVerts { world.append(v) }   // holds the index streams and the liquid too
             }
             worldRes.addAllocations(world)
             worldRes.commit()
