@@ -2738,6 +2738,27 @@ final class WorldSession {
         // maps to) into [zoo] log lines, then lays a sample of every drawtype
         // plus every flagged node out in rows ahead of the spawn pad as
         // client-side nodes, for screenshots. Nothing is sent to the server.
+        // -vrdev.headTest 1: a cobble wall ahead of the pad with wall heads on
+        // its near face at every wallmounted param2 (client-side nodes), to
+        // look at how wall-mounted nodeboxes map their tiles.
+        if !simZooDone, simSceneTimer > 12, UserDefaults.standard.bool(forKey: "vrdev.headTest"), atlasBuilt, client.nodes.count > 100 {
+            simZooDone = true
+            if let cobble = client.nodes.id(for: "mcl_core:cobble"), let zh = client.nodes.id(for: "mcl_heads:zombie_wall"),
+               let ws = client.nodes.id(for: "mcl_heads:wither_skeleton_wall") {
+                // Wall of cobble at z=4, x -3..3, y 121..123; heads on the -z face
+                // (wallmounted 4 = wall toward +z) and the sides.
+                for x in -3...3 { for y in 121...123 { let p = SIMD3(x, y, 4); client.world.setNode(p, param0: cobble, param1: 0xFF); markNodeDirty(p) } }
+                let heads: [(SIMD3<Int>, UInt16, UInt8)] = [
+                    (SIMD3(-2, 122, 3), zh, 4), (SIMD3(0, 122, 3), ws, 4), (SIMD3(2, 122, 3), zh, 4),
+                    (SIMD3(-4, 122, 4), zh, 2),   // on the wall's -x end: wall toward +x
+                    (SIMD3(4, 122, 4), ws, 3),    // on the +x end: wall toward -x
+                    (SIMD3(0, 124, 4), zh, 1),    // on top: floor mount
+                ]
+                for (p, id, p2) in heads { client.world.setNode(p, param0: id, param1: 0xFF, param2: p2); markNodeDirty(p) }
+                remeshCooldown = 0; dirty = true
+                print("[headtest] placed"); fflush(stdout)
+            } else { print("[headtest] node ids missing"); fflush(stdout) }
+        }
         if !simZooDone, simSceneTimer > 12, UserDefaults.standard.bool(forKey: "vrdev.nodeZoo"), atlasBuilt, client.nodes.count > 100 {
             simZooDone = true
             runNodeZoo()

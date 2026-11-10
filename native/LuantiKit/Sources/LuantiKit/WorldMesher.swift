@@ -147,7 +147,7 @@ public enum WorldMesher {
 
     // wallmounted param2 (0..7) -> 6d facedir, matching Luanti's
     // wallmounted_to_facedir table (directiontables.cpp).
-    private static let wallmountedToFacedir: [UInt8] = [20, 0, 17, 15, 8, 6, 21, 1]
+    static let wallmountedToFacedir: [UInt8] = [20, 0, 17, 15, 8, 6, 21, 1]
 
     // Resolve a node's param2 to a 6d facedir (0..23), honouring its
     // param_type_2. Mirrors MapNode::getFaceDir: facedir/colorfacedir use the
@@ -654,8 +654,14 @@ public enum WorldMesher {
         // the opaque mesh. UVs come from boxUV so partial boxes sample the right
         // slice of their tile. All faces are drawn (no inter-box culling).
         @inline(__always)
+        // tileFacedir: the 6d facedir the node's TILES are turned by (its
+        // box geometry stays as given). A wallmounted node_box is drawn from a
+        // pre-turned box, but the engine still picks and turns each face's
+        // tile by the mounting (getNodeTile): a wall head's "front" tile goes
+        // on the face pointing away from the wall. Without it the heads showed
+        // their top/back textures and transparent skin regions on the sides.
         func emitBox(_ box: NodeRegistry.Box, base b: SIMD3<Int>, id: UInt16, light: Float, tint: Float = 16777215, facedir: UInt8 = 0,
-                     siblings: [NodeRegistry.Box] = [], index: Int = 0) {
+                     siblings: [NodeRegistry.Box] = [], index: Int = 0, tileFacedir: UInt8 = 0) {
             var lo = box.min + SIMD3(repeating: 0.5)   // -0.5..0.5 -> 0..1 node-local
             var hi = box.max + SIMD3(repeating: 0.5)
             // A facedir'd box (an open door) can rotate a face flush onto the
@@ -694,7 +700,9 @@ public enum WorldMesher {
                 || (n.x > 0 && hi.x >= 0.999) || (n.x < 0 && lo.x <= 0.001)
                 || (n.z > 0 && hi.z >= 0.999) || (n.z < 0 && lo.z <= 0.001)
             }
-            for f in faces {
+            for (fi, f) in faces.enumerated() {
+                let tileIdx = tileFacedir == 0 ? f.tile : WorldMesher.cubeTile(fi, tileFacedir)
+                let tileTurn = tileFacedir == 0 ? 0 : WorldMesher.tileTurns[Int(tileFacedir)][fi]
                 var nudge = SIMD3<Float>(repeating: 0)
                 if isFlat {
                     // Only the two faces across the flat axis have area.
@@ -710,7 +718,7 @@ public enum WorldMesher {
                 // covering face. Luanti hides it by backface culling.
                 if !siblings.isEmpty, WorldMesher.buriedFace(box, f.n, among: siblings, index: index) { continue }
                 let vbase = UInt32((blended ? lv.count : ov.count) / 9)
-                let layer = Float(atlas.layer(id: id, face: f.tile))
+                let layer = Float(atlas.layer(id: id, face: tileIdx))
                 // A light_source nodebox (sea pickle, redstone lamp) skips the
                 // directional face shade so all faces read equally bright, like
                 // the cube and mesh paths (content_mapblock shade_face).
@@ -729,7 +737,8 @@ public enum WorldMesher {
                     var l = SIMD3<Float>(corner.x == 0 ? lo.x : hi.x,
                                          corner.y == 0 ? lo.y : hi.y,
                                          corner.z == 0 ? lo.z : hi.z)
-                    let t = boxUV(f.n, l)   // UV from the un-rotated face (texture rides along)
+                    var t = boxUV(f.n, l)   // UV from the un-rotated face (texture rides along)
+                    if tileTurn != 0 { t = WorldMesher.rotUV(t, tileTurn) }
                     let vlight = smooth ? smoothLight(np: np, normal: f.n, corner: l) : light
                     // param2 facedir rotates the box about the node centre, so a
                     // door faces the way it was placed and visibly swings when it
@@ -1101,8 +1110,10 @@ public enum WorldMesher {
                         if nodes.isWallmountedBox(id) {
                             // Wallmounted node_box: draw only the one box the
                             // param2 selects (buttons/heads), not all three.
+                            let wm = Int(block.param2[nodeIdx] & 0x07)
                             for box in WorldMesher.wallmountedBox(boxes, param2: block.param2[nodeIdx]) {
-                                emitBox(box, base: g, id: id, light: light, tint: tint, facedir: 0)
+                                emitBox(box, base: g, id: id, light: light, tint: tint, facedir: 0,
+                                        tileFacedir: WorldMesher.wallmountedToFacedir[wm])
                             }
                         } else {
                         let fd = WorldMesher.meshFacedir(block.param2[nodeIdx], ms.p2t(id))
