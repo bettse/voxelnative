@@ -1991,9 +1991,14 @@ public final class Client {
     public func unloadUnusedBlocks(dt: Float, near: SIMD3<Int>) -> [SIMD3<Int>] {
         // Tighter than the engine's desktop defaults (12 mapblocks, 600 s, 7500
         // blocks, ~120 MB of node data plus a mesh each): keep what the server
-        // streams to us (the view range) plus a margin, age the rest out in two
-        // minutes, cap at 3000. DELETEDBLOCKS makes the server re-send on return.
-        let gone = world.expire(dt: dt, near: near, radius: wantedRange + 2, timeout: 120, limit: 3000)
+        // streams to us (the view range) plus one block of margin, age the rest
+        // out in 45 s, cap at 3000. DELETEDBLOCKS makes the server re-send on
+        // return. The margin was +2 and the tail 120 s: the radius is a cube,
+        // so that kept a 21^3 shell the server never streams, and each
+        // resident block costs ~40 KB of nodes, mesh and buffer rounding
+        // (20-40 MB on the headset). The memory-warning shed already drops
+        // to the bare range without trouble.
+        let gone = world.expire(dt: dt, near: near, radius: wantedRange + 1, timeout: 45, limit: 3000)
         for pkt in Client.deletedBlocksPackets(gone) { conn.sendMessage(Op.toserverDeletedBlocks, pkt) }
         return gone
     }
