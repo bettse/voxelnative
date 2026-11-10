@@ -87,4 +87,22 @@ final class BlockDataTests: XCTestCase {
     func testGarbagePayloadReturnsNilNotCrash() {
         XCTAssertNil(WorldMap().decodeBlockData(Data([0, 0, 0, 0, 0, 0, 9, 9, 9])))
     }
+
+    /// Two all-air blocks share one param0/param1/param2 buffer; a node change
+    /// in one copies it out and leaves the other untouched.
+    func testUniformBlocksShareStorageUntilWritten() {
+        let world = WorldMap()
+        let air = Int(WorldMap.CONTENT_AIR)
+        _ = world.decodeBlockData(payload(bpos: SIMD3(0, 5, 0)) { _ in (air, 0x0F, 0) })
+        _ = world.decodeBlockData(payload(bpos: SIMD3(1, 5, 0)) { _ in (air, 0x0F, 0) })
+        let a = world.blocks[SIMD3(0, 5, 0)]!, b = world.blocks[SIMD3(1, 5, 0)]!
+        func base(_ x: [UInt16]) -> UnsafeRawPointer? { x.withUnsafeBufferPointer { UnsafeRawPointer($0.baseAddress) } }
+        func base8(_ x: [UInt8]) -> UnsafeRawPointer? { x.withUnsafeBufferPointer { UnsafeRawPointer($0.baseAddress) } }
+        XCTAssertEqual(base(a.param0), base(b.param0), "uniform param0 shares storage")
+        XCTAssertEqual(base8(a.param1), base8(b.param1)); XCTAssertEqual(base8(a.param2), base8(b.param2))
+        world.setNode(SIMD3(3, 80 + 3, 3), param0: 42)   // block (0,5,0): y 80..95
+        XCTAssertEqual(world.nodeId(SIMD3(3, 83, 3)), 42)
+        XCTAssertEqual(world.nodeId(SIMD3(19, 83, 3)), WorldMap.CONTENT_AIR, "the other block still reads air")
+        XCTAssertEqual(world.blocks[SIMD3(1, 5, 0)]!.param0.allSatisfy { $0 == WorldMap.CONTENT_AIR }, true)
+    }
 }

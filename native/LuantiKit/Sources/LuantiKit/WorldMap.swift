@@ -134,6 +134,24 @@ public final class WorldMap {
         let formspecs: [SIMD3<Int>: String?]   // value nil = clear
     }
 
+    // Shared storage for uniform blocks (see decodeBlock). decodeBlock runs on
+    // background threads, so the caches take a lock; the arrays themselves are
+    // values and copy on their first write.
+    private static let sharedLock = NSLock()
+    nonisolated(unsafe) private static var sharedP0: [UInt16: [UInt16]] = [:]   // guarded by sharedLock
+    nonisolated(unsafe) private static var sharedP8: [Int: [UInt8]] = [:]
+    static func sharedParam0(_ v: UInt16) -> [UInt16] {
+        sharedLock.lock(); defer { sharedLock.unlock() }
+        if let a = sharedP0[v] { return a }
+        let a = [UInt16](repeating: v, count: NODES_PER_BLOCK); sharedP0[v] = a; return a
+    }
+    static func sharedParam8(_ v: UInt8, _ which: Int) -> [UInt8] {
+        sharedLock.lock(); defer { sharedLock.unlock() }
+        let key = Int(v) | (which << 8)
+        if let a = sharedP8[key] { return a }
+        let a = [UInt8](repeating: v, count: NODES_PER_BLOCK); sharedP8[key] = a; return a
+    }
+
     /// Pure decode of a TOCLIENT_BLOCKDATA payload -- no `self`, safe to run on a
     /// background thread. Returns nil for a truncated/corrupt stream.
     public static func decodeBlock(_ payload: Data) -> DecodedBlock? {
@@ -165,6 +183,14 @@ public final class WorldMap {
         // storing the block would then index up to 4095 into a 0-element array
         // on the next light/param2/mesh read. Drop the block instead.
         guard b.param1.count == n, b.param2.count == n else { return nil }
+        // A uniform array (all air above the player, all stone below, param2
+        // all zero, a flat light level) points at one shared copy per value
+        // instead of owning 8 or 4 KB: Swift arrays copy on write, so the first
+        // setNode/relight into such a block gets its own storage again. A
+        // quarter to a third of resident blocks are uniform (8-19 MB).
+        if let v = b.param0.first, b.param0.allSatisfy({ $0 == v }) { b.param0 = sharedParam0(v) }
+        if let v = b.param1.first, b.param1.allSatisfy({ $0 == v }) { b.param1 = sharedParam8(v, 1) }
+        if let v = b.param2.first, b.param2.allSatisfy({ $0 == v }) { b.param2 = sharedParam8(v, 2) }
         // Node metadata (chest/furnace/sign inventories, formspec) follows the
         // bulk node data. Best-effort; a shortfall just leaves containers empty.
         let (meta, fs) = parseNodeMeta(d, bpos: bpos)
