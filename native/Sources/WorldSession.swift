@@ -313,6 +313,11 @@ final class WorldSession {
     // so its count only grows) or media just landed (a pending skin may resolve
     // now). Otherwise every tick re-parsed each pending skin's modifier string.
     private var modelTexRescan = true
+    /// Specs the entity scan registered (mob skins, dropped-item pictures), the
+    /// only layers the unused-skin sweep may free, and when each went unseen.
+    private var entitySkinSpecs = Set<String>()
+    private var skinUnseenSince: [String: TimeInterval] = [:]
+    private var skinSweepAt: TimeInterval = 0
     private var lastModelTexTilesCount = -1
     private var simMobPhase = 0                       // -vrdev.spawnMob framing state
     private var simMobTimer: Double = 0
@@ -8748,11 +8753,42 @@ final class WorldSession {
                     // skipped when drawn.
                     for t in e.textures where !Self.isBlankSpec(t) {
                         if assignModelTexture(t) { changed = true }
+                        entitySkinSpecs.insert(t)
                     }
                 } else if e.name == "__builtin:item", let itemStr = e.textures.first,
                           let spec = droppedItemSpec(itemStr) {
                     if assignModelTexture(spec) { changed = true }
+                    entitySkinSpecs.insert(spec)
                 }
+            }
+        }
+        // Skins and dropped-item pictures used to be kept for good: every sheep
+        // colour, villager profession and horse marking ever seen added a
+        // 256 KB slice (476 layers on the headset vs 79 in the sim, ~80 MB over
+        // a session). Every 15 s, a spec no live entity has referenced for two
+        // minutes gives its layer back for reuse. Only specs this scan
+        // registered: HUD images, icons and text have their own owners.
+        if frameUptime - skinSweepAt > 15 {
+            skinSweepAt = frameUptime
+            var live = Set<String>()
+            for e in ents {
+                if e.visual == "mesh" { for t in e.textures { live.insert(t) } }
+                else if e.name == "__builtin:item", let itemStr = e.textures.first, let spec = droppedItemSpec(itemStr) { live.insert(spec) }
+            }
+            var freed = 0
+            for spec in entitySkinSpecs {
+                if live.contains(spec) { skinUnseenSince[spec] = nil; continue }
+                let since = skinUnseenSince[spec] ?? frameUptime
+                skinUnseenSince[spec] = since
+                guard frameUptime - since > 120, let layer = modelTexLayer[spec] else { continue }
+                modelTexLayer[spec] = nil; modelTexUV[spec] = nil
+                freeModelLayers.append(layer)
+                entitySkinSpecs.remove(spec); skinUnseenSince[spec] = nil
+                freed += 1
+            }
+            if freed > 0 {
+                itemDrawCache.removeAll()   // resolved dropped-item draws pointed at these layers
+                print("[modeltex] released \(freed) unused skin layers (\(freeModelLayers.count) free of \(modelTexCount))"); fflush(stdout)
             }
         }
         // Rebuild when we've registered new layers, OR when the renderer's array
