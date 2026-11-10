@@ -92,7 +92,14 @@ public final class MediaManager {
         pushedLanded(name)
     }
 
-    public init(send: @escaping (Int, Data) -> Void) { self.send = send }
+    public init(send: @escaping (Int, Data) -> Void) {
+        self.send = send
+        // The engine's built-in empty texture: never announced or sent, but
+        // node tiles build on it ("blank.png^[noalpha^[colorize:#b8bab9" is
+        // the beacon beam). A transparent 16x16 PNG so those compose.
+        store["blank.png"] = Self.blankPNG
+    }
+    static let blankPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAEklEQVR42mNgGAWjYBSMAggAAAQQAAGvRYgsAAAAAElFTkSuQmCC")!
 
     /// Lowercase hex of a digest. A nibble table, not String(format:): the
     /// announce carries ~3500 sha1s and formatting them byte by byte was

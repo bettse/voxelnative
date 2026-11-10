@@ -532,7 +532,13 @@ public final class NodeRegistry {
         // can't resolve blank.png^[resize] so it fell back to a grey cube; skip
         // rendering it instead. Applied at the end so nodebox promotion can't
         // un-skip it.
-        let allBlank = faces.allSatisfy { NodeRegistry.imageNames($0).first == "blank.png" }
+        // Only a bare blank.png (a [resize is still blank) counts: the beacon
+        // beam is "blank.png^[noalpha^[colorize:#b8bab9", an opaque grey
+        // column, and skipping it made beacons beamless.
+        let allBlank = faces.allSatisfy { tile in
+            let parts = tile.split(separator: "^")
+            return parts.first == "blank.png" && parts.dropFirst().allSatisfy { $0.hasPrefix("[resize") }
+        }
 
         // Walk to palette_name for every node (biome tinting); only nodebox/
         // fencelike keep going all the way to node_box.

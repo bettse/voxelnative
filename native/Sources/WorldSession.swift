@@ -363,6 +363,7 @@ final class WorldSession {
     private var simAwardRects: [String: (lo: SIMD2<Float>, hi: SIMD2<Float>)] = [:]   // -vrdev.awardTest: drawn toast rects (nominal px)
     private var simScratchInt = Int.max                  // per-scene scratch: a low-water mark or a start value x100
     private var simInvPhase = 0                         // -vrdev.invPickTest state machine
+    private var simZooDone = false                      // -vrdev.nodeZoo: audit + grid placed once
     private var simInvCyclePhase = 0                    // -vrdev.invCycle
     private var simInvTimer: Double = 0
     private var simInvHoverOverride: Int? = nil         // sim: force invHover to a slot (no ray)
@@ -647,6 +648,70 @@ final class WorldSession {
     /// Sim scenes start on the spawn pad at (0, 121, 0). Two hops, because a
     /// MOVE_PLAYER under 6 nodes is not applied (see onSpawn): a scene that
     /// starts near the pad would otherwise begin wherever the last one ended.
+    #if targetEnvironment(simulator)
+    private static let drawtypeNames = ["normal", "airlike", "liquid", "flowingliquid", "glasslike", "allfaces", "allfaces_optional",
+                                        "torchlike", "signlike", "plantlike", "fencelike", "raillike", "nodebox", "glasslike_framed",
+                                        "firelike", "glasslike_framed_optional", "mesh", "plantlike_rooted"]
+    private static func drawtypeName(_ dt: Int) -> String { dt >= 0 && dt < drawtypeNames.count ? drawtypeNames[dt] : "drawtype \(dt)" }
+    private func runNodeZoo() {
+        let names = client.nodes.allNames()
+        let sorted = names.sorted { $0.value < $1.value }
+        var perDraw: [Int: (total: Int, bad: Int, sample: [UInt16])] = [:]
+        var badNodes: [(UInt16, String)] = []
+        for (id, name) in sorted {
+            if name == "air" || name == "ignore" || name.hasPrefix("unknown") { continue }
+            let dt = client.nodes.drawtype(id), kind = client.nodes.kind(id)
+            var issues: [String] = []
+            var seenImgs = Set<String>()
+            for f in 0..<6 {
+                guard let t = client.nodes.faceTile(id, f) else { continue }
+                for img in NodeRegistry.imageNames(t) where !seenImgs.contains(img) {
+                    seenImgs.insert(img)
+                    if img != "blank.png", client.media.store[img] == nil { issues.append("missing \(img)") }
+                }
+            }
+            if kind == .mesh {
+                if let mf = client.nodes.meshFile(id) { if model(for: mf) == nil { issues.append("no model \(mf)") } }
+                else { issues.append("mesh without a file") }
+            }
+            if kind == .nodebox, (client.nodes.boxes(id) ?? []).isEmpty { issues.append("nodebox without boxes") }
+            // The kind the drawtype should map to; a cube fallback for a mesh or
+            // nodebox drawtype means the registry didn't understand the def.
+            let expected: NodeRegistry.RenderKind? = [0: .cube, 1: .skip, 4: .cube, 5: .allfaces, 6: .allfaces, 7: .torch, 8: .sign,
+                                                       9: .plant, 11: .rail, 12: .nodebox, 14: .fire, 16: .mesh, 17: .rooted][dt]
+            if let expected, expected != kind { issues.append("drawtype \(Self.drawtypeName(dt)) drawn as \(kind)") }
+            var e = perDraw[dt] ?? (0, 0, [])
+            e.total += 1
+            if !issues.isEmpty { e.bad += 1; badNodes.append((id, "\(name) [\(Self.drawtypeName(dt))/\(kind)]: " + issues.joined(separator: "; "))) }
+            if e.sample.count < 20 { e.sample.append(id) }
+            perDraw[dt] = e
+        }
+        for (dt, e) in perDraw.sorted(by: { $0.key < $1.key }) {
+            print("[zoo] \(Self.drawtypeName(dt)): \(e.total) nodes, \(e.bad) flagged"); fflush(stdout)
+        }
+        for (_, line) in badNodes.prefix(300) { print("[zoo] BAD \(line)"); fflush(stdout) }
+        print("[zoo] total \(sorted.count) nodes, \(badNodes.count) flagged"); fflush(stdout)
+        // Lay out: one row per drawtype (20 samples), then the flagged ones,
+        // 2 nodes apart along x, rows 2 apart along +z from the pad.
+        let base = SIMD3<Int>(0, 121, 4)
+        var row = 0
+        func place(_ ids: [UInt16]) {
+            for (i, id) in ids.enumerated() {
+                let p = SIMD3(base.x - 19 + (i % 20) * 2, base.y, base.z + row * 2 + (i / 20) * 2)
+                let pt2 = client.nodes.paramType2(id)
+                let p2: UInt8 = (pt2 == 2 || pt2 == 10) ? 1 : 0   // wallmounted: on the floor
+                client.world.setNode(p, param0: id, param1: 0xFF, param2: p2); markNodeDirty(p)
+            }
+            row += (ids.count + 19) / 20
+        }
+        for (_, e) in perDraw.sorted(by: { $0.key < $1.key }) { place(e.sample) }
+        let badRow = row
+        place(badNodes.map { $0.0 })
+        remeshCooldown = 0; dirty = true
+        print("[zoo] placed rows z=\(base.z)...\(base.z + row * 2), flagged nodes from z=\(base.z + badRow * 2)"); fflush(stdout)
+    }
+    #endif
+
     private func simTeleportToPad() {
         client.sendChat("/teleport 0 140 0"); client.sendChat("/teleport 0 121 0")
     }
@@ -2666,6 +2731,16 @@ final class WorldSession {
         // tick (CFPreferences lock + string bridge each) for flags never set.
         simSceneTimer += Double(dt)
         #if targetEnvironment(simulator)
+        // -vrdev.nodeZoo 1: the completeness sweep for nodes. Audits every
+        // registered node (tiles present in the media store, a mesh node's
+        // model loadable, a nodebox with boxes, the render kind the drawtype
+        // maps to) into [zoo] log lines, then lays a sample of every drawtype
+        // plus every flagged node out in rows ahead of the spawn pad as
+        // client-side nodes, for screenshots. Nothing is sent to the server.
+        if !simZooDone, simSceneTimer > 12, UserDefaults.standard.bool(forKey: "vrdev.nodeZoo"), atlasBuilt, client.nodes.count > 100 {
+            simZooDone = true
+            runNodeZoo()
+        }
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.openInventory"), atlasBuilt { toggleInventory(); simSceneTimer = -1e9 }
         // -vrdev.invCycle 1: open at 8 s, close at 16 s, reopen at 20 s, so the
         // [icon] released/reused layer counts show in the log.
@@ -6250,7 +6325,11 @@ final class WorldSession {
                 // the texture rebuild. A never-announced name will never come.
                 let fetchable = missing.filter { client.media.announced.contains($0) }
                 if fetchable.count < missing.count {
-                    print("[hud] image '\(spec.prefix(80))' dropped: never announced \(missing.filter { !client.media.announced.contains($0) })"); fflush(stdout)
+                    // blank.png is the engine's built-in empty texture (never
+                    // announced): a form drawing it means "nothing here".
+                    if !missing.contains("blank.png") {
+                        print("[hud] image '\(spec.prefix(80))' dropped: never announced \(missing.filter { !client.media.announced.contains($0) })"); fflush(stdout)
+                    }
                     modelFailed.insert(spec); return nil
                 }
                 client.media.request(Set(fetchable))
