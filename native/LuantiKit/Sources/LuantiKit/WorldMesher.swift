@@ -400,6 +400,35 @@ public enum WorldMesher {
         return ms.occ(id)
     }
 
+    /// Is face `n` of box `a` (index `ai` in `boxes`) lying flat against another,
+    /// non-flat box of the same node that fully covers it? Either that box starts
+    /// where this face is (the face is buried inside it), or it has a same-facing
+    /// face on the same plane that contains this one (a duplicate; the one with
+    /// the lower index is kept). Compared in the node's own -0.5..0.5 space,
+    /// before any facedir rotation, which applies to all boxes alike.
+    static func buriedFace(_ a: NodeRegistry.Box, _ n: SIMD3<Int>, among boxes: [NodeRegistry.Box], index ai: Int) -> Bool {
+        let axis = n.x != 0 ? 0 : (n.y != 0 ? 1 : 2)
+        let pos = n[axis] > 0
+        let plane = pos ? a.max[axis] : a.min[axis]
+        let (u, v) = axis == 0 ? (1, 2) : (axis == 1 ? (0, 2) : (0, 1))
+        let eps: Float = 1e-4
+        for (bi, b) in boxes.enumerated() where bi != ai {
+            if b.max[axis] - b.min[axis] < eps { continue }          // a flat plane covers nothing
+            let covers = b.min[u] <= a.min[u] + eps && b.max[u] >= a.max[u] - eps
+                      && b.min[v] <= a.min[v] + eps && b.max[v] >= a.max[v] - eps
+            guard covers else { continue }
+            let facing = pos ? abs(b.min[axis] - plane) < eps : abs(b.max[axis] - plane) < eps   // b begins at this face
+            if facing { return true }
+            let sameSide = pos ? abs(b.max[axis] - plane) < eps : abs(b.min[axis] - plane) < eps  // b's own face on this plane
+            if sameSide {
+                let identical = abs(b.min[u] - a.min[u]) < eps && abs(b.max[u] - a.max[u]) < eps
+                              && abs(b.min[v] - a.min[v]) < eps && abs(b.max[v] - a.max[v]) < eps
+                if !identical || bi < ai { return true }
+            }
+        }
+        return false
+    }
+
     // A nodebox face flush with the node boundary is hidden when the neighbour
     // draws a full opaque face coplanar with it: a solid cube OR leaves (allfaces
     // render an opaque boundary face too). Without this, a snow layer / carpet /
@@ -625,7 +654,8 @@ public enum WorldMesher {
         // the opaque mesh. UVs come from boxUV so partial boxes sample the right
         // slice of their tile. All faces are drawn (no inter-box culling).
         @inline(__always)
-        func emitBox(_ box: NodeRegistry.Box, base b: SIMD3<Int>, id: UInt16, light: Float, tint: Float = 16777215, facedir: UInt8 = 0) {
+        func emitBox(_ box: NodeRegistry.Box, base b: SIMD3<Int>, id: UInt16, light: Float, tint: Float = 16777215, facedir: UInt8 = 0,
+                     siblings: [NodeRegistry.Box] = [], index: Int = 0) {
             var lo = box.min + SIMD3(repeating: 0.5)   // -0.5..0.5 -> 0..1 node-local
             var hi = box.max + SIMD3(repeating: 0.5)
             // A facedir'd box (an open door) can rotate a face flush onto the
@@ -673,6 +703,12 @@ public enum WorldMesher {
                 }
                 if facedir == 0, flushBoundary(f.n),
                    WorldMesher.occludesBoundary(cNodeId(b &+ f.n), ms) { continue }
+                // A face lying flat against another box of this node and fully
+                // covered by it (a fence rail's end inside the post, a pane arm
+                // against its post, a stair's riser under its tread) is never
+                // seen from outside, but drawn double-sided it z-fought the
+                // covering face. Luanti hides it by backface culling.
+                if !siblings.isEmpty, WorldMesher.buriedFace(box, f.n, among: siblings, index: index) { continue }
                 let vbase = UInt32((blended ? lv.count : ov.count) / 9)
                 let layer = Float(atlas.layer(id: id, face: f.tile))
                 // A light_source nodebox (sea pickle, redstone lamp) skips the
@@ -1070,7 +1106,10 @@ public enum WorldMesher {
                             }
                         } else {
                         let fd = WorldMesher.meshFacedir(block.param2[nodeIdx], ms.p2t(id))
-                        for box in boxes { emitBox(box, base: g, id: id, light: light, tint: tint, facedir: fd) }
+                        // Gather every box this node draws first (fixed boxes plus
+                        // the connected arms), so a face can tell whether another
+                        // box of the same node covers it (buriedFace).
+                        var drawn = boxes
                         // Connected nodeboxes (fences/walls/panes): add each arm
                         // whose neighbour is in this node's connects_to set. Arm
                         // order: top,bottom,front,left,back,right (+Y,-Y,-Z,-X,+Z,+X).
@@ -1082,10 +1121,11 @@ public enum WorldMesher {
                                 // nodeboxConnects: mutual connects_to between two
                                 // connected nodeboxes, and the target's
                                 // connect_sides gate for anything else.
-                                if nodes.nodeboxConnects(from: id, to: cNodeId(np), dir: di) {
-                                    for box in arms[di] { emitBox(box, base: g, id: id, light: light, tint: tint, facedir: fd) }
-                                }
+                                if nodes.nodeboxConnects(from: id, to: cNodeId(np), dir: di) { drawn += arms[di] }
                             }
+                        }
+                        for (bi, box) in drawn.enumerated() {
+                            emitBox(box, base: g, id: id, light: light, tint: tint, facedir: fd, siblings: drawn, index: bi)
                         }
                         }   // end non-wallmounted branch
                     } else {
