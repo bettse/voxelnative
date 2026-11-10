@@ -5582,3 +5582,45 @@ ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ------------------------------------------------------------------------------
 */
+
+
+/* ---- VoxelNative addition (not part of stb_vorbis) ----------------------
+   Decode an in-memory Ogg Vorbis stream straight into a 16-bit PCM WAV file
+   in chunks, so a 4-minute music track never exists as one ~40 MB buffer in
+   memory. Returns samples per channel (>0) on success, <=0 on failure. */
+#include <stdio.h>
+static void cstb_put32(FILE *f, unsigned v) { unsigned char b[4] = { v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255 }; fwrite(b, 1, 4, f); }
+static void cstb_put16(FILE *f, unsigned v) { unsigned char b[2] = { v & 255, (v >> 8) & 255 }; fwrite(b, 1, 2, f); }
+int cstb_decode_to_wav_file(const unsigned char *mem, int len, const char *path, int *channels_out, int *sample_rate_out)
+{
+   int err = 0;
+   stb_vorbis *v = stb_vorbis_open_memory(mem, len, &err, NULL);
+   if (!v) return -1;
+   stb_vorbis_info info = stb_vorbis_get_info(v);
+   int channels = info.channels, rate = (int)info.sample_rate;
+   if (channels <= 0 || rate <= 0) { stb_vorbis_close(v); return -2; }
+   FILE *f = fopen(path, "wb");
+   if (!f) { stb_vorbis_close(v); return -3; }
+   /* header with placeholder sizes, patched at the end */
+   fwrite("RIFF", 1, 4, f); cstb_put32(f, 0); fwrite("WAVE", 1, 4, f);
+   fwrite("fmt ", 1, 4, f); cstb_put32(f, 16); cstb_put16(f, 1); cstb_put16(f, channels);
+   cstb_put32(f, rate); cstb_put32(f, rate * channels * 2); cstb_put16(f, channels * 2); cstb_put16(f, 16);
+   fwrite("data", 1, 4, f); cstb_put32(f, 0);
+   enum { CHUNK = 16384 };
+   short buf[CHUNK];
+   long total = 0;
+   for (;;) {
+      int n = stb_vorbis_get_samples_short_interleaved(v, channels, buf, CHUNK);
+      if (n <= 0) break;
+      fwrite(buf, sizeof(short), (size_t)n * channels, f);
+      total += n;
+   }
+   stb_vorbis_close(v);
+   unsigned data_bytes = (unsigned)(total * channels * 2);
+   fseek(f, 4, SEEK_SET); cstb_put32(f, 36 + data_bytes);
+   fseek(f, 40, SEEK_SET); cstb_put32(f, data_bytes);
+   fclose(f);
+   if (channels_out) *channels_out = channels;
+   if (sample_rate_out) *sample_rate_out = rate;
+   return total > 0 ? (int)total : 0;
+}

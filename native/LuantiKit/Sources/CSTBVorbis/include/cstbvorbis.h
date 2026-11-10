@@ -9,4 +9,9 @@ extern int stb_vorbis_decode_memory(const unsigned char *mem, int len,
                                     int *channels, int *sample_rate,
                                     short **output);
 
+/* Decode straight into a 16-bit PCM WAV file in chunks (no whole-track buffer).
+   Returns samples per channel (>0) on success, <=0 on failure. */
+extern int cstb_decode_to_wav_file(const unsigned char *mem, int len, const char *path,
+                                   int *channels, int *sample_rate);
+
 #endif

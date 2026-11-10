@@ -316,10 +316,11 @@ final class AudioManager: NSObject {
     /// 4-minute stereo track decoded to float is ~85 MB. Everything else is read
     /// into a buffer (and short effects cached).
     private func decode(_ ogg: Data, mono: Bool, allowStream: Bool) -> Decoded? {
-        guard let wav = Vorbis.decodeToWAV(ogg) else { return nil }
+        // Decoded in chunks straight to the file: the whole-track PCM buffer
+        // (~40 MB for a 4-minute song) no longer exists in memory.
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("snd-\(UUID().uuidString).wav")
+        guard Vorbis.decodeToWAVFile(ogg, url: url) else { return nil }
         do {
-            try wav.write(to: url)
             let file = try AVAudioFile(forReading: url)
             let secs = file.processingFormat.sampleRate > 0 ? Double(file.length) / file.processingFormat.sampleRate : 0
             if allowStream, !mono, secs >= 20 {

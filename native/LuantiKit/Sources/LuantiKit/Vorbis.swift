@@ -26,6 +26,21 @@ public enum Vorbis {
         return wav(pcm: pcm, dataBytes: dataBytes, channels: Int(channels), sampleRate: Int(sampleRate))
     }
 
+    /// Decode `ogg` straight into a WAV file at `url`, in 16K-sample chunks:
+    /// a 4-minute stereo track used to exist as one ~40 MB buffer (decoded
+    /// PCM plus the Data copy) at the moment music started. Returns false if
+    /// the data isn't decodable Vorbis or the file can't be written.
+    @discardableResult
+    public static func decodeToWAVFile(_ ogg: Data, url: URL) -> Bool {
+        var channels: Int32 = 0, rate: Int32 = 0
+        let n: Int32 = ogg.withUnsafeBytes { raw in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return -1 }
+            return cstb_decode_to_wav_file(base, Int32(ogg.count), url.path, &channels, &rate)
+        }
+        if n <= 0 { try? FileManager.default.removeItem(at: url) }
+        return n > 0
+    }
+
     private static func wav(pcm: UnsafeMutablePointer<Int16>, dataBytes: Int,
                             channels: Int, sampleRate: Int) -> Data {
         let bitsPerSample = 16
