@@ -5080,7 +5080,38 @@ final class WorldSession {
     /// `refresh`: the same open node form re-laid-out because its metadata
     /// changed (a furnace's flame and arrow); keeps the picked-up stack and
     /// hover, and doesn't log (it fires about once a second).
+    #if targetEnvironment(simulator)
+    /// Element types the form parser handles, plus structural ones it flattens
+    /// or can ignore without losing anything visible.
+    private static let knownFormElements: Set<String> = [
+        "size", "formspec_version", "real_coordinates", "no_prepend", "position", "anchor", "padding", "bgcolor", "listcolors",
+        "list", "listring", "image", "item_image", "label", "vertlabel", "button", "button_exit", "image_button", "image_button_exit",
+        "item_image_button", "background", "background9", "tooltip", "style", "style_type", "field", "textarea", "textlist",
+        "checkbox", "scrollbar", "scrollbaroptions", "scroll_container", "scroll_container_end", "container", "container_end",
+        "hypertext", "model", "tabheader", "set_focus", "field_close_on_enter", "field_enter_after_edit", "allow_close",
+    ]
+    /// -vrdev.formspecZoo 1 (tools/formspeczoo.sh opens every station): one
+    /// [fzoo] line per form with its element census and anything the parser
+    /// doesn't know, so a station using an unsupported element shows up.
+    private func formspecCensus(_ spec: String, name: String) {
+        var counts: [String: Int] = [:]
+        for chunk in spec.split(separator: "]") {
+            guard let br = chunk.firstIndex(of: "[") else { continue }
+            var ni = br
+            while ni > chunk.startIndex, { let c = chunk[chunk.index(before: ni)]; return c.isLetter || c.isNumber || c == "_" }() { ni = chunk.index(before: ni) }
+            let el = String(chunk[ni..<br])
+            if !el.isEmpty { counts[el, default: 0] += 1 }
+        }
+        let unknown = counts.keys.filter { !Self.knownFormElements.contains($0) }.sorted()
+        let census = counts.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }.joined(separator: " ")
+        print("[fzoo] form '\(name)' \(census)\(unknown.isEmpty ? "" : " UNKNOWN=\(unknown)")"); fflush(stdout)
+    }
+    #endif
+
     private func openFormspec(_ rawSpec0: String, _ name: String, inventory: Bool = false, refresh: Bool = false) {
+        #if targetEnvironment(simulator)
+        if !refresh, UserDefaults.standard.bool(forKey: "vrdev.formspecZoo") { formspecCensus(rawSpec0, name: name) }
+        #endif
         // An empty spec is a close request, but only for its own form: the
         // engine quits the open menu only when the formname is empty or matches
         // it, so a mod clearing its dialog can't shut a chest you have open.
