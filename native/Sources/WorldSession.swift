@@ -914,7 +914,7 @@ final class WorldSession {
                 let flatG = simd_normalize(SIMD3(g.x, 0, g.z)), flatT = simd_normalize(SIMD3(to.x, 0, to.z))
                 let yawOff = atan2(simd_cross(flatG, flatT).y, simd_dot(flatG, flatT)) * 180 / .pi
                 let pitchOff = (asin(to.y / simd_length(to)) - asin(g.y)) * 180 / .pi
-                d["panel"] = ["dist": r2(simd_length(to)), "yawOff": r2(yawOff), "pitchOff": r2(pitchOff), "scale": r2(invScale)]
+                d["panel"] = ["dist": r2(simd_length(to)), "yawOff": r2(yawOff), "pitchOff": r2(pitchOff), "scale": r2(invScale * invNear)]
             }
             if let n = noticeText { d["notice"] = n }
             if let pf = pendingButtonForm { d["buttonForm"] = pf.formname }
@@ -4889,8 +4889,11 @@ final class WorldSession {
     // wide. A wider form (Help 15, Player Settings 20 units) scales down to the
     // same width instead of running off to the side (invScale, per form).
     private var invScale: Float = 1
-    private var invCell: Float { 0.054 * invScale }
-    private var invPitch: Float { 0.062 * invScale }
+    /// Proximity factor: a panel pulled in front of a nearby wall shrinks by
+    /// the same ratio so it subtends the angle it would have at 0.9 m.
+    private var invNear: Float = 1
+    private var invCell: Float { 0.054 * invScale * invNear }
+    private var invPitch: Float { 0.062 * invScale * invNear }
     /// The open form's declared size[] (real-coordinate forms), so the backdrop
     /// covers the whole form like desktop and not just its content: Settings'
     /// text starts 1 unit in from the form's edge and sat flush on the
@@ -5407,7 +5410,19 @@ final class WorldSession {
         var f = player.aim(); f.y = 0
         let l = simd_length(f); f = l > 1e-3 ? f / l : player.bodyForward()
         let right = SIMD3<Float>(f.z, 0, -f.x)          // right of fwd in Luanti's left-handed frame
-        invAnchor = eye + f * 0.9 - SIMD3(0, 0.06, 0)
+        // Nose to a wall, the panel used to sit inside the rock (drawn on top
+        // of it, but at the wrong depth for the eyes). Pull it in front of the
+        // first solid along the gaze, a hand's width clear, and shrink it by
+        // the same ratio so it reads the same size.
+        let want: Float = 0.9
+        var d = want
+        if let hit = client.world.raycast(origin: eye, dir: f, maxDist: want + 0.2, pointable: { self.client.nodes.isWalkable($0) }),
+           hit.dist < want + 0.15 {
+            d = max(0.4, hit.dist - 0.15)
+            print("[inventory] wall \(String(format: "%.2f", hit.dist)) m ahead: panel at \(String(format: "%.2f", d)) m"); fflush(stdout)
+        }
+        invNear = d / want
+        invAnchor = eye + f * d - SIMD3(0, 0.06 * invNear, 0)
         invFrame = InvFrame(center: invAnchor!, right: right, up: SIMD3(0, 1, 0), fwd: f)
         layoutInventory()
     }
@@ -7299,7 +7314,7 @@ final class WorldSession {
             // normal size anyway, or Player Settings / Help read as specks.
             // 0.42 of a cell: the line renderer's quad spans the font's full
             // ascent+descent plus margins, so this matches the old ink-fitted 0.30.
-            let th = max(cell, 0.054 * 0.85) * 0.42
+            let th = max(cell, 0.054 * 0.85 * invNear) * 0.42
             // label[] doesn't wrap in Luanti, but one text layer is 256 px wide:
             // a long line ("mcl_inventory:clear_inventory_confirmation (Default:
             // true)") was cut at 48 chars. Draw it as consecutive <=40-char
