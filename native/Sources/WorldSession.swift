@@ -998,6 +998,7 @@ final class WorldSession {
                 } else if simd_distance(cur, pos) > 6 {
                     let sp = grounded(pos)
                     print("[session] teleport/respawn to \(pos) -> \(sp)"); fflush(stdout)
+                    self.dropPanels("teleported")
                     self.player.setSpawn(sp, yaw: -yaw, pitch: pitch)
                     // LocalPlayer::setPosition drops the sneak node: the glue would
                     // otherwise clamp us straight back toward the ledge we left.
@@ -1035,6 +1036,7 @@ final class WorldSession {
             self.hp = hp
             let dead = hp <= 0
             if dead != self.dead { print("[death] \(dead ? "died - press an action to respawn" : "respawned")"); fflush(stdout) }
+            if dead, !self.dead { self.dropPanels("died") }
             self.dead = dead
             self.player.setDead(dead)
         }
@@ -3330,7 +3332,7 @@ final class WorldSession {
             // With a panel open you can't tread water (jump is menu input), so
             // on desktop you sink; in VR that drifts you away from the panel
             // and, from the surface, under water. Hold the depth instead.
-            let panelUp = inventoryOpen || formspecOpen || keyboardOpen
+            let panelUp = inventoryOpen || formspecOpen || keyboardOpen || koganeMenuOpen
             let vy = player.buoyantVY(dt: dt, submerged: submerged, swimUp: gi.jump && !panelUp, hold: panelUp)
             // Sweep server knockback here too (like the land branch): you can be
             // pushed by explosions/mobs in water, and — importantly — this decays
@@ -4983,6 +4985,17 @@ final class WorldSession {
         }
         if loc.hasPrefix("detached:") { return client.detachedInventory(String(loc.dropFirst("detached:".count)), list: name) }
         return nil
+    }
+
+    /// Close whatever panel is up. A panel is anchored in the world around
+    /// you, so after a death or a long server move (portal, /teleport, respawn)
+    /// it would come along into a wall or face the wrong way; desktop's screen
+    /// GUI has no such problem, but it also closes on death.
+    private func dropPanels(_ why: String) {
+        guard inventoryOpen || formspecOpen || keyboardOpen else { return }
+        if keyboardOpen { closeKeyboard() }
+        if formspecOpen { closeFormspec() } else if inventoryOpen { toggleInventory() }
+        print("[inventory] closed (\(why))"); fflush(stdout)
     }
 
     private func toggleInventory() {
