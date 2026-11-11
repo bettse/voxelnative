@@ -178,7 +178,15 @@ public final class NodeRegistry {
     /// `buildable_to`: the node is replaceable (air, grass tufts, snow, water) so a
     /// placed block goes INTO it, not against it. Air's id defaults true.
     private var buildableTos: [UInt16: Bool] = [:]
-    public func isBuildableTo(_ id: UInt16) -> Bool { lock.withLockUnchecked { buildableTos[id] ?? (id == 0) } }
+    /// Air is always replaceable, defined or not (see isWalkable: NODEDEF
+    /// doesn't always carry an "air" entry). Without this the placement
+    /// prediction never fired for the ordinary case of placing into air: every
+    /// block waited a server round-trip, and the headset log showed hundreds
+    /// of "blocked (target not replaceable)" against a handful of predictions.
+    public func isBuildableTo(_ id: UInt16) -> Bool {
+        if id == WorldMap.CONTENT_AIR { return true }
+        return lock.withLockUnchecked { buildableTos[id] ?? false }
+    }
     /// Luanti's `rightclickable`: right-click runs on_rightclick (open door, use
     /// chest/button) instead of placing a node.
     private var rightclickables: [UInt16: Bool] = [:]

@@ -14,7 +14,9 @@ final class NodeDefTests: XCTestCase {
     // MARK: tests
 
     /// buildable_to: grass/snow are replaceable so a placed block lands in
-    /// them; solid nodes are not. Air (id 0) defaults true.
+    /// them; solid nodes are not. Air is replaceable even without a NODEDEF
+    /// entry (the server does not always send one): that is the ordinary
+    /// placement target, and the prediction gates on it.
     func testBuildableToFlagParsed() {
         let grass = NodeFixtures.node(name: "t:tallgrass", drawtype: 0, dugSound: "", walkable: false, buildableTo: true) { w in w.u8(6).u8(0) }
         let stone = NodeFixtures.node(name: "t:stone", drawtype: 0, dugSound: "") { w in w.u8(6).u8(0) }
@@ -22,7 +24,8 @@ final class NodeDefTests: XCTestCase {
         reg.parseNodeDef(NodeFixtures.nodedefPayload([(1, grass), (2, stone)]))
         XCTAssertTrue(reg.isBuildableTo(reg.id(for: "t:tallgrass")!))
         XCTAssertFalse(reg.isBuildableTo(reg.id(for: "t:stone")!))
-        XCTAssertTrue(reg.isBuildableTo(0), "air is replaceable")
+        XCTAssertTrue(reg.isBuildableTo(WorldMap.CONTENT_AIR), "air is replaceable")
+        XCTAssertFalse(reg.isBuildableTo(0), "an unknown id is not")
     }
 
     /// climbable: ladders (walkable) and vines (not walkable) carry the
