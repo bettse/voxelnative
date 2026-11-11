@@ -98,6 +98,8 @@ final class SimControl: @unchecked Sendable {
         memwarn                  (post a memory warning, like the Simulator's Debug menu)
         head <x> <z>             (move the fake head in the room, metres; physical locomotion test)
         state | slots | widgets | entities  (JSON, answered on the next game tick; entities = mobs within 24 nodes)
+        node <x> <y> <z>          (the node the client holds at that position)
+        give <item> [count]       (creative: move it from the creative list into hand slot 0, old stack to the trash)
         buttons: w a s d space shift e f r p i q esc enter shift-enter 1-9 b n left right
                  rt lt rgrip lgrip square triangle circle cross options create l3 r3
         """
@@ -110,6 +112,8 @@ final class SimControl: @unchecked Sendable {
         switch cmd {
         case "state", "slots", "widgets", "entities":
             return query(cmd)
+        case "node", "give":
+            return query(line)
         case "help":
             return Self.help.replacingOccurrences(of: "\n", with: " / ")
         case "memwarn":

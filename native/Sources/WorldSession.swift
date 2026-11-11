@@ -711,6 +711,47 @@ final class WorldSession {
         remeshCooldown = 0; dirty = true
         print("[zoo] placed rows z=\(base.z)...\(base.z + row * 2), flagged nodes from z=\(base.z + badRow * 2)"); fflush(stdout)
     }
+
+    private func runItemZoo() {
+        var kinds: [String: (total: Int, bad: Int)] = [:]
+        var badItems: [String] = []
+        for name in client.items.inventoryImage.keys.sorted() {
+            if name.isEmpty || name == "air" || name == "ignore" || name.hasPrefix("unknown") { continue }
+            let nid = client.nodes.id(for: name)
+            let isNode = nid != nil && nid != WorldMap.CONTENT_AIR
+            let kind = isNode ? "node" : (client.items.toolCaps[name] != nil ? "tool" : "craft")
+            var issues: [String] = []
+            let img = client.items.image(for: name) ?? ""
+            if !img.isEmpty {
+                let missing = NodeRegistry.imageNames(img).filter { $0 != "blank.png" && client.media.store[$0] == nil }
+                if !missing.isEmpty { issues.append("missing image " + missing.joined(separator: ",")) }
+                else if let px = TextureAtlas.evaluateModifiedFit(img, media: client.media, canvas: 16)?.px {
+                    let alpha = WieldMesh.alphaGrid(rgba: px, width: 16, height: 16, cells: 16)
+                    if alpha.allSatisfy({ !$0 }) { issues.append("icon fully transparent") }
+                } else { issues.append("icon failed to evaluate: \(img)") }
+            } else if !isNode {
+                issues.append("no inventory_image and not a node")
+            }
+            if let w = client.items.wieldImage(for: name) {
+                let missing = NodeRegistry.imageNames(w).filter { $0 != "blank.png" && client.media.store[$0] == nil }
+                if !missing.isEmpty { issues.append("missing wield_image " + missing.joined(separator: ",")) }
+            }
+            let pred = client.items.prediction(for: name) ?? (isNode ? name : "")
+            if !pred.isEmpty, client.nodes.id(for: pred) == nil { issues.append("prediction names unknown node \(pred)") }
+            for (label, snd) in [("sound_place", client.items.placeSound(for: name)), ("sound_place_failed", client.items.placeFailedSound(for: name))] {
+                if let snd, client.media.resolveSound(snd) == nil { issues.append("\(label) \(snd) has no file") }
+            }
+            var e = kinds[kind] ?? (0, 0)
+            e.total += 1
+            if !issues.isEmpty { e.bad += 1; badItems.append("\(name) [\(kind)]: " + issues.joined(separator: "; ")) }
+            kinds[kind] = e
+            print("[izoo] item \(name) kind=\(kind) pred=\(pred) liquids=\(client.items.isLiquidsPointable(name) ? 1 : 0) usable=\(client.items.isUsable(name) ? 1 : 0) eat=\(client.items.isEatable(name) ? 1 : 0)\(issues.isEmpty ? "" : " BAD")")
+        }
+        for (k, e) in kinds.sorted(by: { $0.key < $1.key }) { print("[izoo] \(k): \(e.total) items, \(e.bad) flagged") }
+        for line in badItems.prefix(300) { print("[izoo] BAD \(line)") }
+        print("[izoo] total \(kinds.values.reduce(0) { $0 + $1.total }) items, \(badItems.count) flagged"); fflush(stdout)
+    }
+    private var izooLastWield = ""
     #endif
 
     private func simTeleportToPad() {
@@ -790,6 +831,31 @@ final class WorldSession {
                 if let cd = inventoryStack(sl)?.customDescription { d["desc"] = String(cd.prefix(160)) }   // stack meta (enchant lines)
                 return d
             })
+        case _ where what.hasPrefix("node "):
+            let c = what.split(separator: " ").dropFirst().compactMap { Int($0) }
+            guard c.count == 3 else { return "err node x y z" }
+            let id = client.world.nodeId(SIMD3(c[0], c[1], c[2]))
+            let name = id == WorldMap.CONTENT_AIR ? "air" : id == WorldMap.CONTENT_IGNORE ? "ignore" : client.nodes.name(id)
+            return simJSON(["name": name, "id": Int(id)])
+        case _ where what.hasPrefix("give "):
+            // Creative mode only: the same inventory actions the desktop client
+            // sends when you click an item in the creative list, so a script
+            // can hand the player any item without a chat command (and its
+            // flood limit). The old hand stack goes to the trash first so the
+            // move lands in an empty cell.
+            let a = what.split(separator: " ").dropFirst().map(String.init)
+            guard let item = a.first else { return "err give <item> [count]" }
+            let count = a.count > 1 ? Int(a[1]) ?? 1 : 1
+            var found: (String, Int)? = nil
+            for inv in client.detachedInventoryNames() where inv.hasPrefix("creative_") {
+                if let list = client.detachedInventory(inv), let i = list.firstIndex(where: { $0?.name == item }) { found = (inv, i); break }
+            }
+            guard let (inv, idx) = found else { return "err \(item) is not in a creative list (open the creative inventory once)" }
+            if let st = client.inventory["main"]?.first ?? nil, st.count > 0, !st.name.isEmpty {
+                client.sendInventoryAction("Move \(st.count) current_player main 0 detached:trash main 0")
+            }
+            for _ in 0..<max(1, count) { client.sendInventoryAction("Move 1 detached:\(inv) main \(idx) current_player main 0") }
+            return "ok"
         case "entities":
             let me = player.physics().feet
             let near = client.objects.objects.values.filter { !$0.isPlayer && simd_distance($0.pos, me) < 24 }
@@ -816,6 +882,9 @@ final class WorldSession {
             let wi = client.wieldIndex
             var d: [String: Any] = [
                 "pos": [r2(f.x), r2(f.y), r2(f.z)],
+                "eye": r2(player.origin().y),
+                "ray": [r2(player.rayOrigin().x), r2(player.rayOrigin().y), r2(player.rayOrigin().z)],
+                "aim": [r2(player.aim().x), r2(player.aim().y), r2(player.aim().z)],
                 "yaw": r2(player.snapshot().yaw * 180 / .pi),
                 "pitch": r2(SimControl.shared.pitchDeg),
                 "hp": hp, "dead": dead, "flying": flying,
@@ -2762,6 +2831,16 @@ final class WorldSession {
         if !simZooDone, simSceneTimer > 12, UserDefaults.standard.bool(forKey: "vrdev.nodeZoo"), atlasBuilt, client.nodes.count > 100 {
             simZooDone = true
             runNodeZoo()
+        }
+        // -vrdev.itemZoo 1: the same sweep for items (tools/itemzoo.sh then
+        // holds and uses each one). Audits every registered item into [izoo]
+        // lines: icon images present and not fully transparent, wield_image
+        // present, the placement prediction names a real node, the place
+        // sounds have files. One "item" line per item carries what the script
+        // needs (kind, prediction, liquids_pointable, usable).
+        if !simZooDone, simSceneTimer > 12, UserDefaults.standard.bool(forKey: "vrdev.itemZoo"), atlasBuilt, client.items.count > 100 {
+            simZooDone = true
+            runItemZoo()
         }
         if !inventoryOpen, simSceneTimer > 8, UserDefaults.standard.bool(forKey: "vrdev.openInventory"), atlasBuilt { toggleInventory(); simSceneTimer = -1e9 }
         // -vrdev.invCycle 1: open at 8 s, close at 16 s, reopen at 20 s, so the
@@ -11499,6 +11578,26 @@ final class WorldSession {
             wieldCountLayer = Int32(r.layer); wieldCountAspect = r.aspect
         }
         #if targetEnvironment(simulator)
+        // -vrdev.itemZoo 1: one line per distinct held item saying how the hand
+        // draws it, logged BEFORE the fakeWield stub below so "none" (an item
+        // that shows nothing in the hand) is visible.
+        if let n = wieldName, UserDefaults.standard.bool(forKey: "vrdev.itemZoo") {
+            let k: String
+            switch wield {
+            case .block?: k = "block"
+            case .boxes?: k = "boxes"
+            case .mesh?: k = "mesh"
+            case .item?: k = "item"
+            case nil: k = "none"
+            }
+            // Logged again when the kind changes (an icon lands in the atlas a
+            // moment after the item arrives), so the last line per item counts.
+            if "\(n) \(k)" != izooLastWield {
+            izooLastWield = "\(n) \(k)"
+            let sil = wieldTile.flatMap { wieldSilhouette(for: $0) } != nil
+            print("[izoo] wield \(n) kind=\(k) sil=\(sil ? 1 : 0) tile=\(wieldTile ?? "-")"); fflush(stdout)
+            }
+        }
         // The sim dev account has an empty inventory, so nothing wields. Stub a
         // wield item + a few hotbar cells so the wield pose, wrist ring, and wear
         // bar can be screenshotted headless. Use a REAL opaque node (not the slot

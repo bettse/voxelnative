@@ -101,6 +101,7 @@ public final class Client {
     /// `detached:<name>` list location.
     public private(set) var detached: [String: [String: [ItemStack?]]] = [:]
     public func detachedInventory(_ name: String, list: String = "main") -> [ItemStack?]? { detached[name]?[list] }
+    public func detachedInventoryNames() -> [String] { Array(detached.keys) }
     public var onInventoryLists: (() -> Void)?
     /// TOCLIENT_MOVEMENT (0x45): server walk/fast/crouch/jump/gravity (node units).
     public var onMovement: ((_ walk: Float, _ fast: Float, _ crouch: Float, _ jump: Float, _ gravity: Float) -> Void)?
