@@ -242,10 +242,11 @@ final class PlayerState {
     /// Buoyant model: a short time constant (strong drag) keeps a fast entry
     /// from plummeting to the floor. Holding jump swims up; otherwise you sink
     /// slowly, a touch slower when fully submerged (a mild buoyant bias).
-    func buoyantVY(dt: Float, submerged: Bool = false, swimUp: Bool = false) -> Float {
+    /// `hold`: neither sink nor rise (a panel is open; see WorldSession).
+    func buoyantVY(dt: Float, submerged: Bool = false, swimUp: Bool = false, hold: Bool = false) -> Float {
         lock.lock(); defer { lock.unlock() }
         _grounded = false
-        let target: Float = swimUp ? _swimUp
+        let target: Float = hold ? 0 : swimUp ? _swimUp
             : (submerged ? PlayerState.liquidSubmergedSink : PlayerState.liquidSurfaceSink) * _liquidSinkScale
         let k = 1 - expf(-dt / PlayerState.liquidVerticalTau)
         _vy += (target - _vy) * k
@@ -366,6 +367,10 @@ final class PlayerState {
         return SIMD3<Float>(r.x, 0, r.z) / PlayerState.scale
     }
     func origin() -> SIMD3<Float> { lock.lock(); defer { lock.unlock() }; return _feet + SIMD3(0, _originLift, 0) - roomShift() }
+    /// The feet without the room offset: where the character is in the world
+    /// as far as things anchored to it (an open panel) are concerned. Walking
+    /// physically moves the feet AND the room shift together, so this stays put.
+    func worldFeet() -> SIMD3<Float> { lock.lock(); defer { lock.unlock() }; return _feet - roomShift() }
 
     /// Everything the per-frame world/sky uniform update reads, grabbed under a
     /// single lock instead of six separate acquisitions (snapshot, origin,

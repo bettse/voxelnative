@@ -3306,6 +3306,7 @@ final class WorldSession {
         // in a boat (the boat itself steers with left/right, sent as keys).
         player.integrate(worldVel: .zero, turn: turn, dt: dt)   // stick turn only; movement resolved below
         if gi.lookYaw != 0 { player.addYaw(gi.lookYaw) }        // mouse-look: a direct per-frame yaw delta
+        followPanels()
         // Riding: while the local player is attached to a vehicle, mirror
         // the vehicle's position instead of running our own locomotion/gravity
         // (which would leave the camera behind as the boat/horse moves). The
@@ -3326,7 +3327,11 @@ final class WorldSession {
             // overhang stops at the ceiling instead of clipping through it.
             // Settling onto the column floor falls out of the sweep.
             let (feet0, _, _) = player.physics()
-            let vy = player.buoyantVY(dt: dt, submerged: submerged, swimUp: gi.jump)
+            // With a panel open you can't tread water (jump is menu input), so
+            // on desktop you sink; in VR that drifts you away from the panel
+            // and, from the surface, under water. Hold the depth instead.
+            let panelUp = inventoryOpen || formspecOpen || keyboardOpen
+            let vy = player.buoyantVY(dt: dt, submerged: submerged, swimUp: gi.jump && !panelUp, hold: panelUp)
             // Sweep server knockback here too (like the land branch): you can be
             // pushed by explosions/mobs in water, and — importantly — this decays
             // the impulse. Skipping it left an impulse taken underwater sitting
@@ -5397,6 +5402,24 @@ final class WorldSession {
     /// Where the panel's content should centre (0.9 m ahead, a touch low); set
     /// on a fresh open, kept while one form replaces another.
     private var invAnchor: SIMD3<Float>?
+
+    /// An open panel rides along with the character: it is placed in the
+    /// world, and sinking in water, falling, a shove from a mob or a boat
+    /// used to leave it behind (Eric: open the inventory on water and it
+    /// drifts off as you sink). Only the character's own displacement counts;
+    /// walking physically around the room leaves the panel where it is.
+    private var panelFollowFeet: SIMD3<Float>? = nil
+    private func followPanels() {
+        guard inventoryOpen || formspecOpen || keyboardOpen else { panelFollowFeet = nil; return }
+        let feet = player.worldFeet()
+        defer { panelFollowFeet = feet }
+        guard let last = panelFollowFeet else { return }
+        let d = feet - last
+        guard simd_length_squared(d) > 1e-10 else { return }
+        if let fr = invFrame { invFrame = InvFrame(center: fr.center + d, right: fr.right, up: fr.up, fwd: fr.fwd) }
+        if let a = invAnchor { invAnchor = a + d }
+        if let k = keyboardFrame { keyboardFrame = InvFrame(center: k.center + d, right: k.right, up: k.up, fwd: k.fwd) }
+    }
 
     private func layoutInventory() {
         layoutInventoryContent()
