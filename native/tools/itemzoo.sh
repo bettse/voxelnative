@@ -210,7 +210,11 @@ for n, it in enumerate(items):
         el = time.time() - t0
         print(f"{n + 1}/{len(items)} ({el / 60:.0f} min, {el / (n + 1) * (len(items) - n - 1) / 60:.0f} to go)", flush=True)
 face(0); ctl("pitch 0")
-chat("/clearobjects quick", "/setblock 0,121,3 air")
+# Take the stage down so the other sim scenes start from a clean pad.
+chat("/clearobjects quick", "/setblock 0,121,3 air", "/setblock 0,120,3 air",
+     "/setblock -2,119,2 air", "/setblock -3,120,2 air", "/setblock -1,120,2 air", "/setblock -2,120,1 air", "/setblock -2,120,3 air",
+     "/setblock 2,120,2 air", "/setblock 2,119,2 air", "/setblock 3,120,2 air", "/setblock 1,120,2 air", "/setblock 2,120,1 air", "/setblock 2,120,3 air",
+     "/gamemode survival")
 print(f"done: {len(items)} items held, {placed_count} placed a node")
 print(f"hand did not show the item: {len(miss_held)}"); [print("  " + m) for m in miss_held[:50]]
 print(f"placed something other than predicted: {len(placed_other)}"); [print("  " + m) for m in placed_other[:100]]
