@@ -629,8 +629,13 @@ public final class TextureAtlas {
         // Only parentheses group; Luanti's '[' modifiers (^[colorize, ^[resize)
         // are prefixes with no closing ']', so counting brackets would wrongly
         // stop splitting '^' after the first one (the mcl_skins body chain bug).
-        var parts: [String] = []; var cur = ""; var depth = 0
+        // A backslash escapes the next character (Luanti's texture-string
+        // escaping, used inside [combine entries: "a.png\^[colorize\:#f00");
+        // both characters stay in the part, combineNative unescapes them.
+        var parts: [String] = []; var cur = ""; var depth = 0; var esc = false
         for ch in s {
+            if esc { cur.append(ch); esc = false; continue }
+            if ch == "\\" { cur.append(ch); esc = true; continue }
             if ch == "(" { depth += 1 }
             else if ch == ")" { depth = max(0, depth - 1) }
             if ch == sep && depth == 0 { parts.append(cur); cur = "" } else { cur.append(ch) }
@@ -808,8 +813,9 @@ public final class TextureAtlas {
             guard let eq = entry.firstIndex(of: "=") else { continue }
             let pos = entry[..<eq].split(separator: ",")
             guard pos.count == 2, let x = Int(pos[0]), let y = Int(pos[1]) else { continue }
-            let file = String(entry[entry.index(after: eq)...])
-            guard let img = nativeToken(file, media: media, depth: depth) else { continue }
+            let file = unescape(String(entry[entry.index(after: eq)...]))
+            // An entry is a whole texture string (base ^ modifiers), not one token.
+            guard let img = renderNative(file, media: media, depth: depth) else { continue }
             blitNative(&base, img, x: x, y: y)
         }
         return base
@@ -834,12 +840,27 @@ public final class TextureAtlas {
     /// Split on `sep` at top level, respecting only '(' ')' (so a nested group's
     /// ':' or ',' isn't split). Brackets are NOT treated as depth here.
     private static func splitParens(_ s: String, on sep: Character) -> [String] {
-        var parts: [String] = []; var cur = ""; var depth = 0
+        var parts: [String] = []; var cur = ""; var depth = 0; var esc = false
         for ch in s {
+            if esc { cur.append(ch); esc = false; continue }
+            if ch == "\\" { cur.append(ch); esc = true; continue }
             if ch == "(" { depth += 1 } else if ch == ")" { depth -= 1 }
             if ch == sep && depth == 0 { parts.append(cur); cur = "" } else { cur.append(ch) }
         }
         parts.append(cur); return parts
+    }
+
+    /// Drop the backslash escapes a [combine entry carries (imagesource.cpp
+    /// unescape_string): "a.png\^[colorize\:#f00" -> "a.png^[colorize:#f00".
+    static func unescape(_ s: String) -> String {
+        guard s.contains("\\") else { return s }
+        var out = ""; var esc = false
+        for ch in s {
+            if esc { out.append(ch); esc = false }
+            else if ch == "\\" { esc = true }
+            else { out.append(ch) }
+        }
+        return out
     }
 
     private static func decodePNGNative(_ data: Data) -> NativeImg? {

@@ -151,4 +151,18 @@ final class PixelModifierTests: XCTestCase {
         let half = at(native("red.png^[colorize:#0000ff80").px, 2, 2)
         XCTAssertEqual(half.r, 128, accuracy: 4); XCTAssertEqual(half.b, 128, accuracy: 4)
     }
+
+    /// A [combine entry can be a whole escaped texture string ("file\\^[mod\\:arg"),
+    /// the way VoxeLibre builds its banner preview icons; the escapes must not
+    /// split the string and must be dropped before the entry renders. They
+    /// used to render as nothing, so 600 preview icons were fully transparent.
+    func testCombineEntryWithEscapedModifiers() {
+        let spec = "[combine:16x16:0,0=lr.png\\^[transformFX:8,8=red.png"
+        let r = native(spec, canvas: 16).px
+        let tl = at(r, 1, 1, w: 16), br = at(r, 12, 12, w: 16), tr = at(r, 12, 1, w: 16)
+        XCTAssertEqual(tl.b, 255, "the flipped lr.png puts blue on the left")
+        XCTAssertEqual(tl.r, 0)
+        XCTAssertEqual(br.r, 255, "red.png blitted at 8,8")
+        XCTAssertEqual(tr.a, 0, "untouched canvas stays transparent")
+    }
 }
