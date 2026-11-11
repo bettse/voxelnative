@@ -8725,8 +8725,11 @@ final class WorldSession {
     /// flat slab instead).
     private func wieldSilhouette(for tile: String) -> B3DLoader.Mesh? {
         if let m = wieldSilCache[tile] { return m.positions.isEmpty ? nil : m }
-        guard wieldSilCache.count < 128,
-              let px = TextureAtlas.evaluateModifiedFit(tile, media: client.media, canvas: 16)?.px else { return nil }
+        // Bounded, but by dropping the cache, not by refusing: a session that
+        // has held 128 distinct items used to get a flat slab for every item
+        // after that (the item zoo held 545 and exactly 128 had a silhouette).
+        if wieldSilCache.count >= 128 { wieldSilCache.removeAll(keepingCapacity: true) }
+        guard let px = TextureAtlas.evaluateModifiedFit(tile, media: client.media, canvas: 16)?.px else { return nil }
         let alpha = WieldMesh.alphaGrid(rgba: px, width: 16, height: 16, cells: 16)
         let mesh: B3DLoader.Mesh = (alpha.allSatisfy { $0 }) || (alpha.allSatisfy { !$0 })
             ? B3DLoader.Mesh(positions: [], uvs: [], indices: [], textureName: "", minBounds: .zero, maxBounds: .zero)
