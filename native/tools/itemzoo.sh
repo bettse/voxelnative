@@ -77,7 +77,7 @@ def ensure_clear():
 # Stage, from the pad at (0.5,121,0.5) facing +z: a stone ahead whose top is
 # the placement cell (0,121,3); a cow in a fenced 1x1 pen down-left at
 # (-2,120,2); a water source in a stone-lined hole down-right at (2,120,2).
-chat("/gamemode creative", "/teleport 0 140 0", "/teleport 0 121 0")
+chat("/gamemode creative", "/clearinv", "/teleport 0 140 0", "/teleport 0 121 0")
 time.sleep(2)
 st = q("state"); ctl(f"turn {-st['yaw']}", "pitch 0", "tap 1")
 def yaw_now():
@@ -214,7 +214,7 @@ face(0); ctl("pitch 0")
 chat("/clearobjects quick", "/setblock 0,121,3 air", "/setblock 0,120,3 air",
      "/setblock -2,119,2 air", "/setblock -3,120,2 air", "/setblock -1,120,2 air", "/setblock -2,120,1 air", "/setblock -2,120,3 air",
      "/setblock 2,120,2 air", "/setblock 2,119,2 air", "/setblock 3,120,2 air", "/setblock 1,120,2 air", "/setblock 2,120,1 air", "/setblock 2,120,3 air",
-     "/gamemode survival")
+     "/clearinv", "/gamemode survival")
 print(f"done: {len(items)} items held, {placed_count} placed a node")
 print(f"hand did not show the item: {len(miss_held)}"); [print("  " + m) for m in miss_held[:50]]
 print(f"placed something other than predicted: {len(placed_other)}"); [print("  " + m) for m in placed_other[:100]]
