@@ -77,8 +77,11 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
       <summary>Map settings (map_meta.txt)</summary>
       <textarea id="meta" spellcheck="false"></textarea>
       <p>Paste the server's map_meta.txt to use its noise settings. The default is VoxeLibre's mapgen v7 as shipped.</p>
+      <p><label for="cpu">Server CPU (stronghold rings)</label><br>
+        <select id="cpu"><option value="x86">x86 (most Linux servers)</option><option value="arm64">Apple silicon</option></select></p>
+      <p>Stronghold positions come from the seed through a 64-bit integer cast that the two CPU families do differently. Pick the one the server runs on; the other choice is a wrong set of rings, not a slightly different one.</p>
     </details>
-    <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit; checked against a headless render of the same seed. Villages, outposts and temples reshape the ground where they stand and are not drawn yet. Caves that open at the surface are not carved.</p>
+    <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit, and landmarks follow the engine's decoration placer and VoxeLibre's placement rules; both checked against a headless render of the same seed. A village marked with ? is a chunk where the game attempts one; whether it is built depends on terrain checks the map approximates. Caves that open at the surface are not carved.</p>
     <p>Overworld sea level is y = 1. Hover for height and biome; drag to pan, scroll or pinch to zoom.</p>
   </aside>
 </main>
@@ -90,7 +93,12 @@ self.onmessage = function (e) {
   if (m.type === "init") {
     self.gen = makeGen(parseMapMeta(m.meta), m.biomes);
     self.biomeIndex = new Map(m.biomes.map((b, i) => [b.name, i]));
-    postMessage({ type: "ready" });
+    self.structs = makeStructures(self.gen, m.decos, m.structs, m.groups);
+    postMessage({ type: "ready", strongholds: self.structs.strongholds(m.cpu) });
+    return;
+  }
+  if (m.type === "chunk") {
+    postMessage({ type: "chunk", id: m.id, ox: m.ox, oz: m.oz, list: self.structs.chunkStructures(m.ox, m.oz) });
     return;
   }
   if (m.type === "tile") {
@@ -109,6 +117,17 @@ self.onmessage = function (e) {
 
 <script>
 const BIOMES = /*__BIOMES__*/;
+const DECOS = /*__DECOS__*/;
+const STRUCTS = /*__STRUCTS__*/;
+const GROUPS = /*__GROUPS__*/;
+const KIND = {   // landmark kinds: label and marker colour
+  village: ["Village", "#f2c232"], pillager_outpost: ["Pillager outpost", "#e05a3a"], desert_temple: ["Desert temple", "#e8c76a"],
+  jungle_temple: ["Jungle temple", "#5fbf5a"], witch_hut: ["Witch hut", "#9c6ad6"], igloo: ["Igloo", "#bfe6ff"],
+  woodland_cabin: ["Woodland mansion", "#8a5a3a"], ruined_portal_overworld: ["Ruined portal", "#c58cff"],
+  shipwreck: ["Shipwreck", "#7fb8e6"], ocean_temple: ["Ocean monument", "#3fd1c8"], cold_ocean_ruins: ["Ocean ruins", "#7fb8e6"],
+  warm_ocean_ruins: ["Ocean ruins", "#7fb8e6"], desert_well: ["Desert well", "#e8c76a"], stronghold: ["Stronghold", "#ff4d6d"],
+};
+const kindInfo = k => KIND[k] || [k.replace(/_/g, " "), "#dddddd"];
 const META_DEFAULT = /*__META__*/;
 const SAMPLE_SEED = "11002241683599094559";   // the dev world used to check the port
 const PALETTE = [
@@ -131,6 +150,10 @@ const seedIn = document.getElementById("seed"), metaIn = document.getElementById
 let zoom = 2, cx = 0, cz = 0;                  // node coordinates at the canvas centre
 let tiles = new Map(), pending = new Map(), worker = null, ready = false, nextId = 1, generation = 0;
 let marker = null;
+let chunks = new Map(), chunkPending = new Map(), strongholdList = [];
+const CHUNK = 80, chunkOrigin = v => Math.floor((v + 32) / CHUNK) * CHUNK - 32;
+const cpuSel = document.getElementById("cpu");
+try { const c = localStorage.getItem("seedmap.cpu"); if (c) cpuSel.value = c; } catch (_) {}
 const WATER_LEVEL = 1;
 seedIn.value = SAMPLE_SEED; metaIn.value = META_DEFAULT;
 try { const s = localStorage.getItem("seedmap.seed"); if (s) seedIn.value = s; const m = localStorage.getItem("seedmap.meta"); if (m) metaIn.value = m; } catch (_) {}
@@ -183,7 +206,20 @@ function request() {
     pending.set(id, tx + "," + tz);
     worker.postMessage({ type: "tile", id, x0: tx, z0: tz, n: TILE });
   }
-  status.textContent = pending.size ? `generating ${pending.size + want.length} tiles` : `${tiles.size} tiles · ${zoom}× · seed ${seedIn.value.trim()}`;
+  // structures per 80-node chunk, after the tiles in view
+  const cwant = [];
+  for (let cz = chunkOrigin(z0); cz <= z1; cz += CHUNK) for (let cxx = chunkOrigin(x0); cxx <= x1; cxx += CHUNK) {
+    const key = cxx + "," + cz;
+    if (chunks.has(key) || [...chunkPending.values()].includes(key)) continue;
+    cwant.push([cxx, cz, (cxx + CHUNK / 2 - cx) ** 2 + (cz + CHUNK / 2 - cz) ** 2]);
+  }
+  cwant.sort((a, b) => a[2] - b[2]);
+  while (!want.length && pending.size < 6 && chunkPending.size < 2 && cwant.length) {
+    const [cxx, cz] = cwant.shift(); const id = nextId++;
+    chunkPending.set(id, cxx + "," + cz);
+    worker.postMessage({ type: "chunk", id, ox: cxx, oz: cz });
+  }
+  status.textContent = pending.size ? `generating ${pending.size + want.length} tiles` : chunkPending.size ? `placing structures (${chunkPending.size + cwant.length} chunks)` : `${tiles.size} tiles · ${zoom}× · seed ${seedIn.value.trim()}`;
   if (!pending.size) updateLegend();
 }
 
@@ -196,6 +232,25 @@ function draw() {
     const px = (tx - cx) * zoom + W / 2, py = (tz - cz) * zoom + H / 2;
     if (px > W || py > H || px + TILE * zoom < 0 || py + TILE * zoom < 0) continue;
     ctx.drawImage(t.img, Math.round(px), Math.round(py), TILE * zoom, TILE * zoom);
+  }
+  // landmarks: a dot with a label at 2x and up; strongholds from the seed
+  const all = [];
+  for (const list of chunks.values()) for (const p of list) all.push(p);
+  for (const p of strongholdList) all.push(p);
+  ctx.font = "500 11px " + getComputedStyle(document.body).getPropertyValue("--font");
+  ctx.textBaseline = "middle";
+  for (const p of all) {
+    const px = (p.x + 0.5 - cx) * zoom + W / 2, py = (p.z + 0.5 - cz) * zoom + H / 2;
+    if (px < -80 || py < -20 || px > W + 80 || py > H + 20) continue;
+    const [label, colour] = kindInfo(p.kind);
+    ctx.fillStyle = colour; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (zoom >= 2) {
+      const text = label + (p.note === "centre of the attempt" ? "?" : "");
+      const tw = ctx.measureText(text).width;
+      ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(px + 8, py - 8, tw + 8, 16);
+      ctx.fillStyle = "#fff"; ctx.fillText(text, px + 12, py);
+    }
   }
   // origin cross and the marker
   ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1;
@@ -240,7 +295,11 @@ canvas.addEventListener("pointermove", (e) => {
   const r = canvas.getBoundingClientRect();
   const x = Math.floor(cx + (e.clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz + (e.clientY - r.top - r.height / 2) / zoom);
   const c = columnAt(x, z);
-  readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + (c ? (c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`) : "not generated yet");
+  let near = null, nd = 12 / zoom;
+  for (const list of chunks.values()) for (const p of list) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
+  for (const p of strongholdList) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
+  readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + (c ? (c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`) : "not generated yet")
+    + (near ? `<br><span style="color:${kindInfo(near.kind)[1]}">●</span> ${kindInfo(near.kind)[0]} at ${near.x}, ${near.z}${near.note ? " (" + near.note + ")" : ""}` : "");
 });
 canvas.addEventListener("pointerup", () => { if (drag) { drag = null; request(); } });
 canvas.addEventListener("pointercancel", () => { drag = null; });
@@ -259,7 +318,7 @@ function parseXZ(s) { const m = s.match(/(-?\d+)\s*[, ]\s*(-?\d+)/); return m ? 
 document.getElementById("goto").addEventListener("change", (e) => { const p = parseXZ(e.target.value); if (p) { cx = p[0]; cz = p[1]; draw(); request(); } });
 document.getElementById("mark").addEventListener("change", (e) => { marker = parseXZ(e.target.value); if (marker) { cx = marker[0]; cz = marker[1]; } draw(); request(); });
 function generate() {
-  try { localStorage.setItem("seedmap.seed", seedIn.value.trim()); localStorage.setItem("seedmap.meta", metaIn.value); } catch (_) {}
+  try { localStorage.setItem("seedmap.seed", seedIn.value.trim()); localStorage.setItem("seedmap.meta", metaIn.value); localStorage.setItem("seedmap.cpu", cpuSel.value); } catch (_) {}
   status.textContent = "starting";
   const meta = metaWithSeed();
   if (worker) worker.terminate();
@@ -267,14 +326,16 @@ function generate() {
   const src = document.getElementById("genSrc").textContent;
   worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
   const gen = generation;
+  chunks = new Map(); chunkPending = new Map(); strongholdList = [];
   worker.onmessage = (e) => {
     if (gen !== generation) return;
     const m = e.data;
-    if (m.type === "ready") { ready = true; request(); return; }
+    if (m.type === "ready") { ready = true; strongholdList = m.strongholds || []; request(); return; }
     if (m.type === "tile") { pending.delete(m.id); tiles.set(m.x0 + "," + m.z0, paintTile(m)); draw(); request(); }
+    if (m.type === "chunk") { chunkPending.delete(m.id); chunks.set(m.ox + "," + m.oz, m.list); draw(); request(); }
   };
   worker.onerror = (e) => { status.textContent = "generator error: " + e.message; };
-  worker.postMessage({ type: "init", meta, biomes: BIOMES });
+  worker.postMessage({ type: "init", meta, biomes: BIOMES, decos: DECOS, structs: STRUCTS, groups: GROUPS, cpu: cpuSel.value });
   draw();
 }
 document.getElementById("go").addEventListener("click", generate);

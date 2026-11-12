@@ -121,6 +121,68 @@ local function scan()
 			def.max_pos and string.format("[%d,%d,%d]", def.max_pos.x, def.max_pos.y, def.max_pos.z) or "null")
 	end
 	write("worldmap_biomes.json", "[" .. table.concat(bl, ",") .. "]\n")
+	-- Every registered decoration as the engine resolved it, for a port of the
+	-- decoration placer: VoxeLibre's structures are decorations with a
+	-- gen_callback. Registration order is the engine's placement order.
+	-- Keyed by the engine's handle (placement order and the per-decoration
+	-- blockseed offset); a named decoration appears under its name too.
+	local dl, seen = {}, {}
+	for id, def in pairs(minetest.registered_decorations) do
+		local handle = tonumber(id) or (def.name and minetest.get_decoration_id(def.name))
+		if handle and not seen[handle] then
+			seen[handle] = true
+			local np = def.noise_params
+			dl[#dl + 1] = {
+				id = handle, name = def.name or "", deco_type = def.deco_type,
+				place_on = def.place_on, spawn_by = def.spawn_by, num_spawn_by = def.num_spawn_by or -1,
+				sidelen = def.sidelen or 8, fill_ratio = def.fill_ratio or 0.02,
+				noise_params = np and { offset = np.offset or 0, scale = np.scale or 1,
+					spread = np.spread and { np.spread.x, np.spread.y, np.spread.z } or { 1, 1, 1 },
+					seed = np.seed or 0, octaves = np.octaves or 1, persist = np.persist or np.persistence or 0.5,
+					lacunarity = np.lacunarity or 2, flags = np.flags or "defaults" } or nil,
+				biomes = def.biomes, y_min = def.y_min or -31000, y_max = def.y_max or 31000, flags = def.flags or "",
+				schematic = type(def.schematic) == "string" and def.schematic or (type(def.schematic) == "table" and "table" or ""),
+				place_offset_y = def.place_offset_y or 0, height = def.height or 1, height_max = def.height_max or 0,
+				decoration = def.decoration, gen_callback = def.gen_callback and true or false,
+				struct = def.mcl_structure_name,
+			}
+		end
+	end
+	write("worldmap_decorations.json", minetest.write_json(dl) .. "\n")
+	-- Node names behind each "group:x" a decoration places on, and the
+	-- structure table (what place_structure checks before it builds).
+	local groups = {}
+	for _, d in ipairs(dl) do
+		for _, list in ipairs({ d.place_on or {}, d.spawn_by or {} }) do
+			for _, n in ipairs(type(list) == "table" and list or { list }) do
+				local g = n:match("^group:(.+)$")
+				if g and not groups[g] then
+					local names = {}
+					for nn, nd in pairs(minetest.registered_nodes) do
+						if nd.groups and (nd.groups[g] or 0) > 0 then names[#names + 1] = nn end
+					end
+					table.sort(names)
+					groups[g] = names
+				end
+			end
+		end
+	end
+	write("worldmap_groups.json", minetest.write_json(groups) .. "\n")
+	local sl = {}
+	if minetest.global_exists("mcl_structures") then
+		for name, def in pairs(mcl_structures.registered_structures) do
+			sl[#sl + 1] = {
+				name = name, sidelen = def.sidelen, solid_ground = def.solid_ground and true or false,
+				make_foundation = def.make_foundation and true or false, chunk_probability = def.chunk_probability,
+				y_offset = type(def.y_offset) == "function" and "function" or (def.y_offset or 0),
+				on_place = def.on_place and true or false, place_func = def.place_func and true or false,
+				filenames = def.filenames and #def.filenames or 0, terrain_feature = def.terrain_feature and true or false,
+				static_pos = def.static_pos and #def.static_pos or 0, y_min = def.y_min, y_max = def.y_max,
+				biomes = def.biomes, place_on = def.place_on, fill_ratio = def.fill_ratio, flags = def.flags,
+			}
+		end
+	end
+	write("worldmap_structures.json", minetest.write_json(sl) .. "\n")
 
 	-- Strongholds come straight from the seed (rings around the origin), so
 	-- list all of them, generated here or not.
