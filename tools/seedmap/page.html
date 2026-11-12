@@ -82,7 +82,7 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
         This seed is 2<sup>63</sup> or more, and the stronghold rings then depend on how the server's CPU converts it to an integer. Pick the one the server runs on; the other choice is a different set of rings. Seeds below 2<sup>63</sup> convert the same way everywhere.</p>
     </details>
     <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit, and landmarks follow the engine's decoration placer and VoxeLibre's placement rules; both checked against a headless render of the same seed. A village marked with ? is a chunk where the game attempts one; whether it is built depends on terrain checks the map approximates. Caves that open at the surface are not carved.</p>
-    <p>Overworld sea level is y = 1. Hover for height and biome; drag to pan, scroll or pinch to zoom.</p>
+    <p>North (+z) is up and east (+x) is right, as on the game's minimap. Overworld sea level is y = 1. Hover for height and biome; drag to pan, scroll or pinch to zoom.</p>
   </aside>
 </main>
 
@@ -198,12 +198,12 @@ function paintTile(m) {
       if (m.b[k] !== 65535 && !/ocean|river|water/i.test(BIOMES[m.b[k]].name)) { r = r * 0.7 + c[0] * 0.3; g = g * 0.7 + c[1] * 0.3; b = b * 0.7 + c[2] * 0.3; }
     } else {
       const e = i + 1 < n ? m.h[k + 1] : y, s = j + 1 < n ? m.h[k + n] : y;
-      const slope = (y - e) + (y - s);                 // light from the north-west
+      const slope = (y - e) + (y - s);                 // s is the +z (north) neighbour: light from the north-east
       const shade = Math.max(0.6, Math.min(1.25, 1 + slope * 0.06));
       const alt = Math.max(0, Math.min(1, (y - 60) / 60)); // high ground fades toward stone grey
       r = (r * (1 - alt) + 140 * alt) * shade; g = (g * (1 - alt) + 140 * alt) * shade; b = (b * (1 - alt) + 140 * alt) * shade;
     }
-    const o = k * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    const o = ((n - 1 - j) * n + i) * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;   // north (+z) at the top
   }
   const off = document.createElement("canvas"); off.width = n; off.height = n; off.getContext("2d").putImageData(img, 0, 0);
   return { img: off, h: m.h, w: m.w, b: m.b, f: m.f, step: m.step || 1 };
@@ -251,7 +251,7 @@ function draw() {
   for (const [key, t] of tiles) {
     if (t.step !== step) continue;
     const [tx, tz] = key.slice(key.indexOf(":") + 1).split(",").map(Number);
-    const px = (tx - cx) * zoom + W / 2, py = (tz - cz) * zoom + H / 2;
+    const px = (tx - cx) * zoom + W / 2, py = (cz - (tz + TS)) * zoom + H / 2;   // north up: +z runs toward the top
     if (px > W || py > H || px + TS * zoom < 0 || py + TS * zoom < 0) continue;
     ctx.drawImage(t.img, Math.round(px), Math.round(py), TS * zoom, TS * zoom);
   }
@@ -262,7 +262,7 @@ function draw() {
   ctx.font = "500 11px " + getComputedStyle(document.body).getPropertyValue("--font");
   ctx.textBaseline = "middle";
   for (const p of all) {
-    const px = (p.x + 0.5 - cx) * zoom + W / 2, py = (p.z + 0.5 - cz) * zoom + H / 2;
+    const px = (p.x + 0.5 - cx) * zoom + W / 2, py = (cz - (p.z + 0.5)) * zoom + H / 2;
     if (px < -80 || py < -20 || px > W + 80 || py > H + 20) continue;
     const [label, colour] = kindInfo(p.kind);
     ctx.fillStyle = colour; ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 1.5;
@@ -276,10 +276,10 @@ function draw() {
   }
   // origin cross and the marker
   ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1;
-  const ox = (0 - cx) * zoom + W / 2, oz = (0 - cz) * zoom + H / 2;
+  const ox = (0 - cx) * zoom + W / 2, oz = (cz - 0) * zoom + H / 2;
   ctx.beginPath(); ctx.moveTo(ox - 6, oz); ctx.lineTo(ox + 6, oz); ctx.moveTo(ox, oz - 6); ctx.lineTo(ox, oz + 6); ctx.stroke();
   if (marker) {
-    const mx = (marker[0] + 0.5 - cx) * zoom + W / 2, mz = (marker[1] + 0.5 - cz) * zoom + H / 2;
+    const mx = (marker[0] + 0.5 - cx) * zoom + W / 2, mz = (cz - (marker[1] + 0.5)) * zoom + H / 2;
     ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#b5472b"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(mx, mz, 7, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(mx, mz - 11); ctx.lineTo(mx, mz + 11); ctx.moveTo(mx - 11, mz); ctx.lineTo(mx + 11, mz); ctx.stroke();
@@ -299,7 +299,7 @@ function updateLegend() {
   for (const [key, t] of tiles) {
     if (t.step !== step) continue;
     const [tx, tz] = key.slice(key.indexOf(":") + 1).split(",").map(Number);
-    if ((tx - cx) * zoom + W / 2 > W || (tz - cz) * zoom + H / 2 > H || (tx + TS - cx) * zoom + W / 2 < 0 || (tz + TS - cz) * zoom + H / 2 < 0) continue;
+    if ((tx - cx) * zoom + W / 2 > W || (cz - (tz + TS)) * zoom + H / 2 > H || (tx + TS - cx) * zoom + W / 2 < 0 || (cz - tz) * zoom + H / 2 < 0) continue;
     for (let k = 0; k < t.b.length; k++) counts.set(t.b[k], (counts.get(t.b[k]) || 0) + 1);
   }
   const rows = [...counts].filter(([i]) => i !== 65535).sort((a, b) => b[1] - a[1]).slice(0, 18);
@@ -316,9 +316,9 @@ new ResizeObserver(resize).observe(canvas);
 let drag = null;
 canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, cx, cz }; canvas.setPointerCapture(e.pointerId); });
 canvas.addEventListener("pointermove", (e) => {
-  if (drag) { cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz - (e.clientY - drag.y) / zoom; draw(); saveView(); return; }
+  if (drag) { cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz + (e.clientY - drag.y) / zoom; draw(); saveView(); return; }
   const r = canvas.getBoundingClientRect();
-  const x = Math.floor(cx + (e.clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz + (e.clientY - r.top - r.height / 2) / zoom);
+  const x = Math.floor(cx + (e.clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz - (e.clientY - r.top - r.height / 2) / zoom);
   const c = columnAt(x, z);
   let near = null, nd = 12 / zoom;
   for (const list of chunks.values()) for (const p of list) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
