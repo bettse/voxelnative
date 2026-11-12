@@ -6706,6 +6706,9 @@ final class WorldSession {
     // the centre. It doubles as a compass: an N rides the rim at true north.
     private var minimapLayer = -1               // model-array layer of the disk
     private var minimapArrowLayer = -1
+    private var minimapNeedleLayer = -1         // the north needle on the rim
+    private var minimapDrawn = false            // this frame: top-right HUD elements move left
+    private static let minimapRadiusPx: Float = 210   // nominal HUD px
     private var minimapBuiltAt: Double = 0
     private var minimapCentre = SIMD3<Int>(Int.min, Int.min, Int.min)
     private var minimapColors: [UInt16: SIMD3<Float>] = [:]   // top-tile average colour per content id
@@ -6808,6 +6811,7 @@ final class WorldSession {
         }
         if minimapLayer < 0 { minimapLayer = registerRGBALayer("#minimap", px) } else { updateModelLayer(minimapLayer, px) }
         if minimapArrowLayer < 0 { minimapArrowLayer = registerRGBALayer("#minimaparrow", Self.renderMinimapArrow(canvas: N)) }
+        if minimapNeedleLayer < 0 { minimapNeedleLayer = registerRGBALayer("#minimapneedle", Self.renderMinimapNeedle(canvas: N)) }
         minimapCentre = SIMD3(cx, cy, cz); minimapBuiltAt = AppClock.seconds
     }
 
@@ -6830,13 +6834,35 @@ final class WorldSession {
         return px
     }
 
-    /// Draw the disk head-locked in the upper right (under the potion-effect
-    /// icons when any are up), turned so the way you look is up; the arrow and
-    /// the N stay upright. Gaze with no horizontal part (looking straight up or
-    /// down) falls back to the body's yaw.
+    /// The north needle: a slim kite in brushed steel, tip up, lit on the left,
+    /// dark outline. Alpha 0 elsewhere.
+    private static func renderMinimapNeedle(canvas n: Int) -> [UInt8] {
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        let c = Float(n) * 0.5
+        func inside(_ u: Float, _ w: Float, _ k: Float) -> Bool {   // tip (0, .9), sides (+-.5, .1), tail (0, -.9)
+            let a = abs(u) / k, b = w / k
+            if b > 0.1 { return b <= 0.9 && a <= 0.5 * (0.9 - b) / 0.8 }
+            return b >= -0.9 && a <= 0.5 * (b + 0.9) / 1.0
+        }
+        for y in 0..<n { for x in 0..<n {
+            let u = (Float(x) + 0.5 - c) / c, w = (c - Float(y) - 0.5) / c
+            let o = (y * n + x) * 4
+            if inside(u, w, 1) {
+                let g = (u < 0 ? 215 : 150) - abs(w) * 45
+                let v = UInt8(max(0, min(255, g)))
+                px[o] = v; px[o + 1] = v; px[o + 2] = UInt8(min(255, Int(v) + 8)); px[o + 3] = 255
+            } else if inside(u, w, 1.45) { px[o] = 32; px[o + 1] = 32; px[o + 2] = 38; px[o + 3] = 255 }
+        } }
+        return px
+    }
+
+    /// Draw the disk head-locked in the top-right corner, turned so the way you
+    /// look is up; the arrow stays upright and the needle points along the
+    /// map's north. Gaze with no horizontal part (looking straight up or down)
+    /// falls back to the body's yaw.
     private func appendMinimap(feet: SIMD3<Float>, gaze: SIMD3<Float>, bodyYaw: Float,
                                v: inout [Float], idx: inout [UInt32]) {
-        guard minimapLayer >= 0, highlightLayer >= 0 else { return }
+        guard minimapLayer >= 0 else { return }
         let hx = frameHeadXform
         let headPos = SIMD3<Float>(hx.columns.3.x, hx.columns.3.y, hx.columns.3.z)
         let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
@@ -6844,9 +6870,8 @@ final class WorldSession {
         let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
         let D = Self.hudDepth * hudK
         let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x, ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
-        let effects = client.hudElements.values.contains { $0.type == 0 && $0.pos.x >= 0.99 && $0.pos.y <= 0.01 && !$0.text.isEmpty }
-        let radiusPx: Float = 210                 // nominal HUD px
-        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, (effects ? 210 : 30) + radiusPx)
+        let radiusPx = Self.minimapRadiusPx
+        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, 30 + radiusPx)
         let az = (cpx.x - Self.hudScreen.x / 2) * kx, el = (Self.hudScreen.y / 2 - cpx.y) * ky
         let centre = headPos + hf * D + hr * (tan(az) * D) + hu * (tan(el) * D)
         let hs = tan(radiusPx * kx) * D
@@ -6860,25 +6885,17 @@ final class WorldSession {
         // exact spot; the texture only repaints when you change node.
         let k = hs * Float(Self.minimapPx) / (Float(ModelTextureHandoff.size) * 0.5)
         let mc = centre - east * ((feet.x - floor(feet.x)) * k) - north * ((feet.z - floor(feet.z)) * k)
-        let corners = [mc - east * hs + north * hs, mc + east * hs + north * hs,
-                       mc + east * hs - north * hs, mc - east * hs - north * hs]
-        let base = UInt32(v.count / 9)
-        for (i, p) in corners.enumerated() {
-            pushV(&v, p.x, p.y, p.z, Self.quadUVsTL[i].0, Self.quadUVsTL[i].1, Float(minimapLayer), 1.0, 255, 16777215)
+        func quad(_ c: SIMD3<Float>, _ r: SIMD3<Float>, _ u: SIMD3<Float>, _ hw: Float, _ hh: Float, _ layer: Int) {
+            let corners = [c - r * hw + u * hh, c + r * hw + u * hh, c + r * hw - u * hh, c - r * hw - u * hh]
+            let base = UInt32(v.count / 9)
+            for (i, p) in corners.enumerated() {
+                pushV(&v, p.x, p.y, p.z, Self.quadUVsTL[i].0, Self.quadUVsTL[i].1, Float(layer), 1.0, 255, 16777215)
+            }
+            pushQuad(&idx, base)
         }
-        pushQuad(&idx, base)
-        if minimapArrowLayer >= 0 {
-            appendQuad(center: centre - hf * 0.002, right: hr, up: hu, hw: hs * 0.1, hh: hs * 0.1,
-                       layer: minimapArrowLayer, tint: 16777215, v: &v, idx: &idx)
-        }
-        if let t = hudTextLayer(id: 3_200_000, text: "N") {
-            let th = hs * 0.13, tw = th * max(0.4, t.aspect)
-            let np = centre + north * (hs * 0.84) - hf * 0.002
-            appendQuad(center: np, right: hr, up: hu, hw: tw + 0.004, hh: th + 0.003,
-                       layer: highlightLayer, tint: Self.packTint(22, 22, 26), v: &v, idx: &idx)
-            appendQuad(center: np - hf * 0.001, right: hr, up: hu, hw: tw, hh: th,
-                       layer: t.layer, tint: Self.packTint(255, 72, 60), v: &v, idx: &idx)
-        }
+        quad(mc, east, north, hs, hs, minimapLayer)
+        if minimapArrowLayer >= 0 { quad(centre - hf * 0.002, hr, hu, hs * 0.1, hs * 0.1, minimapArrowLayer) }
+        if minimapNeedleLayer >= 0 { quad(centre + north * (hs * 0.86) - hf * 0.002, east, north, hs * 0.11, hs * 0.19, minimapNeedleLayer) }
     }
 
     /// Draw the server's generic HUD elements (Hud::drawLuaElements): images
@@ -7020,7 +7037,10 @@ final class WorldSession {
             // Pixel offsets scale with the size boost so a mod's layout (a title
             // over its bar, a label over its timer) stays proportional; only the
             // normalised position stays pinned to the screen edge.
-            let anchor = e.pos * Self.hudScreen + e.offset * Self.hudSizeBoost
+            var anchor = e.pos * Self.hudScreen + e.offset * Self.hudSizeBoost
+            // The minimap takes the top-right corner; potion icons and their
+            // timers (anchored there) slide left past it.
+            if minimapDrawn, e.pos.x >= 0.99, e.pos.y <= 0.01 { anchor.x -= 2 * Self.minimapRadiusPx + 50 }
             switch e.type {
             case 1:                                              // text
                 guard !e.text.isEmpty, let t = hudTextBlockLayer(id: id, text: e.text) else { continue }
@@ -8204,8 +8224,9 @@ final class WorldSession {
         appendChat(v: &ov, idx: &oi)
         appendStatusBanner(v: &ov, idx: &oi)
         appendXpLevel(v: &ov, idx: &oi)
+        minimapDrawn = (ViewSettings.shared.minimap || minimapForced) && !dead
         appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
-        if (ViewSettings.shared.minimap || minimapForced) && !dead {
+        if minimapDrawn {
             // Repaint when you cross into another node (throttled: running
             // changes nodes several times a second) and once a second anyway
             // for blocks that loaded or changed under a still player.
