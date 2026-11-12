@@ -328,10 +328,31 @@ canvas.addEventListener("pointermove", (e) => {
 });
 canvas.addEventListener("pointerup", () => { if (drag) { drag = null; request(); saveView(); } });
 canvas.addEventListener("pointercancel", () => { drag = null; });
-canvas.addEventListener("wheel", (e) => { e.preventDefault(); setZoom(e.deltaY < 0 ? zoom * 2 : zoom / 2); }, { passive: false });
+// One zoom step per notch of a mouse wheel, or per ~200 px of trackpad
+// scroll (a trackpad fires dozens of small deltas per gesture, so stepping
+// on each one ran through every level at once). Trackpad pinch arrives as
+// a wheel event with ctrlKey set.
+let wheelAcc = 0, wheelTimer = null;
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+  wheelAcc += e.ctrlKey ? dy * 4 : dy;
+  clearTimeout(wheelTimer); wheelTimer = setTimeout(() => { wheelAcc = 0; }, 250);
+  const STEP = 200;
+  if (wheelAcc <= -STEP) { wheelAcc = 0; setZoom(zoom * 2); }
+  else if (wheelAcc >= STEP) { wheelAcc = 0; setZoom(zoom / 2); }
+}, { passive: false });
+// Touch pinch: a level per doubling of the finger distance from where the
+// pinch started, so a small pinch is one step.
 let pinch = null;
 canvas.addEventListener("touchstart", (e) => { if (e.touches.length === 2) pinch = { d: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY), zoom }; }, { passive: true });
-canvas.addEventListener("touchmove", (e) => { if (pinch && e.touches.length === 2) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); const z = pinch.zoom * d / pinch.d; setZoom(Math.pow(2, Math.round(Math.log2(z)))); } }, { passive: true });
+canvas.addEventListener("touchmove", (e) => {
+  if (pinch && e.touches.length === 2) {
+    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    const want = pinch.zoom * Math.pow(2, Math.round(Math.log2(d / pinch.d)));
+    if (want !== zoom) setZoom(want);
+  }
+}, { passive: true });
 canvas.addEventListener("touchend", () => { pinch = null; });
 function setZoom(z) {
   zoom = Math.max(0.5, Math.min(8, z));
