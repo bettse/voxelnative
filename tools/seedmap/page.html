@@ -77,9 +77,9 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
       <summary>Map settings (map_meta.txt)</summary>
       <textarea id="meta" spellcheck="false"></textarea>
       <p>Paste the server's map_meta.txt to use its noise settings. The default is VoxeLibre's mapgen v7 as shipped.</p>
-      <p><label for="cpu">Server CPU (stronghold rings)</label><br>
-        <select id="cpu"><option value="x86">x86 (most Linux servers)</option><option value="arm64">Apple silicon</option></select></p>
-      <p>Stronghold positions come from the seed through a 64-bit integer cast that the two CPU families do differently. Pick the one the server runs on; the other choice is a wrong set of rings, not a slightly different one.</p>
+      <p id="cpuRow" hidden><label for="cpu">Server CPU (stronghold rings)</label><br>
+        <select id="cpu"><option value="x86">x86 (most Linux servers)</option><option value="arm64">Apple silicon</option></select><br>
+        This seed is 2<sup>63</sup> or more, and the stronghold rings then depend on how the server's CPU converts it to an integer. Pick the one the server runs on; the other choice is a different set of rings. Seeds below 2<sup>63</sup> convert the same way everywhere.</p>
     </details>
     <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit, and landmarks follow the engine's decoration placer and VoxeLibre's placement rules; both checked against a headless render of the same seed. A village marked with ? is a chunk where the game attempts one; whether it is built depends on terrain checks the map approximates. Caves that open at the surface are not carved.</p>
     <p>Overworld sea level is y = 1. Hover for height and biome; drag to pan, scroll or pinch to zoom.</p>
@@ -333,7 +333,11 @@ for (const b of document.querySelectorAll(".zoom button")) b.addEventListener("c
 function parseXZ(s) { const m = s.match(/(-?\d+)\s*[, ]\s*(-?\d+)/); return m ? [+m[1], +m[2]] : null; }
 document.getElementById("goto").addEventListener("change", (e) => { const p = parseXZ(e.target.value); if (p) { cx = p[0]; cz = p[1]; draw(); request(); saveView(); } });
 document.getElementById("mark").addEventListener("change", (e) => { marker = parseXZ(e.target.value); if (marker) { cx = marker[0]; cz = marker[1]; } draw(); request(); saveView(); });
+function bigSeed() { const d = Number(seedIn.value.trim().replace(/[^0-9-]/g, "") || "0"); return Math.abs(d) >= 2 ** 63; }
+function updateCpuRow() { document.getElementById("cpuRow").hidden = !bigSeed(); }
+seedIn.addEventListener("input", updateCpuRow);
 function generate() {
+  updateCpuRow();
   try { localStorage.setItem("seedmap.seed", seedIn.value.trim()); localStorage.setItem("seedmap.meta", metaIn.value); localStorage.setItem("seedmap.cpu", cpuSel.value); } catch (_) {}
   saveView();
   status.textContent = "starting";

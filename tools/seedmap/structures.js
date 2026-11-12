@@ -27,16 +27,17 @@ class PseudoRandom {
 }
 
 // mcl_strongholds: 128 positions on rings around the origin. The seed goes
-// through LuaJIT's tointeger of a double; for a seed past 2^31 that is a
-// 64-bit truncation whose low 32 bits depend on the server's CPU: Apple
-// silicon saturates to INT64_MAX (low bits -1, checked against the dev
-// world), x86 gives INT64_MIN (low bits 0).
+// through tonumber (a double) and then Lua's tointeger: the double's integer
+// value to 64 bits, of which PseudoRandom keeps the low 32. Checked on this
+// Mac's Luanti for four seeds. A seed at or above 2^63 does not fit, and
+// that conversion is CPU-defined: Apple silicon saturates to INT64_MAX (low
+// bits -1, checked), x86 is expected to give INT64_MIN (low bits 0).
 const STRONGHOLD_RINGS = [[3, 1408, 2688], [6, 4480, 5760], [10, 7552, 8832], [15, 10624, 11904], [21, 13696, 14976], [28, 16768, 18048], [36, 19840, 21120], [9, 22912, 24192]];
 function strongholds(seedStr, cpu) {
   const d = Number(seedStr);
   let s;
-  if (d >= 2147483648 || d < -2147483648) s = cpu === "x86" ? 0 : -1;
-  else s = Math.trunc(d);
+  if (Math.abs(d) < 2 ** 63) s = Number(BigInt.asIntN(32, BigInt(Math.trunc(d))));
+  else s = cpu === "x86" ? 0 : (d > 0 ? -1 : 0);
   const pr = new PseudoRandom(s), out = [];
   for (const [amount, min, max] of STRONGHOLD_RINGS) {
     let angle = (pr.next() / 32767) * (Math.PI * 2);

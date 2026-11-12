@@ -27,4 +27,6 @@ Known gaps: a village is marked where the game attempts one (the chunk
 gate and a flatness check), not where it finishes building; fallen trees
 and other terrain features are left out (they depend on the plants placed
 before them); caves that open at the surface are not carved. Stronghold
-rings depend on the server CPU's float-to-integer cast (a page setting).
+rings use the seed's low 32 bits (checked on this Mac's Luanti for four
+seeds); a seed at or above 2^63 converts in a CPU-defined way and the page
+then shows a CPU setting (Apple silicon checked, x86 assumed).
