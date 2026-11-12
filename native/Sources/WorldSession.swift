@@ -291,7 +291,7 @@ final class WorldSession {
     private var playersSeen: Set<String> = []
     private var creepersNear: Set<Int> = []   // creeper object ids within hiss range (#gag: hot-pink creepers)
     private var loggedDropIds: Set<Int> = []  // dropped items already reported by the one-shot [drop] draw log
-    private var creeperCache: [Int: Bool] = [:]   // per-entity creeper flag; mesh/name are stable, so don't re-lowercase every frame
+    private var creeperCache: [Int: (name: String, creeper: Bool)] = [:]   // per-entity creeper flag, with the name it was decided for (ids get reused)
     private var bgMissLogged: Set<String> = []    // one-time log for a missing fill-background texture
     private var skinCache: [Int: (mesh: String, frame: Float, bones: Int, positions: [SIMD3<Float>])] = [:]   // entity id -> last skin
     // Perf: how far out we animate (skin) mob meshes. Capped at 96 nodes, and
@@ -7717,14 +7717,19 @@ final class WorldSession {
             // Eric hates creepers: paint them hot pink and hiss (tnt_ignite, the
             // fuse sound) when one gets close. Hit-flash still wins.
             let isCreeper: Bool
-            if let c = creeperCache[e.id] { isCreeper = c }
+            // The server hands a removed object's id to the next object it
+            // adds, so a cache keyed by id alone outlived the creeper: an
+            // outpost banner that inherited a dead stalker's id drew hot pink
+            // (Eric's screenshot). Keep the name with the answer and recheck
+            // when it changes.
+            if let c = creeperCache[e.id], c.name == e.name { isCreeper = c.creeper }
             else {
                 // VoxeLibre 0.92 renamed the creeper: the live entity is
                 // mobs_mc:stalker with vl_stalker.b3d, and only its sounds still
                 // say "creeper", so matching "creep" alone never fired.
                 let m = e.mesh.lowercased(), n = e.name.lowercased()
                 isCreeper = m.contains("creep") || n.contains("creep") || m.contains("stalker") || n.contains("stalker")
-                creeperCache[e.id] = isCreeper
+                creeperCache[e.id] = (e.name, isCreeper)
             }
             // Damage flash colour follows damage_texture_modifier: the engine
             // default ^[brighten is a white wash (mobs), VoxeLibre players get
