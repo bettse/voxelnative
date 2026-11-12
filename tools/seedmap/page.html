@@ -157,6 +157,22 @@ try { const c = localStorage.getItem("seedmap.cpu"); if (c) cpuSel.value = c; } 
 const WATER_LEVEL = 1;
 seedIn.value = SAMPLE_SEED; metaIn.value = META_DEFAULT;
 try { const s = localStorage.getItem("seedmap.seed"); if (s) seedIn.value = s; const m = localStorage.getItem("seedmap.meta"); if (m) metaIn.value = m; } catch (_) {}
+// The view (centre, zoom, marker) comes back with the seed it was on.
+let viewSaveTimer = null;
+function saveView() {
+  clearTimeout(viewSaveTimer);
+  viewSaveTimer = setTimeout(() => {
+    try { localStorage.setItem("seedmap.view", JSON.stringify({ seed: seedIn.value.trim(), cx, cz, zoom, marker })); } catch (_) {}
+  }, 400);
+}
+try {
+  const v = JSON.parse(localStorage.getItem("seedmap.view") || "null");
+  if (v && v.seed === seedIn.value.trim() && isFinite(v.cx) && isFinite(v.cz)) {
+    cx = v.cx; cz = v.cz; zoom = [1, 2, 4, 8].includes(v.zoom) ? v.zoom : 2;
+    if (Array.isArray(v.marker) && v.marker.length === 2) { marker = v.marker; document.getElementById("mark").value = v.marker.join(", "); }
+    for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
+  }
+} catch (_) {}
 
 function metaWithSeed() {
   const seed = seedIn.value.trim().replace(/[^0-9-]/g, "") || "0";
@@ -291,7 +307,7 @@ new ResizeObserver(resize).observe(canvas);
 let drag = null;
 canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, cx, cz }; canvas.setPointerCapture(e.pointerId); });
 canvas.addEventListener("pointermove", (e) => {
-  if (drag) { cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz - (e.clientY - drag.y) / zoom; draw(); return; }
+  if (drag) { cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz - (e.clientY - drag.y) / zoom; draw(); saveView(); return; }
   const r = canvas.getBoundingClientRect();
   const x = Math.floor(cx + (e.clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz + (e.clientY - r.top - r.height / 2) / zoom);
   const c = columnAt(x, z);
@@ -301,7 +317,7 @@ canvas.addEventListener("pointermove", (e) => {
   readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + (c ? (c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`) : "not generated yet")
     + (near ? `<br><span style="color:${kindInfo(near.kind)[1]}">●</span> ${kindInfo(near.kind)[0]} at ${near.x}, ${near.z}${near.note ? " (" + near.note + ")" : ""}` : "");
 });
-canvas.addEventListener("pointerup", () => { if (drag) { drag = null; request(); } });
+canvas.addEventListener("pointerup", () => { if (drag) { drag = null; request(); saveView(); } });
 canvas.addEventListener("pointercancel", () => { drag = null; });
 canvas.addEventListener("wheel", (e) => { e.preventDefault(); setZoom(e.deltaY < 0 ? zoom * 2 : zoom / 2); }, { passive: false });
 let pinch = null;
@@ -311,14 +327,15 @@ canvas.addEventListener("touchend", () => { pinch = null; });
 function setZoom(z) {
   zoom = Math.max(1, Math.min(8, z));
   for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
-  draw(); request();
+  draw(); request(); saveView();
 }
 for (const b of document.querySelectorAll(".zoom button")) b.addEventListener("click", () => setZoom(+b.dataset.z));
 function parseXZ(s) { const m = s.match(/(-?\d+)\s*[, ]\s*(-?\d+)/); return m ? [+m[1], +m[2]] : null; }
-document.getElementById("goto").addEventListener("change", (e) => { const p = parseXZ(e.target.value); if (p) { cx = p[0]; cz = p[1]; draw(); request(); } });
-document.getElementById("mark").addEventListener("change", (e) => { marker = parseXZ(e.target.value); if (marker) { cx = marker[0]; cz = marker[1]; } draw(); request(); });
+document.getElementById("goto").addEventListener("change", (e) => { const p = parseXZ(e.target.value); if (p) { cx = p[0]; cz = p[1]; draw(); request(); saveView(); } });
+document.getElementById("mark").addEventListener("change", (e) => { marker = parseXZ(e.target.value); if (marker) { cx = marker[0]; cz = marker[1]; } draw(); request(); saveView(); });
 function generate() {
   try { localStorage.setItem("seedmap.seed", seedIn.value.trim()); localStorage.setItem("seedmap.meta", metaIn.value); localStorage.setItem("seedmap.cpu", cpuSel.value); } catch (_) {}
+  saveView();
   status.textContent = "starting";
   const meta = metaWithSeed();
   if (worker) worker.terminate();
