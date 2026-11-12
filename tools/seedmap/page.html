@@ -23,36 +23,48 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 var(-
 .bar h1 { font-size: 15px; font-weight: 600; margin: 0 6px 0 0; letter-spacing: 0.01em; }
 .field { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
-input[type=text] { font: 13px var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); min-width: 0; }
+input[type=text] { font: 13px var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); min-width: 0; min-height: 32px; box-sizing: border-box; }
 #seed { width: 21ch; } #goto { width: 11ch; } #mark { width: 11ch; }
-button { font: 500 13px var(--font); padding: 6px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); cursor: pointer; }
+button { font: 500 13px var(--font); padding: 6px 12px; min-height: 32px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); cursor: pointer; touch-action: manipulation; }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .zoom { display: flex; gap: 2px; }
-.zoom button { padding: 6px 9px; font-family: var(--mono); }
+.zoom button { padding: 6px 9px; min-width: 36px; font-family: var(--mono); }
 .zoom button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .status { font: 12px var(--mono); color: var(--muted); margin-left: auto; white-space: nowrap; }
 main { position: relative; flex: 1; min-height: 320px; display: flex; min-width: 0; }
-#map { flex: 1; min-width: 0; touch-action: none; cursor: grab; background: var(--bg);
+#map { flex: 1; min-width: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: grab; background: var(--bg);
   background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 32px 32px; }
 #map:active { cursor: grabbing; }
 .readout { position: absolute; left: 12px; bottom: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
   font: 12px/1.5 var(--mono); pointer-events: none; min-width: 20ch; font-variant-numeric: tabular-nums; }
 .readout b { font-weight: 500; color: var(--muted); }
-aside { width: 230px; border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 12px 14px; font-size: 12px; }
-aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }
+details#side { width: 230px; border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 12px 14px; font-size: 12px; }
+details#side > summary { display: none; }
+details#side h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }
 .legend { display: grid; grid-template-columns: 14px 1fr; gap: 5px 8px; align-items: center; margin-bottom: 14px; }
 .legend i { display: block; width: 14px; height: 14px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
 .legend span { font-variant-numeric: tabular-nums; }
 details summary { cursor: pointer; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 textarea { width: 100%; box-sizing: border-box; height: 160px; font: 11px var(--mono); margin-top: 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }
-aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
+details#side p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
 @media (max-width: 720px) {
   main { flex-direction: column; }
-  aside { width: auto; border-left: 0; border-top: 1px solid var(--line); max-height: 40%; }
-  #map { min-height: 300px; }
+  /* The side panel folds to one line under the map; open it for the legend and settings. */
+  details#side { width: auto; border-left: 0; border-top: 1px solid var(--line); max-height: 45%; padding: 0 14px; }
+  details#side > summary { display: block; padding: 10px 0; cursor: pointer; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  details#side:not([open]) { overflow: hidden; }
+  details#side > *:not(summary) { margin-bottom: 12px; }
+  #map { min-height: 55vh; }
   .status { margin-left: 0; width: 100%; }
+  .bar h1 { width: 100%; margin: 0; }
+  #seed { flex: 1; width: auto; }
+  /* iOS zooms the page when a focused field's text is under 16 px */
+  input[type=text] { font-size: 16px; }
+  .readout { font-size: 11px; max-width: calc(100% - 24px); }
 }
+@media (hover: none) { .readout::after { content: "tap the map to read a spot"; display: block; color: var(--muted); font-size: 10px; } .readout.pinned::after { content: ""; display: none; } }
+body { overscroll-behavior: none; }
 @media (prefers-reduced-motion: no-preference) { .readout { transition: opacity 120ms; } }
 </style>
 
@@ -60,8 +72,8 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
   <h1>VoxeLibre Seed Map</h1>
   <div class="field"><label for="seed">Seed</label><input type="text" id="seed" inputmode="numeric" autocomplete="off"></div>
   <button class="primary" id="go">Generate</button>
-  <div class="field"><label for="goto">Go to</label><input type="text" id="goto" placeholder="x, z" autocomplete="off"></div>
-  <div class="field"><label for="mark">Mark</label><input type="text" id="mark" placeholder="x, z" autocomplete="off"></div>
+  <div class="field"><label for="goto">Go to</label><input type="text" id="goto" placeholder="x, z" inputmode="numeric" enterkeyhint="go" autocomplete="off"></div>
+  <div class="field"><label for="mark">Mark</label><input type="text" id="mark" placeholder="x, z" inputmode="numeric" enterkeyhint="done" autocomplete="off"></div>
   <div class="zoom" role="group" aria-label="Zoom">
     <button data-z="0.5">½×</button><button data-z="1">1×</button><button data-z="2" aria-pressed="true">2×</button><button data-z="4">4×</button><button data-z="8">8×</button>
   </div>
@@ -70,7 +82,7 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
 <main>
   <canvas id="map" aria-label="World map"></canvas>
   <div class="readout" id="readout"><b>x</b> — <b>z</b> —<br>hover the map</div>
-  <aside>
+  <details open id="side"><summary>Legend and settings</summary>
     <h2>Biomes in view</h2>
     <div class="legend" id="legend"></div>
     <details>
@@ -82,8 +94,8 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
         This seed is 2<sup>63</sup> or more, and the stronghold rings then depend on how the server's CPU converts it to an integer. Pick the one the server runs on; the other choice is a different set of rings. Seeds below 2<sup>63</sup> convert the same way everywhere.</p>
     </details>
     <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit, and landmarks follow the engine's decoration placer and VoxeLibre's placement rules; both checked against a headless render of the same seed. A village marked with ? is a chunk where the game attempts one; whether it is built depends on terrain checks the map approximates. Caves that open at the surface are not carved.</p>
-    <p>North (+z) is up and east (+x) is right, as on the game's minimap. Overworld sea level is y = 1. Hover for height and biome; drag to pan, scroll or pinch to zoom.</p>
-  </aside>
+    <p>North (+z) is up and east (+x) is right, as on the game's minimap. Overworld sea level is y = 1. Hover or tap for height and biome; drag to pan, scroll or pinch to zoom, double-tap to zoom in.</p>
+  </details>
 </main>
 
 <script id="genSrc" type="text/plain">
@@ -212,7 +224,7 @@ function paintTile(m) {
 // Tiles the view needs, nearest the centre first; at most 6 in flight.
 function request() {
   if (!ready) return;
-  const W = canvas.width, H = canvas.height;
+  const W = view.w, H = view.h;
   const x0 = Math.floor(cx - W / 2 / zoom), x1 = Math.ceil(cx + W / 2 / zoom), z0 = Math.floor(cz - H / 2 / zoom), z1 = Math.ceil(cz + H / 2 / zoom);
   const want = [], step = stepFor(zoom), TS = TILE * step;
   for (let tz = Math.floor(z0 / TS) * TS; tz <= z1; tz += TS) for (let tx = Math.floor(x0 / TS) * TS; tx <= x1; tx += TS) {
@@ -244,8 +256,8 @@ function request() {
 }
 
 function draw() {
-  const W = canvas.width, H = canvas.height;
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+  const W = view.w, H = view.h;
+  ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0); ctx.clearRect(0, 0, W, H);
   ctx.imageSmoothingEnabled = false;
   const step = stepFor(zoom), TS = TILE * step;
   for (const [key, t] of tiles) {
@@ -294,7 +306,7 @@ function columnAt(x, z) {
   return { y: t.h[k], water: !!t.w[k], floor: t.f[k], biome: t.b[k] === 65535 ? "?" : BIOMES[t.b[k]].name };
 }
 function updateLegend() {
-  const W = canvas.width, H = canvas.height, counts = new Map();
+  const W = view.w, H = view.h, counts = new Map();
   const step = stepFor(zoom), TS = TILE * step;
   for (const [key, t] of tiles) {
     if (t.step !== step) continue;
@@ -307,27 +319,81 @@ function updateLegend() {
 }
 
 // ---- input --------------------------------------------------------------------
+// Logical size in CSS px; the backing store is scaled by the device pixel
+// ratio so a phone's 3x screen gets crisp nodes instead of a blurry upscale.
+const view = { w: 1, h: 1, dpr: 1 };
 function resize() {
   const r = canvas.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.round(r.width)); canvas.height = Math.max(1, Math.round(r.height));
+  view.dpr = Math.min(3, window.devicePixelRatio || 1);
+  view.w = Math.max(1, Math.round(r.width)); view.h = Math.max(1, Math.round(r.height));
+  canvas.width = Math.round(view.w * view.dpr); canvas.height = Math.round(view.h * view.dpr);
   draw(); request();
 }
+window.addEventListener("resize", resize);
 new ResizeObserver(resize).observe(canvas);
-let drag = null;
-canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, cx, cz }; canvas.setPointerCapture(e.pointerId); });
-canvas.addEventListener("pointermove", (e) => {
-  if (drag) { cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz + (e.clientY - drag.y) / zoom; draw(); saveView(); return; }
+// Pointers: one finger or the mouse pans; two fingers pinch (a level per
+// doubling of the spread, the midpoint pans); a tap pins the readout on
+// that spot; a double-tap zooms in there. Hover works on a mouse as before.
+const pointers = new Map();
+let drag = null, pinch = null, lastTap = 0, moved = false;
+function readoutAt(clientX, clientY, pin) {
   const r = canvas.getBoundingClientRect();
-  const x = Math.floor(cx + (e.clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz - (e.clientY - r.top - r.height / 2) / zoom);
+  const x = Math.floor(cx + (clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz - (clientY - r.top - r.height / 2) / zoom);
   const c = columnAt(x, z);
-  let near = null, nd = 12 / zoom;
+  let near = null, nd = (pin ? 20 : 12) / zoom;
   for (const list of chunks.values()) for (const p of list) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
   for (const p of strongholdList) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
   readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + (c ? (c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`) : "not generated yet")
     + (near ? `<br><span style="color:${kindInfo(near.kind)[1]}">●</span> ${kindInfo(near.kind)[0]} at ${near.x}, ${near.z}${near.note ? " (" + near.note + ")" : ""}` : "");
+  readout.classList.toggle("pinned", !!pin);
+}
+function spread() { const [a, b] = [...pointers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; }
+canvas.addEventListener("pointerdown", (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  moved = false;
+  if (pointers.size === 1) { drag = { x: e.clientX, y: e.clientY, cx, cz }; pinch = null; }
+  else if (pointers.size === 2) { const sp = spread(); pinch = { d: sp.d, zoom, mx: sp.mx, my: sp.my, cx, cz }; drag = null; }
 });
-canvas.addEventListener("pointerup", () => { if (drag) { drag = null; request(); saveView(); } });
-canvas.addEventListener("pointercancel", () => { drag = null; });
+canvas.addEventListener("pointermove", (e) => {
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch && pointers.size >= 2) {
+    const sp = spread();
+    const want = pinch.zoom * Math.pow(2, Math.round(Math.log2(sp.d / pinch.d)));
+    cx = pinch.cx - (sp.mx - pinch.mx) / zoom; cz = pinch.cz + (sp.my - pinch.my) / zoom;
+    if (want !== zoom) { setZoom(want); pinch.d = sp.d; pinch.zoom = zoom; pinch.mx = sp.mx; pinch.my = sp.my; pinch.cx = cx; pinch.cz = cz; }
+    else draw();
+    moved = true; return;
+  }
+  if (drag) {
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) > 4) moved = true;
+    cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz + (e.clientY - drag.y) / zoom; draw(); saveView(); return;
+  }
+  if (e.pointerType === "mouse") readoutAt(e.clientX, e.clientY, false);
+});
+function pointerEnd(e) {
+  const wasDrag = drag && pointers.size === 1 && !moved;
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+  if (pointers.size === 0) {
+    if (drag) { drag = null; request(); saveView(); }
+    if (wasDrag && e.type === "pointerup") {
+      const now = performance.now();
+      if (now - lastTap < 320 && zoom < 8) {
+        // double-tap: zoom in around the tapped spot
+        const r = canvas.getBoundingClientRect();
+        const px = e.clientX - r.left - r.width / 2, py = e.clientY - r.top - r.height / 2;
+        const wx = cx + px / zoom, wz = cz - py / zoom;
+        const z2 = zoom * 2; cx = wx - px / z2; cz = wz + py / z2; setZoom(z2); lastTap = 0;
+      } else { lastTap = now; readoutAt(e.clientX, e.clientY, true); }
+    }
+  } else if (pointers.size === 1) {
+    // one finger lifted from a pinch: the other keeps panning from here
+    const [p] = pointers.values(); drag = { x: p.x, y: p.y, cx, cz };
+  }
+}
+canvas.addEventListener("pointerup", pointerEnd);
+canvas.addEventListener("pointercancel", pointerEnd);
 // One zoom step per notch of a mouse wheel, or per ~200 px of trackpad
 // scroll (a trackpad fires dozens of small deltas per gesture, so stepping
 // on each one ran through every level at once). Trackpad pinch arrives as
@@ -342,18 +408,6 @@ canvas.addEventListener("wheel", (e) => {
   if (wheelAcc <= -STEP) { wheelAcc = 0; setZoom(zoom * 2); }
   else if (wheelAcc >= STEP) { wheelAcc = 0; setZoom(zoom / 2); }
 }, { passive: false });
-// Touch pinch: a level per doubling of the finger distance from where the
-// pinch started, so a small pinch is one step.
-let pinch = null;
-canvas.addEventListener("touchstart", (e) => { if (e.touches.length === 2) pinch = { d: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY), zoom }; }, { passive: true });
-canvas.addEventListener("touchmove", (e) => {
-  if (pinch && e.touches.length === 2) {
-    const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-    const want = pinch.zoom * Math.pow(2, Math.round(Math.log2(d / pinch.d)));
-    if (want !== zoom) setZoom(want);
-  }
-}, { passive: true });
-canvas.addEventListener("touchend", () => { pinch = null; });
 function setZoom(z) {
   zoom = Math.max(0.5, Math.min(8, z));
   for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
@@ -391,5 +445,6 @@ function generate() {
 }
 document.getElementById("go").addEventListener("click", generate);
 seedIn.addEventListener("keydown", (e) => { if (e.key === "Enter") generate(); });
+if (window.matchMedia("(max-width: 720px)").matches) document.getElementById("side").open = false;
 generate();
 </script>
