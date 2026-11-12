@@ -192,7 +192,10 @@ try {
 
 function metaWithSeed() {
   const seed = seedIn.value.trim().replace(/[^0-9-]/g, "") || "0";
-  return metaIn.value.replace(/^\s*seed\s*=.*$/m, "") + "\nseed = " + seed + "\n";
+  // Only the world's own top-level "seed =" line goes; the indented "seed ="
+  // inside each noise block stays. (With \s* before it, the first noise
+  // block lost its seed and every river was carved in the wrong place.)
+  return metaIn.value.replace(/^seed[ \t]*=.*$/m, "") + "\nseed = " + seed + "\n";
 }
 
 // Paint one tile to an ImageData at 1 px per node: biome colour, hill shade

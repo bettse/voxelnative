@@ -6,7 +6,7 @@ const ref = process.argv[2];
 const pmeta = JSON.parse(fs.readFileSync(ref + "/world/worldmap_pois.json")).meta;
 // the run's own seed and area (the map_meta gives the noise settings)
 const meta = fs.readFileSync(process.argv[3] || process.env.HOME + "/Library/Application Support/minetest/worlds/vrdev/map_meta.txt", "utf8")
-  .replace(/^\s*seed\s*=.*$/m, "") + "\nseed = " + pmeta.seed + "\n";
+  .replace(/^seed[ \t]*=.*$/m, "") + "\nseed = " + pmeta.seed + "\n";
 const S = parseMapMeta(meta);
 const CX = pmeta.cx, CZ = pmeta.cz, RAD = pmeta.radius;
 const corg = v => Math.floor((v + 32) / 80) * 80 - 32;
