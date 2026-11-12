@@ -63,7 +63,7 @@ aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
   <div class="field"><label for="goto">Go to</label><input type="text" id="goto" placeholder="x, z" autocomplete="off"></div>
   <div class="field"><label for="mark">Mark</label><input type="text" id="mark" placeholder="x, z" autocomplete="off"></div>
   <div class="zoom" role="group" aria-label="Zoom">
-    <button data-z="1">1×</button><button data-z="2" aria-pressed="true">2×</button><button data-z="4">4×</button><button data-z="8">8×</button>
+    <button data-z="0.5">½×</button><button data-z="1">1×</button><button data-z="2" aria-pressed="true">2×</button><button data-z="4">4×</button><button data-z="8">8×</button>
   </div>
   <span class="status" id="status">ready</span>
 </div>
@@ -102,15 +102,15 @@ self.onmessage = function (e) {
     return;
   }
   if (m.type === "tile") {
-    const n = m.n, h = new Int16Array(n * n), w = new Uint8Array(n * n), b = new Uint16Array(n * n), f = new Int16Array(n * n);
+    const n = m.n, step = m.step || 1, h = new Int16Array(n * n), w = new Uint8Array(n * n), b = new Uint16Array(n * n), f = new Int16Array(n * n);
     for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-      const x = m.x0 + i, z = m.z0 + j, k = j * n + i;
+      const x = m.x0 + i * step, z = m.z0 + j * step, k = j * n + i;
       const c = self.gen.column(x, z);
       h[k] = c.y; w[k] = c.water ? 1 : 0; f[k] = c.floor;
       const bb = self.gen.biomeAt(x, c.y, z);
       b[k] = bb ? self.biomeIndex.get(bb.name) : 65535;
     }
-    postMessage({ type: "tile", id: m.id, x0: m.x0, z0: m.z0, n, h, w, b, f }, [h.buffer, w.buffer, b.buffer, f.buffer]);
+    postMessage({ type: "tile", id: m.id, x0: m.x0, z0: m.z0, n, step, h, w, b, f }, [h.buffer, w.buffer, b.buffer, f.buffer]);
   }
 };
 </script>
@@ -143,7 +143,11 @@ function hsv(h, s, v) { const f = (n, k = (n + h / 60) % 6) => v - v * s * Math.
 const biomeColour = BIOMES.map(b => { const low = b.name.toLowerCase(); for (const [k, c] of PALETTE) if (low.includes(k)) return c; return hsv(hashHue(b.name), 0.35, 0.75); });
 
 // ---- state ------------------------------------------------------------------
-const TILE = 64;
+const TILE = 64;                                  // samples per tile side
+// Below 1x each sample stands for a 2x2 block of nodes (its own tile set),
+// so the far view fills in four times faster.
+const stepFor = z => (z < 1 ? 2 : 1);
+const tileKey = (step, x0, z0) => step + ":" + x0 + "," + z0;
 const canvas = document.getElementById("map"), ctx = canvas.getContext("2d");
 const status = document.getElementById("status"), readout = document.getElementById("readout"), legendEl = document.getElementById("legend");
 const seedIn = document.getElementById("seed"), metaIn = document.getElementById("meta");
@@ -168,7 +172,7 @@ function saveView() {
 try {
   const v = JSON.parse(localStorage.getItem("seedmap.view") || "null");
   if (v && v.seed === seedIn.value.trim() && isFinite(v.cx) && isFinite(v.cz)) {
-    cx = v.cx; cz = v.cz; zoom = [1, 2, 4, 8].includes(v.zoom) ? v.zoom : 2;
+    cx = v.cx; cz = v.cz; zoom = [0.5, 1, 2, 4, 8].includes(v.zoom) ? v.zoom : 2;
     if (Array.isArray(v.marker) && v.marker.length === 2) { marker = v.marker; document.getElementById("mark").value = v.marker.join(", "); }
     for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
   }
@@ -202,7 +206,7 @@ function paintTile(m) {
     const o = k * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
   }
   const off = document.createElement("canvas"); off.width = n; off.height = n; off.getContext("2d").putImageData(img, 0, 0);
-  return { img: off, h: m.h, w: m.w, b: m.b, f: m.f };
+  return { img: off, h: m.h, w: m.w, b: m.b, f: m.f, step: m.step || 1 };
 }
 
 // Tiles the view needs, nearest the centre first; at most 6 in flight.
@@ -210,17 +214,17 @@ function request() {
   if (!ready) return;
   const W = canvas.width, H = canvas.height;
   const x0 = Math.floor(cx - W / 2 / zoom), x1 = Math.ceil(cx + W / 2 / zoom), z0 = Math.floor(cz - H / 2 / zoom), z1 = Math.ceil(cz + H / 2 / zoom);
-  const want = [];
-  for (let tz = Math.floor(z0 / TILE) * TILE; tz <= z1; tz += TILE) for (let tx = Math.floor(x0 / TILE) * TILE; tx <= x1; tx += TILE) {
-    const key = tx + "," + tz;
+  const want = [], step = stepFor(zoom), TS = TILE * step;
+  for (let tz = Math.floor(z0 / TS) * TS; tz <= z1; tz += TS) for (let tx = Math.floor(x0 / TS) * TS; tx <= x1; tx += TS) {
+    const key = tileKey(step, tx, tz);
     if (tiles.has(key) || [...pending.values()].includes(key)) continue;
-    want.push([tx, tz, (tx + TILE / 2 - cx) ** 2 + (tz + TILE / 2 - cz) ** 2]);
+    want.push([tx, tz, (tx + TS / 2 - cx) ** 2 + (tz + TS / 2 - cz) ** 2]);
   }
   want.sort((a, b) => a[2] - b[2]);
   while (pending.size < 6 && want.length) {
     const [tx, tz] = want.shift(); const id = nextId++;
-    pending.set(id, tx + "," + tz);
-    worker.postMessage({ type: "tile", id, x0: tx, z0: tz, n: TILE });
+    pending.set(id, tileKey(step, tx, tz));
+    worker.postMessage({ type: "tile", id, x0: tx, z0: tz, n: TILE, step });
   }
   // structures per 80-node chunk, after the tiles in view
   const cwant = [];
@@ -243,11 +247,13 @@ function draw() {
   const W = canvas.width, H = canvas.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
   ctx.imageSmoothingEnabled = false;
+  const step = stepFor(zoom), TS = TILE * step;
   for (const [key, t] of tiles) {
-    const [tx, tz] = key.split(",").map(Number);
+    if (t.step !== step) continue;
+    const [tx, tz] = key.slice(key.indexOf(":") + 1).split(",").map(Number);
     const px = (tx - cx) * zoom + W / 2, py = (tz - cz) * zoom + H / 2;
-    if (px > W || py > H || px + TILE * zoom < 0 || py + TILE * zoom < 0) continue;
-    ctx.drawImage(t.img, Math.round(px), Math.round(py), TILE * zoom, TILE * zoom);
+    if (px > W || py > H || px + TS * zoom < 0 || py + TS * zoom < 0) continue;
+    ctx.drawImage(t.img, Math.round(px), Math.round(py), TS * zoom, TS * zoom);
   }
   // landmarks: a dot with a label at 2x and up; strongholds from the seed
   const all = [];
@@ -281,16 +287,19 @@ function draw() {
 }
 
 function columnAt(x, z) {
-  const tx = Math.floor(x / TILE) * TILE, tz = Math.floor(z / TILE) * TILE, t = tiles.get(tx + "," + tz);
+  const step = stepFor(zoom), TS = TILE * step;
+  const tx = Math.floor(x / TS) * TS, tz = Math.floor(z / TS) * TS, t = tiles.get(tileKey(step, tx, tz));
   if (!t) return null;
-  const k = (z - tz) * TILE + (x - tx);
+  const k = Math.floor((z - tz) / step) * TILE + Math.floor((x - tx) / step);
   return { y: t.h[k], water: !!t.w[k], floor: t.f[k], biome: t.b[k] === 65535 ? "?" : BIOMES[t.b[k]].name };
 }
 function updateLegend() {
   const W = canvas.width, H = canvas.height, counts = new Map();
+  const step = stepFor(zoom), TS = TILE * step;
   for (const [key, t] of tiles) {
-    const [tx, tz] = key.split(",").map(Number);
-    if ((tx - cx) * zoom + W / 2 > W || (tz - cz) * zoom + H / 2 > H || (tx + TILE - cx) * zoom + W / 2 < 0 || (tz + TILE - cz) * zoom + H / 2 < 0) continue;
+    if (t.step !== step) continue;
+    const [tx, tz] = key.slice(key.indexOf(":") + 1).split(",").map(Number);
+    if ((tx - cx) * zoom + W / 2 > W || (tz - cz) * zoom + H / 2 > H || (tx + TS - cx) * zoom + W / 2 < 0 || (tz + TS - cz) * zoom + H / 2 < 0) continue;
     for (let k = 0; k < t.b.length; k++) counts.set(t.b[k], (counts.get(t.b[k]) || 0) + 1);
   }
   const rows = [...counts].filter(([i]) => i !== 65535).sort((a, b) => b[1] - a[1]).slice(0, 18);
@@ -325,7 +334,7 @@ canvas.addEventListener("touchstart", (e) => { if (e.touches.length === 2) pinch
 canvas.addEventListener("touchmove", (e) => { if (pinch && e.touches.length === 2) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); const z = pinch.zoom * d / pinch.d; setZoom(Math.pow(2, Math.round(Math.log2(z)))); } }, { passive: true });
 canvas.addEventListener("touchend", () => { pinch = null; });
 function setZoom(z) {
-  zoom = Math.max(1, Math.min(8, z));
+  zoom = Math.max(0.5, Math.min(8, z));
   for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
   draw(); request(); saveView();
 }
@@ -352,7 +361,7 @@ function generate() {
     if (gen !== generation) return;
     const m = e.data;
     if (m.type === "ready") { ready = true; strongholdList = m.strongholds || []; request(); return; }
-    if (m.type === "tile") { pending.delete(m.id); tiles.set(m.x0 + "," + m.z0, paintTile(m)); draw(); request(); }
+    if (m.type === "tile") { pending.delete(m.id); tiles.set(tileKey(m.step || 1, m.x0, m.z0), paintTile(m)); draw(); request(); }
     if (m.type === "chunk") { chunkPending.delete(m.id); chunks.set(m.ox + "," + m.oz, m.list); draw(); request(); }
   };
   worker.onerror = (e) => { status.textContent = "generator error: " + e.message; };
