@@ -6871,7 +6871,7 @@ final class WorldSession {
         let D = Self.hudDepth * hudK
         let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x, ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
         let radiusPx = Self.minimapRadiusPx
-        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, 30 + radiusPx)
+        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, 80 + radiusPx)
         let az = (cpx.x - Self.hudScreen.x / 2) * kx, el = (Self.hudScreen.y / 2 - cpx.y) * ky
         let centre = headPos + hf * D + hr * (tan(az) * D) + hu * (tan(el) * D)
         let hs = tan(radiusPx * kx) * D
@@ -10497,24 +10497,24 @@ final class WorldSession {
         // Panel sized for the current option count (title + n rows), so nothing
         // runs off the backdrop.
         let n = koganeOptionLayers.count
-        let rowStep: Float = 0.085
+        let rowStep: Float = 0.046
         let topOy: Float = Float(n - 1) * rowStep * 0.5      // rows centred about 0
-        let titleOy = topOy + 0.10
+        let titleOy = topOy + 0.06
         // Backdrop from just above the title to just below the last row. It was
         // centred on the rows with the title's margin mirrored below, which left
         // an empty band under the last option.
-        let backTop = titleOy + 0.10, backBottom = -topOy - 0.075
-        appendQuad(center: at(0.60, 0, (backTop + backBottom) * 0.5), right: hr, up: hu, hw: 0.26, hh: (backTop - backBottom) * 0.5,
+        let backTop = titleOy + 0.055, backBottom = -topOy - 0.045
+        appendQuad(center: at(0.60, 0, (backTop + backBottom) * 0.5), right: hr, up: hu, hw: 0.17, hh: (backTop - backBottom) * 0.5,
                    layer: highlightLayer, tint: Self.packTint(24, 22, 30), v: &v, idx: &idx)
         if koganeTitleLayer >= 0 {
-            appendQuad(center: at(0.58, 0, titleOy), right: hr, up: hu, hw: 0.075, hh: 0.06,
+            appendQuad(center: at(0.58, 0, titleOy), right: hr, up: hu, hw: 0.05, hh: 0.04,
                        layer: koganeTitleLayer, tint: gold, v: &v, idx: &idx)
         }
         for (i, layer) in koganeOptionLayers.enumerated() where layer >= 0 {
             let oy = topOy - Float(i) * rowStep
             if i == koganeSel {
-                appendQuad(center: at(0.575, -0.19, oy), right: hr, up: hu,
-                           hw: 0.012, hh: 0.012, layer: highlightLayer, tint: gold, v: &v, idx: &idx)
+                appendQuad(center: at(0.575, -0.12, oy), right: hr, up: hu,
+                           hw: 0.009, hh: 0.009, layer: highlightLayer, tint: gold, v: &v, idx: &idx)
             }
             // Toggles show their state as a dot (green = on, grey = off).
             let label = i < koganeOptions.count ? koganeOptions[i] : ""
@@ -10522,11 +10522,11 @@ final class WorldSession {
                 let on = label == "Coordinates" ? coordsShown == true : label == "Biome" ? biomeShown == true
                     : label == "Minimap" ? ViewSettings.shared.minimap
                     : label == "Toggle music" ? VolumeSettings.shared.music > 0 : VolumeSettings.shared.sfx > 0
-                appendQuad(center: at(0.575, 0.19, oy), right: hr, up: hu, hw: 0.02, hh: 0.02,
+                appendQuad(center: at(0.575, 0.12, oy), right: hr, up: hu, hw: 0.013, hh: 0.013,
                            layer: highlightLayer, tint: on ? Self.packTint(60, 210, 90) : Self.packTint(70, 70, 78),
                            v: &v, idx: &idx)
             }
-            appendQuad(center: at(0.58, 0, oy), right: hr, up: hu, hw: 0.11, hh: 0.055,
+            appendQuad(center: at(0.58, 0, oy), right: hr, up: hu, hw: 0.075, hh: 0.0375,
                        layer: layer, tint: i == koganeSel ? gold : 16777215, v: &v, idx: &idx)
         }
     }
