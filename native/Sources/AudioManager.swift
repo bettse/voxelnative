@@ -68,6 +68,12 @@ final class ViewSettings {
             defaults.set(hudCached, forKey: "view.hudDistance")
         }
     }
+    // Pause-menu minimap toggle. Ours, not the server's.
+    private var minimapCached = UserDefaults.standard.bool(forKey: "view.minimap")
+    var minimap: Bool {
+        get { minimapCached }
+        set { minimapCached = newValue; defaults.set(newValue, forKey: "view.minimap") }
+    }
     var blocks: Int {
         get {
             guard defaults.object(forKey: key) != nil else { return Self.defaultBlocks }

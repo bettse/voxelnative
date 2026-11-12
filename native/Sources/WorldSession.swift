@@ -157,7 +157,7 @@ final class WorldSession {
     private let koganeOptions: [String] = {
         // No "Take photo": the left Create button (and P / F12) does that. No Chat:
         // the app doesn't send or show chat.
-        var o = ["Resume", "Coordinates", "Biome", "Exit to menu", "Quit game"]
+        var o = ["Resume", "Coordinates", "Biome", "Minimap", "Exit to menu", "Quit game"]
         if UserDefaults.standard.bool(forKey: "vrdev.testingMode") { o.insert("Bug note", at: 1) }
         return o
     }()
@@ -893,6 +893,7 @@ final class WorldSession {
                 "inventoryOpen": inventoryOpen, "formspecOpen": formspecOpen,
                 "formspecName": formspecName,
                 "menuOpen": koganeMenuOpen, "menuSel": koganeMenuOpen ? koganeOptions[koganeSel] : "",
+                "minimap": ViewSettings.shared.minimap || minimapForced,
                 "keyboardOpen": keyboardOpen,
             ]
             if let it = simStackDesc(inventoryStack(InvSlot(loc: "current_player", list: "main", index: wi, u: 0, v: 0))) { d["wieldItem"] = it }
@@ -4147,6 +4148,11 @@ final class WorldSession {
             // level 1 (coordinates) or 0.
             client.sendChat(biomeShown == true ? (coordsShown == true ? "/debug 1" : "/debug 0") : "/debug 3")
             return
+        case "Minimap":
+            // Ours (no server side): a local setting that sticks.
+            ViewSettings.shared.minimap.toggle()
+            print("[kogane] minimap \(ViewSettings.shared.minimap ? "on" : "off")"); fflush(stdout)
+            return
         case "Exit to menu":
             koganeMenuOpen = false
             DispatchQueue.main.async { [weak self] in self?.appModel?.requestExit(.toMenu) }
@@ -6693,6 +6699,188 @@ final class WorldSession {
         return false
     }
 
+    // MARK: - Minimap
+
+    // A GTA-style minimap in the upper right: the loaded terrain around you
+    // from above, turned so the way you face is up, with you as an arrow at
+    // the centre. It doubles as a compass: an N rides the rim at true north.
+    private var minimapLayer = -1               // model-array layer of the disk
+    private var minimapArrowLayer = -1
+    private var minimapBuiltAt: Double = 0
+    private var minimapCentre = SIMD3<Int>(Int.min, Int.min, Int.min)
+    private var minimapColors: [UInt16: SIMD3<Float>] = [:]   // top-tile average colour per content id
+    private let minimapForced = UserDefaults.standard.bool(forKey: "vrdev.minimap")
+    private static let minimapRadius = 32       // nodes from you to the rim
+    private static let minimapPx = 4            // texture pixels per node (256 / 64)
+
+    /// The colour a node paints on the map: the average of its top tile's
+    /// texels, times the biome palette tint for its param2 (grass, leaves,
+    /// water). nil until the tile has reached the atlas.
+    private func minimapColor(_ id: UInt16, _ p2: UInt8) -> SIMD3<Float>? {
+        var base = minimapColors[id]
+        if base == nil {
+            guard let tile = client.nodes.faceTile(id, 0) ?? client.nodes.specialTile(id),
+                  let ai = atlas.tileLayer(tile) ?? NodeRegistry.imageNames(tile).first.flatMap({ atlas.tileLayer($0) }),
+                  let px = atlas.pixels(Int(ai)) else { return nil }
+            var r = 0, g = 0, b = 0, n = 0, i = 0
+            while i + 3 < px.count {
+                if px[i + 3] > 0 { r += Int(px[i]); g += Int(px[i + 1]); b += Int(px[i + 2]); n += 1 }
+                i += 4
+            }
+            guard n > 0 else { return nil }
+            let c = SIMD3<Float>(Float(r), Float(g), Float(b)) / (255 * Float(n))
+            minimapColors[id] = c
+            base = c
+        }
+        guard var c = base else { return nil }
+        if let colors = atlas.paletteColors(id), !colors.isEmpty {
+            let idx: Int
+            switch client.nodes.paramType2(id) {       // same index bits as the mesher's tintFor
+            case 9, 12: idx = Int(p2) >> 5
+            case 10: idx = Int(p2) >> 3
+            case 14: idx = Int(p2) >> 2
+            default: idx = Int(p2)
+            }
+            let t = colors[min(max(idx, 0), colors.count - 1)]
+            if t.x + t.y + t.z >= 0.06 { c *= t }
+        }
+        return c
+    }
+
+    /// Repaint the disk around `feet` (node space): a 64x64-column scan of the
+    /// loaded world where the first node under y+40 colours its column. Lit
+    /// Minecraft-map style: a column higher than its northern neighbour is
+    /// brighter, lower is darker, and ground above you reads lighter than
+    /// ground below.
+    private func rebuildMinimap(feet: SIMD3<Float>) {
+        let R = Self.minimapRadius, W = 2 * R, P = Self.minimapPx, N = ModelTextureHandoff.size
+        let cx = Int(floor(feet.x)), cy = Int(floor(feet.y)), cz = Int(floor(feet.z))
+        let top = cy + 40, bottom = cy - 80
+        // Row 0 is one node north of the disk, for the slope of the top row.
+        var heights = [Int32](repeating: Int32.min, count: W * (W + 1))
+        var colors = [SIMD3<Float>](repeating: .zero, count: W * (W + 1))
+        var cursor = WorldMap.BlockCursor()
+        let world = client.world, nodes = client.nodes
+        for j in 0...W {
+            let z = cz + R - j
+            for i in 0..<W {
+                let x = cx - R + i
+                var y = top
+                while y >= bottom {
+                    let id = world.nodeId(SIMD3(x, y, z), &cursor)
+                    if id == WorldMap.CONTENT_IGNORE { y = (y & ~15) - 1; continue }   // unloaded block: skip it whole
+                    if id != WorldMap.CONTENT_AIR {
+                        let dt = nodes.drawtype(id)
+                        // Plants, torches, signs, rails, fire: see through to the ground.
+                        if dt != 1 && dt != 7 && dt != 8 && dt != 9 && dt != 11 && dt != 14,
+                           let c = minimapColor(id, world.nodeParam2(SIMD3(x, y, z))) {
+                            heights[j * W + i] = Int32(y); colors[j * W + i] = c
+                            break
+                        }
+                    }
+                    y -= 1
+                }
+            }
+        }
+        var px = [UInt8](repeating: 0, count: N * N * 4)
+        let c0 = Float(N) * 0.5, rim = c0 - 2, inner = rim - 3
+        for py in 0..<N {
+            let j = py / P + 1
+            for pxl in 0..<N {
+                let dx = Float(pxl) + 0.5 - c0, dy = Float(py) + 0.5 - c0
+                let d = (dx * dx + dy * dy).squareRoot()
+                guard d <= rim else { continue }
+                let o = (py * N + pxl) * 4
+                if d > inner { px[o] = 22; px[o + 1] = 22; px[o + 2] = 26; px[o + 3] = 255; continue }
+                let i = pxl / P, h = heights[j * W + i]
+                var c = SIMD3<Float>(0.11, 0.11, 0.13)
+                if h != Int32.min {
+                    let hn = heights[(j - 1) * W + i]
+                    var shade: Float = hn == Int32.min ? 1 : hn < h ? 1.18 : hn > h ? 0.76 : 1
+                    shade *= max(0.6, min(1.25, 1 + Float(Int(h) - cy) * 0.012))
+                    c = colors[j * W + i] * shade
+                }
+                px[o] = UInt8(max(0, min(255, c.x * 255)))
+                px[o + 1] = UInt8(max(0, min(255, c.y * 255)))
+                px[o + 2] = UInt8(max(0, min(255, c.z * 255)))
+                px[o + 3] = 255
+            }
+        }
+        if minimapLayer < 0 { minimapLayer = registerRGBALayer("#minimap", px) } else { updateModelLayer(minimapLayer, px) }
+        if minimapArrowLayer < 0 { minimapArrowLayer = registerRGBALayer("#minimaparrow", Self.renderMinimapArrow(canvas: N)) }
+        minimapCentre = SIMD3(cx, cy, cz); minimapBuiltAt = AppClock.seconds
+    }
+
+    /// The player arrow: a white arrowhead with a dark outline, tip up, notch
+    /// at the base. Alpha 0 elsewhere (the overlay cuts out under 0.5).
+    private static func renderMinimapArrow(canvas n: Int) -> [UInt8] {
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        let c = Float(n) * 0.5
+        func inside(_ u: Float, _ w: Float, _ k: Float) -> Bool {
+            let a = abs(u) / k, b = w / k
+            guard b <= 0.9, b >= -0.6, a <= 0.6 * (0.9 - b) / 1.5 else { return false }
+            return b >= -0.25 - 0.35 * (a / 0.6)
+        }
+        for y in 0..<n { for x in 0..<n {
+            let u = (Float(x) + 0.5 - c) / c, w = (c - Float(y) - 0.5) / c
+            let o = (y * n + x) * 4
+            if inside(u, w, 1) { px[o] = 255; px[o + 1] = 255; px[o + 2] = 255; px[o + 3] = 255 }
+            else if inside(u, w, 1.3) { px[o] = 25; px[o + 1] = 25; px[o + 2] = 30; px[o + 3] = 255 }
+        } }
+        return px
+    }
+
+    /// Draw the disk head-locked in the upper right (under the potion-effect
+    /// icons when any are up), turned so the way you look is up; the arrow and
+    /// the N stay upright. Gaze with no horizontal part (looking straight up or
+    /// down) falls back to the body's yaw.
+    private func appendMinimap(feet: SIMD3<Float>, gaze: SIMD3<Float>, bodyYaw: Float,
+                               v: inout [Float], idx: inout [UInt32]) {
+        guard minimapLayer >= 0, highlightLayer >= 0 else { return }
+        let hx = frameHeadXform
+        let headPos = SIMD3<Float>(hx.columns.3.x, hx.columns.3.y, hx.columns.3.z)
+        let hr = simd_normalize(SIMD3<Float>(hx.columns.0.x, hx.columns.0.y, hx.columns.0.z))
+        let hu = simd_normalize(SIMD3<Float>(hx.columns.1.x, hx.columns.1.y, hx.columns.1.z))
+        let hf = -simd_normalize(SIMD3<Float>(hx.columns.2.x, hx.columns.2.y, hx.columns.2.z))
+        let D = Self.hudDepth * hudK
+        let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x, ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
+        let effects = client.hudElements.values.contains { $0.type == 0 && $0.pos.x >= 0.99 && $0.pos.y <= 0.01 && !$0.text.isEmpty }
+        let radiusPx: Float = 210                 // nominal HUD px
+        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, (effects ? 210 : 30) + radiusPx)
+        let az = (cpx.x - Self.hudScreen.x / 2) * kx, el = (Self.hudScreen.y / 2 - cpx.y) * ky
+        let centre = headPos + hf * D + hr * (tan(az) * D) + hu * (tan(el) * D)
+        let hs = tan(radiusPx * kx) * D
+        // Heading clockwise from north (+Z north, +X east). The map turns the
+        // other way so that heading points up: facing east, north is on your left.
+        let hl = (gaze.x * gaze.x + gaze.z * gaze.z).squareRoot()
+        let theta = hl > 0.2 ? atan2(gaze.x, gaze.z) : bodyYaw
+        let ct = cos(theta), st = sin(theta)
+        let east = hr * ct + hu * st, north = hu * ct - hr * st
+        // Slide the map by your offset inside the node so the arrow is on your
+        // exact spot; the texture only repaints when you change node.
+        let k = hs * Float(Self.minimapPx) / (Float(ModelTextureHandoff.size) * 0.5)
+        let mc = centre - east * ((feet.x - floor(feet.x)) * k) - north * ((feet.z - floor(feet.z)) * k)
+        let corners = [mc - east * hs + north * hs, mc + east * hs + north * hs,
+                       mc + east * hs - north * hs, mc - east * hs - north * hs]
+        let base = UInt32(v.count / 9)
+        for (i, p) in corners.enumerated() {
+            pushV(&v, p.x, p.y, p.z, Self.quadUVsTL[i].0, Self.quadUVsTL[i].1, Float(minimapLayer), 1.0, 255, 16777215)
+        }
+        pushQuad(&idx, base)
+        if minimapArrowLayer >= 0 {
+            appendQuad(center: centre - hf * 0.002, right: hr, up: hu, hw: hs * 0.1, hh: hs * 0.1,
+                       layer: minimapArrowLayer, tint: 16777215, v: &v, idx: &idx)
+        }
+        if let t = hudTextLayer(id: 3_200_000, text: "N") {
+            let th = hs * 0.13, tw = th * max(0.4, t.aspect)
+            let np = centre + north * (hs * 0.84) - hf * 0.002
+            appendQuad(center: np, right: hr, up: hu, hw: tw + 0.004, hh: th + 0.003,
+                       layer: highlightLayer, tint: Self.packTint(22, 22, 26), v: &v, idx: &idx)
+            appendQuad(center: np - hf * 0.001, right: hr, up: hu, hw: tw, hh: th,
+                       layer: t.layer, tint: Self.packTint(255, 72, 60), v: &v, idx: &idx)
+        }
+    }
+
     /// Draw the server's generic HUD elements (Hud::drawLuaElements): images
     /// sized by texture px * scale (negative scale = percent of screen) and
     /// anchored by align (-1..1), text in its `number` colour, waypoints at the
@@ -8017,6 +8205,17 @@ final class WorldSession {
         appendStatusBanner(v: &ov, idx: &oi)
         appendXpLevel(v: &ov, idx: &oi)
         appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
+        if (ViewSettings.shared.minimap || minimapForced) && !dead {
+            // Repaint when you cross into another node (throttled: running
+            // changes nodes several times a second) and once a second anyway
+            // for blocks that loaded or changed under a still player.
+            let node = SIMD3(Int(floor(s.feet.x)), Int(floor(s.feet.y)), Int(floor(s.feet.z)))
+            let now = AppClock.seconds
+            if minimapLayer < 0 || (node != minimapCentre && now - minimapBuiltAt > 0.15) || now - minimapBuiltAt > 1.0 {
+                let t0 = perf.now(); rebuildMinimap(feet: s.feet); perf.add("minimap", t0, perf.now())
+            }
+            appendMinimap(feet: s.feet, gaze: aimDir, bodyYaw: s.yaw, v: &ov, idx: &oi)
+        }
         // Entity nametags: overlay (no depth, like the engine's
         // screen-space nametags), camera-facing, in origin space with the same
         // Z mirror the world gets.
@@ -10296,10 +10495,11 @@ final class WorldSession {
                 appendQuad(center: at(0.575, -0.19, oy), right: hr, up: hu,
                            hw: 0.012, hh: 0.012, layer: highlightLayer, tint: gold, v: &v, idx: &idx)
             }
-            // Audio toggles show their state as a dot (green = on, grey = off).
+            // Toggles show their state as a dot (green = on, grey = off).
             let label = i < koganeOptions.count ? koganeOptions[i] : ""
-            if label == "Toggle music" || label == "Toggle sound" || label == "Coordinates" || label == "Biome" {
+            if label == "Toggle music" || label == "Toggle sound" || label == "Coordinates" || label == "Biome" || label == "Minimap" {
                 let on = label == "Coordinates" ? coordsShown == true : label == "Biome" ? biomeShown == true
+                    : label == "Minimap" ? ViewSettings.shared.minimap
                     : label == "Toggle music" ? VolumeSettings.shared.music > 0 : VolumeSettings.shared.sfx > 0
                 appendQuad(center: at(0.575, 0.19, oy), right: hr, up: hu, hw: 0.02, hh: 0.02,
                            layer: highlightLayer, tint: on ? Self.packTint(60, 210, 90) : Self.packTint(70, 70, 78),
