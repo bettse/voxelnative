@@ -107,6 +107,20 @@ local function scan()
 		end
 	end
 	write("worldmap_columns.csv", table.concat(lines, "\n") .. "\n")
+	-- The biome table as the engine resolved it (registration order is the
+	-- engine's id order, which breaks ties in biome selection), for a port of
+	-- the biome picker to check against.
+	local bl = {}
+	for name, def in pairs(minetest.registered_biomes) do
+		local id = minetest.get_biome_id(name)
+		bl[#bl + 1] = string.format('{"id":%d,"name":%q,"heat":%s,"humidity":%s,"y_min":%d,"y_max":%d,"node_top":%q,"node_filler":%q,"node_water_top":%q,"node_water":%q,"node_riverbed":%q,"vertical_blend":%d,"weight":%s,"min_pos":%s,"max_pos":%s}',
+			id, name, tostring(def.heat_point or 50), tostring(def.humidity_point or 50), def.y_min or -31000, def.y_max or 31000,
+			def.node_top or "", def.node_filler or "", def.node_water_top or "", def.node_water or "", def.node_riverbed or "",
+			def.vertical_blend or 0, tostring(def.weight or 1),
+			def.min_pos and string.format("[%d,%d,%d]", def.min_pos.x, def.min_pos.y, def.min_pos.z) or "null",
+			def.max_pos and string.format("[%d,%d,%d]", def.max_pos.x, def.max_pos.y, def.max_pos.z) or "null")
+	end
+	write("worldmap_biomes.json", "[" .. table.concat(bl, ",") .. "]\n")
 
 	-- Strongholds come straight from the seed (rings around the origin), so
 	-- list all of them, generated here or not.

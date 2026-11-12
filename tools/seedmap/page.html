@@ -1,0 +1,283 @@
+<title>VoxeLibre Seed Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one working screen. A thin control bar on top, the map fills the
+   rest; a hover readout rides the bottom-left corner of the map and the
+   legend folds out on the right. On a phone the bar wraps and the legend
+   becomes a sheet under the map. */
+:root {
+  --bg: #e9e6dc; --panel: #f6f4ec; --ink: #1f2a2e; --muted: #5d6a6e; --line: #cfcbbd;
+  --accent: #b5472b; --accent-ink: #ffffff; --grid: rgba(31,42,46,0.08);
+  --font: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #171c1f; --panel: #20272b; --ink: #e8e4d8; --muted: #9aa6aa; --line: #343d42;
+  --accent: #e0714f; --accent-ink: #171c1f; --grid: rgba(232,228,216,0.08); color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #171c1f; --panel: #20272b; --ink: #e8e4d8; --muted: #9aa6aa; --line: #343d42;
+  --accent: #e0714f; --accent-ink: #171c1f; --grid: rgba(232,228,216,0.08); color-scheme: dark }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 var(--font); display: flex; flex-direction: column; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.bar h1 { font-size: 15px; font-weight: 600; margin: 0 6px 0 0; letter-spacing: 0.01em; }
+.field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.field label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+input[type=text] { font: 13px var(--mono); padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); min-width: 0; }
+#seed { width: 21ch; } #goto { width: 11ch; } #mark { width: 11ch; }
+button { font: 500 13px var(--font); padding: 6px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); color: var(--ink); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.zoom { display: flex; gap: 2px; }
+.zoom button { padding: 6px 9px; font-family: var(--mono); }
+.zoom button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.status { font: 12px var(--mono); color: var(--muted); margin-left: auto; white-space: nowrap; }
+main { position: relative; flex: 1; min-height: 320px; display: flex; min-width: 0; }
+#map { flex: 1; min-width: 0; touch-action: none; cursor: grab; background: var(--bg);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); background-size: 32px 32px; }
+#map:active { cursor: grabbing; }
+.readout { position: absolute; left: 12px; bottom: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px;
+  font: 12px/1.5 var(--mono); pointer-events: none; min-width: 20ch; font-variant-numeric: tabular-nums; }
+.readout b { font-weight: 500; color: var(--muted); }
+aside { width: 230px; border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 12px 14px; font-size: 12px; }
+aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 8px; }
+.legend { display: grid; grid-template-columns: 14px 1fr; gap: 5px 8px; align-items: center; margin-bottom: 14px; }
+.legend i { display: block; width: 14px; height: 14px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15); }
+.legend span { font-variant-numeric: tabular-nums; }
+details summary { cursor: pointer; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+textarea { width: 100%; box-sizing: border-box; height: 160px; font: 11px var(--mono); margin-top: 8px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }
+aside p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
+@media (max-width: 720px) {
+  main { flex-direction: column; }
+  aside { width: auto; border-left: 0; border-top: 1px solid var(--line); max-height: 40%; }
+  #map { min-height: 300px; }
+  .status { margin-left: 0; width: 100%; }
+}
+@media (prefers-reduced-motion: no-preference) { .readout { transition: opacity 120ms; } }
+</style>
+
+<div class="bar">
+  <h1>VoxeLibre Seed Map</h1>
+  <div class="field"><label for="seed">Seed</label><input type="text" id="seed" inputmode="numeric" autocomplete="off"></div>
+  <button class="primary" id="go">Generate</button>
+  <div class="field"><label for="goto">Go to</label><input type="text" id="goto" placeholder="x, z" autocomplete="off"></div>
+  <div class="field"><label for="mark">Mark</label><input type="text" id="mark" placeholder="x, z" autocomplete="off"></div>
+  <div class="zoom" role="group" aria-label="Zoom">
+    <button data-z="1">1×</button><button data-z="2" aria-pressed="true">2×</button><button data-z="4">4×</button><button data-z="8">8×</button>
+  </div>
+  <span class="status" id="status">ready</span>
+</div>
+<main>
+  <canvas id="map" aria-label="World map"></canvas>
+  <div class="readout" id="readout"><b>x</b> — <b>z</b> —<br>hover the map</div>
+  <aside>
+    <h2>Biomes in view</h2>
+    <div class="legend" id="legend"></div>
+    <details>
+      <summary>Map settings (map_meta.txt)</summary>
+      <textarea id="meta" spellcheck="false"></textarea>
+      <p>Paste the server's map_meta.txt to use its noise settings. The default is VoxeLibre's mapgen v7 as shipped.</p>
+    </details>
+    <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit; checked against a headless render of the same seed. Villages, outposts and temples reshape the ground where they stand and are not drawn yet. Caves that open at the surface are not carved.</p>
+    <p>Overworld sea level is y = 1. Hover for height and biome; drag to pan, scroll or pinch to zoom.</p>
+  </aside>
+</main>
+
+<script id="genSrc" type="text/plain">
+/*__GEN__*/
+self.onmessage = function (e) {
+  const m = e.data;
+  if (m.type === "init") {
+    self.gen = makeGen(parseMapMeta(m.meta), m.biomes);
+    self.biomeIndex = new Map(m.biomes.map((b, i) => [b.name, i]));
+    postMessage({ type: "ready" });
+    return;
+  }
+  if (m.type === "tile") {
+    const n = m.n, h = new Int16Array(n * n), w = new Uint8Array(n * n), b = new Uint16Array(n * n), f = new Int16Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const x = m.x0 + i, z = m.z0 + j, k = j * n + i;
+      const c = self.gen.column(x, z);
+      h[k] = c.y; w[k] = c.water ? 1 : 0; f[k] = c.surface;
+      const bb = self.gen.biomeAt(x, c.y, z);
+      b[k] = bb ? self.biomeIndex.get(bb.name) : 65535;
+    }
+    postMessage({ type: "tile", id: m.id, x0: m.x0, z0: m.z0, n, h, w, b, f }, [h.buffer, w.buffer, b.buffer, f.buffer]);
+  }
+};
+</script>
+
+<script>
+const BIOMES = /*__BIOMES__*/;
+const META_DEFAULT = /*__META__*/;
+const SAMPLE_SEED = "11002241683599094559";   // the dev world used to check the port
+const PALETTE = [
+  ["deep_ocean",[24,52,120]],["ocean",[40,80,160]],["river",[70,120,200]],["beach",[220,205,150]],["shore",[215,200,150]],
+  ["mushroom",[150,110,160]],["desert",[225,205,130]],["mesa",[200,110,60]],["savanna",[180,175,90]],["bamboo",[90,170,60]],
+  ["jungle",[40,130,40]],["swamp",[80,100,60]],["mangrove",[70,95,55]],["cherry",[235,170,200]],["icespikes",[200,230,245]],
+  ["ice",[190,220,240]],["snow",[235,240,245]],["cold",[170,200,200]],["megataiga",[70,110,80]],["megaspruce",[70,110,80]],
+  ["taiga",[90,130,100]],["roofed",[40,80,35]],["birch",[120,165,90]],["flower",[130,180,80]],["forest",[70,130,55]],
+  ["sunflower",[150,195,85]],["plains",[130,185,85]],["stonebeach",[140,140,140]],["extremehills",[120,130,120]],["hills",[125,140,110]],
+];
+function hashHue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; }
+function hsv(h, s, v) { const f = (n, k = (n + h / 60) % 6) => v - v * s * Math.max(Math.min(k, 4 - k, 1), 0); return [f(5) * 255, f(3) * 255, f(1) * 255]; }
+const biomeColour = BIOMES.map(b => { const low = b.name.toLowerCase(); for (const [k, c] of PALETTE) if (low.includes(k)) return c; return hsv(hashHue(b.name), 0.35, 0.75); });
+
+// ---- state ------------------------------------------------------------------
+const TILE = 64;
+const canvas = document.getElementById("map"), ctx = canvas.getContext("2d");
+const status = document.getElementById("status"), readout = document.getElementById("readout"), legendEl = document.getElementById("legend");
+const seedIn = document.getElementById("seed"), metaIn = document.getElementById("meta");
+let zoom = 2, cx = 0, cz = 0;                  // node coordinates at the canvas centre
+let tiles = new Map(), pending = new Map(), worker = null, ready = false, nextId = 1, generation = 0;
+let marker = null;
+const WATER_LEVEL = 1;
+seedIn.value = SAMPLE_SEED; metaIn.value = META_DEFAULT;
+try { const s = localStorage.getItem("seedmap.seed"); if (s) seedIn.value = s; const m = localStorage.getItem("seedmap.meta"); if (m) metaIn.value = m; } catch (_) {}
+
+function metaWithSeed() {
+  const seed = seedIn.value.trim().replace(/[^0-9-]/g, "") || "0";
+  return metaIn.value.replace(/^\s*seed\s*=.*$/m, "") + "\nseed = " + seed + "\n";
+}
+
+// Paint one tile to an ImageData at 1 px per node: biome colour, hill shade
+// from the slope, water darkened by depth.
+function paintTile(m) {
+  const n = m.n, img = ctx.createImageData(n, n), d = img.data;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const k = j * n + i, y = m.h[k];
+    let c = m.b[k] === 65535 ? [128, 128, 128] : biomeColour[m.b[k]];
+    let r = c[0], g = c[1], b = c[2];
+    if (m.w[k]) {
+      const depth = Math.max(0, WATER_LEVEL - m.f[k]);
+      const t = Math.min(1, depth / 24);
+      r = 40 + (24 - 40) * t; g = 80 + (52 - 80) * t; b = 160 + (120 - 160) * t;
+      if (m.b[k] !== 65535 && !/ocean|river|water/i.test(BIOMES[m.b[k]].name)) { r = r * 0.7 + c[0] * 0.3; g = g * 0.7 + c[1] * 0.3; b = b * 0.7 + c[2] * 0.3; }
+    } else {
+      const e = i + 1 < n ? m.h[k + 1] : y, s = j + 1 < n ? m.h[k + n] : y;
+      const slope = (y - e) + (y - s);                 // light from the north-west
+      const shade = Math.max(0.6, Math.min(1.25, 1 + slope * 0.06));
+      const alt = Math.max(0, Math.min(1, (y - 60) / 60)); // high ground fades toward stone grey
+      r = (r * (1 - alt) + 140 * alt) * shade; g = (g * (1 - alt) + 140 * alt) * shade; b = (b * (1 - alt) + 140 * alt) * shade;
+    }
+    const o = k * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+  }
+  const off = document.createElement("canvas"); off.width = n; off.height = n; off.getContext("2d").putImageData(img, 0, 0);
+  return { img: off, h: m.h, w: m.w, b: m.b, f: m.f };
+}
+
+// Tiles the view needs, nearest the centre first; at most 6 in flight.
+function request() {
+  if (!ready) return;
+  const W = canvas.width, H = canvas.height;
+  const x0 = Math.floor(cx - W / 2 / zoom), x1 = Math.ceil(cx + W / 2 / zoom), z0 = Math.floor(cz - H / 2 / zoom), z1 = Math.ceil(cz + H / 2 / zoom);
+  const want = [];
+  for (let tz = Math.floor(z0 / TILE) * TILE; tz <= z1; tz += TILE) for (let tx = Math.floor(x0 / TILE) * TILE; tx <= x1; tx += TILE) {
+    const key = tx + "," + tz;
+    if (tiles.has(key) || [...pending.values()].includes(key)) continue;
+    want.push([tx, tz, (tx + TILE / 2 - cx) ** 2 + (tz + TILE / 2 - cz) ** 2]);
+  }
+  want.sort((a, b) => a[2] - b[2]);
+  while (pending.size < 6 && want.length) {
+    const [tx, tz] = want.shift(); const id = nextId++;
+    pending.set(id, tx + "," + tz);
+    worker.postMessage({ type: "tile", id, x0: tx, z0: tz, n: TILE });
+  }
+  status.textContent = pending.size ? `generating ${pending.size + want.length} tiles` : `${tiles.size} tiles · ${zoom}× · seed ${seedIn.value.trim()}`;
+  if (!pending.size) updateLegend();
+}
+
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+  ctx.imageSmoothingEnabled = false;
+  for (const [key, t] of tiles) {
+    const [tx, tz] = key.split(",").map(Number);
+    const px = (tx - cx) * zoom + W / 2, py = (tz - cz) * zoom + H / 2;
+    if (px > W || py > H || px + TILE * zoom < 0 || py + TILE * zoom < 0) continue;
+    ctx.drawImage(t.img, Math.round(px), Math.round(py), TILE * zoom, TILE * zoom);
+  }
+  // origin cross and the marker
+  ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1;
+  const ox = (0 - cx) * zoom + W / 2, oz = (0 - cz) * zoom + H / 2;
+  ctx.beginPath(); ctx.moveTo(ox - 6, oz); ctx.lineTo(ox + 6, oz); ctx.moveTo(ox, oz - 6); ctx.lineTo(ox, oz + 6); ctx.stroke();
+  if (marker) {
+    const mx = (marker[0] + 0.5 - cx) * zoom + W / 2, mz = (marker[1] + 0.5 - cz) * zoom + H / 2;
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#b5472b"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mx, mz, 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(mx, mz - 11); ctx.lineTo(mx, mz + 11); ctx.moveTo(mx - 11, mz); ctx.lineTo(mx + 11, mz); ctx.stroke();
+  }
+}
+
+function columnAt(x, z) {
+  const tx = Math.floor(x / TILE) * TILE, tz = Math.floor(z / TILE) * TILE, t = tiles.get(tx + "," + tz);
+  if (!t) return null;
+  const k = (z - tz) * TILE + (x - tx);
+  return { y: t.h[k], water: !!t.w[k], floor: t.f[k], biome: t.b[k] === 65535 ? "?" : BIOMES[t.b[k]].name };
+}
+function updateLegend() {
+  const W = canvas.width, H = canvas.height, counts = new Map();
+  for (const [key, t] of tiles) {
+    const [tx, tz] = key.split(",").map(Number);
+    if ((tx - cx) * zoom + W / 2 > W || (tz - cz) * zoom + H / 2 > H || (tx + TILE - cx) * zoom + W / 2 < 0 || (tz + TILE - cz) * zoom + H / 2 < 0) continue;
+    for (let k = 0; k < t.b.length; k++) counts.set(t.b[k], (counts.get(t.b[k]) || 0) + 1);
+  }
+  const rows = [...counts].filter(([i]) => i !== 65535).sort((a, b) => b[1] - a[1]).slice(0, 18);
+  legendEl.innerHTML = rows.map(([i, n]) => { const c = biomeColour[i]; return `<i style="background:rgb(${c.map(Math.round)})"></i><span>${BIOMES[i].name}</span>`; }).join("");
+}
+
+// ---- input --------------------------------------------------------------------
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(r.width)); canvas.height = Math.max(1, Math.round(r.height));
+  draw(); request();
+}
+new ResizeObserver(resize).observe(canvas);
+let drag = null;
+canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, cx, cz }; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => {
+  if (drag) { cx = drag.cx - (e.clientX - drag.x) / zoom; cz = drag.cz - (e.clientY - drag.y) / zoom; draw(); return; }
+  const r = canvas.getBoundingClientRect();
+  const x = Math.floor(cx + (e.clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz + (e.clientY - r.top - r.height / 2) / zoom);
+  const c = columnAt(x, z);
+  readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + (c ? (c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`) : "not generated yet");
+});
+canvas.addEventListener("pointerup", () => { if (drag) { drag = null; request(); } });
+canvas.addEventListener("pointercancel", () => { drag = null; });
+canvas.addEventListener("wheel", (e) => { e.preventDefault(); setZoom(e.deltaY < 0 ? zoom * 2 : zoom / 2); }, { passive: false });
+let pinch = null;
+canvas.addEventListener("touchstart", (e) => { if (e.touches.length === 2) pinch = { d: Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY), zoom }; }, { passive: true });
+canvas.addEventListener("touchmove", (e) => { if (pinch && e.touches.length === 2) { const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY); const z = pinch.zoom * d / pinch.d; setZoom(Math.pow(2, Math.round(Math.log2(z)))); } }, { passive: true });
+canvas.addEventListener("touchend", () => { pinch = null; });
+function setZoom(z) {
+  zoom = Math.max(1, Math.min(8, z));
+  for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
+  draw(); request();
+}
+for (const b of document.querySelectorAll(".zoom button")) b.addEventListener("click", () => setZoom(+b.dataset.z));
+function parseXZ(s) { const m = s.match(/(-?\d+)\s*[, ]\s*(-?\d+)/); return m ? [+m[1], +m[2]] : null; }
+document.getElementById("goto").addEventListener("change", (e) => { const p = parseXZ(e.target.value); if (p) { cx = p[0]; cz = p[1]; draw(); request(); } });
+document.getElementById("mark").addEventListener("change", (e) => { marker = parseXZ(e.target.value); if (marker) { cx = marker[0]; cz = marker[1]; } draw(); request(); });
+function generate() {
+  try { localStorage.setItem("seedmap.seed", seedIn.value.trim()); localStorage.setItem("seedmap.meta", metaIn.value); } catch (_) {}
+  status.textContent = "starting";
+  const meta = metaWithSeed();
+  if (worker) worker.terminate();
+  tiles = new Map(); pending = new Map(); ready = false; generation++;
+  const src = document.getElementById("genSrc").textContent;
+  worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+  const gen = generation;
+  worker.onmessage = (e) => {
+    if (gen !== generation) return;
+    const m = e.data;
+    if (m.type === "ready") { ready = true; request(); return; }
+    if (m.type === "tile") { pending.delete(m.id); tiles.set(m.x0 + "," + m.z0, paintTile(m)); draw(); request(); }
+  };
+  worker.onerror = (e) => { status.textContent = "generator error: " + e.message; };
+  worker.postMessage({ type: "init", meta, biomes: BIOMES });
+  draw();
+}
+document.getElementById("go").addEventListener("click", generate);
+seedIn.addEventListener("keydown", (e) => { if (e.key === "Enter") generate(); });
+generate();
+</script>
