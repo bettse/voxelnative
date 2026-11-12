@@ -51,7 +51,7 @@ backend = sqlite3
 EOF
 if [[ -n $META ]]; then
   # The meta's own seed line would win over --seed; keep its settings, use ours.
-  { grep -v '^seed = ' "$META"; printf 'seed = %s\n' "$SEED"; } > "$WORLD/map_meta.txt"
+  { grep -v '^seed = \|^\[end_of_params\]' "$META"; printf 'seed = %s\n[end_of_params]\n' "$SEED"; } > "$WORLD/map_meta.txt"
 else
   # VoxeLibre's defaults for a fresh world (it disallows v6).
   printf 'seed = %s\nmg_name = v7\n[end_of_params]\n' "$SEED" > "$WORLD/map_meta.txt"

@@ -238,8 +238,11 @@ function makeGen(settings, biomes) {
       if (riversHere) while (y > S.ymin && river(x, y, z, uw)) y--;
       top = y;
     }
+    // floor: the stone top even under water (a river channel carves below
+    // the base terrain, so it is not `surface` there)
+    const floor = top;
     if (top < S.water_level) { top = S.water_level; water = true; }
-    return { y: top, water, surface };
+    return { y: top, water, surface, floor };
   };
   // calcBiomeAtPoint: point heat/humidity, nearest biome valid at y.
   gen.heat = (x, z) => fr(fractal2d(S.np_heat, x, z, seed) + fractal2d(S.np_heat_blend, x, z, seed));

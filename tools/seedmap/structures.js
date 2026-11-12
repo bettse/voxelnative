@@ -91,7 +91,7 @@ function makeStructures(gen, decorations, structs, groups, biomesByName) {
     const ground = new Int16Array(CS * CS), water = new Uint8Array(CS * CS), biome = new Array(CS * CS);
     for (let j = 0; j < CS; j++) for (let i = 0; i < CS; i++) {
       const col = gen.column(ox + i, oz + j), k = j * CS + i;
-      ground[k] = col.water ? col.surface : col.y; water[k] = col.water ? 1 : 0;
+      ground[k] = col.floor; water[k] = col.water ? 1 : 0;
       biome[k] = gen.biomeAt(ox + i, ground[k], oz + j);
     }
     c = { ground, water, biome };

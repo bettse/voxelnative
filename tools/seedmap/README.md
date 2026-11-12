@@ -17,11 +17,13 @@ the headless mod dumps (biomes, decorations, structures, node groups) into
     node tools/seedmap/diff2.js /tmp/ref           # landmarks and strongholds vs the engine
     python3 tools/seedmap/build.py /tmp/ref         # -> tools/seedmap/seedmap.html
 
-Checked on the server's seed over 1280x1280 nodes (289 chunks): 39 of 41
-landmarks the headless run placed are found at the same spot (every outpost,
-ocean monument, shipwreck and cold ocean ruin; one ruined portal and one
-warm ocean ruin missed, one ruined portal extra), all 4 villages' chunks,
-and all 128 strongholds.
+Checked on the server's seed (7869100364537964025) over 1280x1280 nodes,
+289 chunks: 38 of 40 landmarks the headless run placed are found at the
+same spot (every ruined portal, ocean ruin and ocean monument; 6 of 7
+outposts and 17 of 19 igloos, each miss paired with a nearby extra where
+the game took a chunk's second candidate), both villages' chunks, and all
+128 strongholds. On the dev world's seed over the same area: 36 of 37
+landmarks, 4 of 4 villages, 128 strongholds.
 
 Known gaps: a village is marked where the game attempts one (the chunk
 gate and a flatness check), not where it finishes building; fallen trees
