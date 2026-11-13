@@ -6871,7 +6871,12 @@ final class WorldSession {
         let D = Self.hudDepth * hudK
         let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x, ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
         let radiusPx = Self.minimapRadiusPx
-        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, 10 + radiusPx)
+        // The disk is round in the world, so its vertical extent in nominal
+        // pixels is radiusPx * kx / ky (the HUD window's vertical pixels span
+        // more angle). Its top lines up with mcl_potions' effect icons,
+        // which sit at offset y=3 from the top edge.
+        let top = 3 * Self.hudSizeBoost
+        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, top + radiusPx * kx / ky)
         let az = (cpx.x - Self.hudScreen.x / 2) * kx, el = (Self.hudScreen.y / 2 - cpx.y) * ky
         let centre = headPos + hf * D + hr * (tan(az) * D) + hu * (tan(el) * D)
         let hs = tan(radiusPx * kx) * D
