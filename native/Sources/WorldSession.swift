@@ -7025,8 +7025,13 @@ final class WorldSession {
         // count too: the server laid out that row even when it's blank, and an
         // effect with no level (blank label above its timer) left the timer
         // with no neighbour, so it drew at full size, huge under the icons.
-        let textLines: [(id: Int, pos: SIMD2<Float>, off: SIMD2<Float>)] = elems.compactMap { (id, e) in
-            e.type == 1 && !skip.contains(id) ? (id, e.pos, e.offset) : nil
+        // Top-anchored images count as a row below a text (the boss bar under
+        // its title: the enlarged title ran into the bar).
+        let textLines: [(id: Int, pos: SIMD2<Float>, off: SIMD2<Float>, image: Bool)] = elems.compactMap { (id, e) in
+            guard !skip.contains(id) else { return nil }
+            if e.type == 1 { return (id, e.pos, e.offset, false) }
+            if e.type == 0, e.align.y > 0.5, !e.text.isEmpty { return (id, e.pos, e.offset, true) }
+            return nil
         }
         for (id, e) in elems where !skip.contains(id) && drawn < 128 {
             // statbar/inventory/compass/minimap/hotbar aren't drawn here EXCEPT
@@ -7045,8 +7050,9 @@ final class WorldSession {
             // normalised position stays pinned to the screen edge.
             var anchor = e.pos * Self.hudScreen + e.offset * Self.hudSizeBoost
             // The minimap takes the top-right corner; potion icons and their
-            // timers (anchored there) slide left past it.
-            if minimapDrawn, e.pos.x >= 0.99, e.pos.y <= 0.01 { anchor.x -= 2 * Self.minimapRadiusPx + 50 }
+            // timers (anchored there) hang below it instead. (Sliding them left
+            // put the timers on the boss bar's right end.)
+            if minimapDrawn, e.pos.x >= 0.99, e.pos.y <= 0.01 { anchor.y += 2 * Self.minimapRadiusPx + 30 }
             switch e.type {
             case 1:                                              // text
                 guard !e.text.isEmpty, let t = hudTextBlockLayer(id: id, text: e.text) else { continue }
@@ -7074,6 +7080,7 @@ final class WorldSession {
                     // a black copy 1 px off as a shadow, which squeezed the
                     // coordinate readout to a smudge.
                     let dy = abs(o.off.y - e.offset.y)
+                    if o.image && o.off.y < e.offset.y { continue }   // an image above (potion icon) doesn't bound its label
                     if dy >= 3 { gap = min(gap, dy) }
                 }
                 if gap.isFinite {
@@ -7108,6 +7115,11 @@ final class WorldSession {
                 var dst = img.src * e.scale * Self.hudSizeBoost
                 if e.scale.x < 0 { dst.x = Self.hudScreen.x * (-0.01 * e.scale.x) }   // percent of screen: no boost
                 if e.scale.y < 0 { dst.y = Self.hudScreen.y * (-0.01 * e.scale.y) }
+                // The boost is for legibility, not for bars: mcl_bossbars' 546 px
+                // bar came out 1365 of the window's 1920 px, under the minimap
+                // and over the coordinate readout. Half the window is plenty.
+                let maxW = Self.hudScreen.x * 0.5
+                if e.scale.x > 0, dst.x > maxW { dst *= maxW / dst.x }
                 var base = anchor
                 if e.type == 5 { guard let p = pixel(ofNode: e.worldPos) else { continue }; base = p + e.offset * Self.hudSizeBoost }
                 let c = at(base + e.align * dst / 2)
