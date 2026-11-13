@@ -6296,16 +6296,16 @@ final class WorldSession {
 
     // Server HUD elements: generic image/text/waypoint elements from
     // HUDADD (boss bars, potion effects, vignettes), drawn in the overlay
-    // against a nominal 1920x1080 screen mapped onto a +-0.42 x +-0.32 rad
-    // window 1.2 m ahead. Statbars and the XP pair have their own paths.
+    // against a nominal 1920x1080 screen mapped onto a 16:9 window
+    // (+-0.36 x +-0.2025 rad) 1.2 m ahead. Statbars and the XP pair have their own paths.
     private var hudTextLayers: [Int: (layer: Int, text: String, aspect: Float)] = [:]
     private var hudTextBlocks: [Int: (layers: [Int], text: String, aspect: Float, lines: Int, lineToCap: Float)] = [:]
     private var hudElementsLogged = false          // sim: one-shot dump of the server's HUD elements
     private static let hudScreen = SIMD2<Float>(1920, 1080)
-    // Horizontal half-angle kept under the peripheral stat columns (hearts /
-    // hunger at +-0.66 rad, bowing in to ~0.56 at the top) so VoxeLibre's
-    // top-right potion-effect stack doesn't land on the drumsticks.
-    private static let hudHalfAngle = SIMD2<Float>(0.36, 0.32)
+    // Same angle per nominal pixel on both axes (16:9, like the screen), so a
+    // square texture draws square and text keeps its glyph shape. A taller
+    // window used to stretch every server image and glyph 1.58x vertically.
+    private static let hudHalfAngle = SIMD2<Float>(0.36, 0.2025)
     private static let hudDepth: Float = 1.2
     /// Desktop HUD sizes are tuned for a monitor, where 20 px of text is fine;
     /// at the same angular size in VR it's unreadable. Sizes (not positions)
@@ -6649,13 +6649,15 @@ final class WorldSession {
             // The real mcl_bossbars spec for red at 60% (frames 4/5 of 14).
             (9002, el(0, "(mcl_bossbars.png^[transformR270^[verticalframe:14:4^(mcl_bossbars_empty.png^[lowpart:60:mcl_bossbars.png^[transformR270^[verticalframe:14:5))^[resize:1456x40",
                       pos: SIMD2(0.5, 0), align: SIMD2(0, 1), offset: SIMD2(0, 65), scale: SIMD2(0.375, 0.375))),
-            (9003, el(0, "mcl_potions_effect_swiftness.png", pos: SIMD2(1, 0), align: SIMD2(1, 1), offset: SIMD2(-54, 3), scale: SIMD2(0.375, 0.375), z: 100)),
+            // mcl_potions sends def.icon .. "^[resize:128x128": the 16 px art
+            // is drawn at 128 * 0.375 = 48 px, not as a 6 px speck.
+            (9003, el(0, "mcl_potions_effect_swiftness.png^[resize:128x128", pos: SIMD2(1, 0), align: SIMD2(1, 1), offset: SIMD2(-54, 3), scale: SIMD2(0.375, 0.375), z: 100)),
             // What mcl_potions really sends: the level alone under the icon
             // (the name comes from effectNameLines).
             (9004, el(1, "II", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 50), z: 100)),
             (9005, el(1, "0:42", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-32, 65), z: 100)),
             // A second effect with no level: a blank label above its timer.
-            (9006, el(0, "mcl_potions_effect_night_vision.png", pos: SIMD2(1, 0), align: SIMD2(1, 1), offset: SIMD2(-106, 3), scale: SIMD2(0.375, 0.375), z: 100)),
+            (9006, el(0, "mcl_potions_effect_night_vision.png^[resize:128x128", pos: SIMD2(1, 0), align: SIMD2(1, 1), offset: SIMD2(-106, 3), scale: SIMD2(0.375, 0.375), z: 100)),
             (9007, el(1, "", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-84, 50), z: 100)),
             (9008, el(1, "3:54", pos: SIMD2(1, 0), align: SIMD2(0, 1), offset: SIMD2(-84, 65), z: 100)),
         ]
@@ -6871,12 +6873,9 @@ final class WorldSession {
         let D = Self.hudDepth * hudK
         let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x, ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
         let radiusPx = Self.minimapRadiusPx
-        // The disk is round in the world, so its vertical extent in nominal
-        // pixels is radiusPx * kx / ky (the HUD window's vertical pixels span
-        // more angle). Its top lines up with mcl_potions' effect icons,
-        // which sit at offset y=3 from the top edge.
+        // The top lines up with mcl_potions' effect icons (offset y=3).
         let top = 3 * Self.hudSizeBoost
-        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, top + radiusPx * kx / ky)
+        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, top + radiusPx)
         let az = (cpx.x - Self.hudScreen.x / 2) * kx, el = (Self.hudScreen.y / 2 - cpx.y) * ky
         let centre = headPos + hf * D + hr * (tan(az) * D) + hu * (tan(el) * D)
         let hs = tan(radiusPx * kx) * D
