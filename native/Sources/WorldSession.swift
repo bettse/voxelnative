@@ -6871,7 +6871,7 @@ final class WorldSession {
         let D = Self.hudDepth * hudK
         let kx = 2 * Self.hudHalfAngle.x / Self.hudScreen.x, ky = 2 * Self.hudHalfAngle.y / Self.hudScreen.y
         let radiusPx = Self.minimapRadiusPx
-        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, 80 + radiusPx)
+        let cpx = SIMD2<Float>(Self.hudScreen.x - 40 - radiusPx, 10 + radiusPx)
         let az = (cpx.x - Self.hudScreen.x / 2) * kx, el = (Self.hudScreen.y / 2 - cpx.y) * ky
         let centre = headPos + hf * D + hr * (tan(az) * D) + hu * (tan(el) * D)
         let hs = tan(radiusPx * kx) * D
