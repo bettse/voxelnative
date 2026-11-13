@@ -143,7 +143,9 @@ final class WorldSession {
     private var koganeLayer = -1               // the companion sprite, eyes open
     private var koganeClosedLayer = -1         // eyes closed (shown until you look at it)
     private var koganeTitleLayer = -1          // "Menu" heading
+    private var koganeTitleAspect: Float = 1
     private var koganeOptionLayers: [Int] = [] // one text layer per menu option
+    private var koganeOptionAspects: [Float] = []   // width/height of each label's quad
     // "Resume" is first and is the default selection, so opening the menu and
     // confirming (a double trigger) just closes it — no accidental exit.
     // "Bug note" appears only in testing mode, a developer setting with no
@@ -8228,8 +8230,13 @@ final class WorldSession {
         appendChat(v: &ov, idx: &oi)
         appendStatusBanner(v: &ov, idx: &oi)
         appendXpLevel(v: &ov, idx: &oi)
-        minimapDrawn = (ViewSettings.shared.minimap || minimapForced) && !dead
-        appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi)
+        // The pause menu sits on the HUD window: the server HUD and the minimap
+        // stay out of the way while it's open.
+        // HUD_SET_FLAGS bit 5 is the engine minimap: a server that turns it off
+        // (hudFlags defaults to all on) turns ours off too.
+        let minimapAllowed = (client.hudFlags & (1 << 5)) != 0
+        minimapDrawn = (ViewSettings.shared.minimap || minimapForced) && minimapAllowed && !dead && !koganeMenuOpen
+        if !koganeMenuOpen { appendServerHUD(eye: eye, cosY: cy, sinY: sy, v: &ov, idx: &oi) }
         if minimapDrawn {
             // Repaint when you cross into another node (throttled: running
             // changes nodes several times a second) and once a second anyway
@@ -8417,7 +8424,7 @@ final class WorldSession {
         // blue, regeneration) like vl_hudbars; plain red until one is known.
         let pair = client.healthIcon.flatMap { atlas.statusIconPairs[$0] }
         let full = pair?.full ?? atlas.healthFullLayer, half = pair?.half ?? atlas.healthHalfLayer
-        appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: min(hp, 20),   // low row, left of centre (HUD B)
+        appendStatColumn(origin: origin, gaze: gaze, az: -0.20, value: min(hp, 20),   // low row, left of centre (HUD B)
                          full: full, half: half, empty: atlas.healthEmptyLayer, into: &billboards)
         // HP above 20 (health boost) stacks extra rows above, 20 HP each, the
         // way vl_hudbars layers its bar; without them losing health above 20
@@ -8426,14 +8433,14 @@ final class WorldSession {
         var rest = hp - 20
         while rest > 0 && rowElev < 0.2 {
             rowElev += 0.05   // a full icon apart, like vl_hudbars' first (unsquished) layers
-            appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: min(rest, 20),
+            appendStatColumn(origin: origin, gaze: gaze, az: -0.20, value: min(rest, 20),
                              full: full, half: half, empty: -1, elevOffset: rowElev, into: &billboards)
             rest -= 20
         }
         // Absorption (golden apple): gold hearts in a row above the rest, only
         // as many as there are, like vl_hudbars' absorption part.
         if client.absorption > 0, let gold = atlas.statusIconPairs["mcl_potions_icon_absorb.png"] {
-            appendStatColumn(origin: origin, gaze: gaze, az: -0.185, value: client.absorption,
+            appendStatColumn(origin: origin, gaze: gaze, az: -0.20, value: client.absorption,
                              full: gold.full, half: gold.half, empty: -1, elevOffset: rowElev + 0.045, into: &billboards)
         }
     }
@@ -8517,7 +8524,7 @@ final class WorldSession {
     private func appendHungerHUD(origin: SIMD3<Float>, gaze: SIMD3<Float>,
                                  into billboards: inout [EntityInstance]) {
         let pair = client.hungerIcon.flatMap { atlas.statusIconPairs[$0] }   // food poisoning swaps the icon
-        appendStatColumn(origin: origin, gaze: gaze, az: 0.185, value: hunger,   // low row, right of centre (HUD B)
+        appendStatColumn(origin: origin, gaze: gaze, az: 0.20, value: hunger,   // low row, right of centre (HUD B)
                          full: pair?.full ?? atlas.hungerFullLayer, half: pair?.half ?? atlas.hungerHalfLayer,
                          empty: atlas.hungerEmptyLayer, into: &billboards)
     }
@@ -8561,9 +8568,11 @@ final class WorldSession {
         // in the comfortable lower band, instead of two tall corner columns that
         // read as crowded. `az` is the row centre; 10 icons run across it.
         let hudDist: Float = 1.35 * hudK   // on the panel focal plane (HUD P1); hudK = the HUD distance setting
-        let size: Float = 0.05 * hudDist
+        let size: Float = 0.042 * hudDist
         let elev: Float = -0.30 + elevOffset   // low band, below the gaze (HUD P3/B)
-        let hstep: Float = 0.032           // radians between icons, left to right
+        // Icons overlap by 1/9 of their width like Minecraft's 9 px hearts on
+        // an 8 px pitch; a 0.05 rad icon on a 0.032 step hid the half-heart edge.
+        let hstep: Float = 0.042 * 8 / 9   // radians between icons, left to right
         let az0 = az - Float(9) * hstep / 2
         let (fwd, right, up) = stableFrame(gaze, horizFwd: player.bodyForward())
         for i in 0..<10 {
@@ -9236,13 +9245,16 @@ final class WorldSession {
         if koganeClosedLayer < 0, let px = Self.renderKoganeRGBA(canvas: ModelTextureHandoff.size, closed: true) {
             koganeClosedLayer = registerRGBALayer("#koganeclosed", px); changed = true
         }
-        if koganeTitleLayer < 0, let px = Self.renderTextRGBA("Menu", canvas: ModelTextureHandoff.size, fontFrac: 0.17) {
-            koganeTitleLayer = registerRGBALayer("#koganetitle", px); changed = true
+        // Filled renders drawn at their own aspect: a small-font render on a
+        // square canvas stretched onto a 2:1 quad made the labels wide and squat.
+        if koganeTitleLayer < 0, let r = Self.renderTextFilled("Menu", canvas: ModelTextureHandoff.size, lineHeight: true) {
+            koganeTitleLayer = registerRGBALayer("#koganetitle", r.px); koganeTitleAspect = r.aspect; changed = true
         }
         if koganeOptionLayers.isEmpty {
             for (i, opt) in koganeOptions.enumerated() {
-                if let px = Self.renderTextRGBA(opt, canvas: ModelTextureHandoff.size, fontFrac: 0.11) {
-                    koganeOptionLayers.append(registerRGBALayer("#koganeopt\(i)", px)); changed = true
+                if let r = Self.renderTextFilled(opt, canvas: ModelTextureHandoff.size, lineHeight: true) {
+                    koganeOptionLayers.append(registerRGBALayer("#koganeopt\(i)", r.px))
+                    koganeOptionAspects.append(r.aspect); changed = true
                 }
             }
         }
@@ -9927,7 +9939,10 @@ final class WorldSession {
         return (px, Float(w / (h * CGFloat(canvas) / (CGFloat(canvas) - 2 * mv))))
     }
 
-    static func renderTextFilled(_ text: String, canvas: Int) -> (px: [UInt8], aspect: Float)? {
+    /// lineHeight: size the canvas by the font's line box (ascent + descent)
+    /// instead of the ink, so labels drawn at one quad height share one cap
+    /// height whether or not they have descenders ("Quit game" vs "Resume").
+    static func renderTextFilled(_ text: String, canvas: Int, lineHeight: Bool = false) -> (px: [UInt8], aspect: Float)? {
         guard !text.isEmpty else { return nil }
         let cs = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil, width: canvas, height: canvas, bitsPerComponent: 8,
@@ -9943,7 +9958,12 @@ final class WorldSession {
                 attributes: [.font: f, .foregroundColor: color]))
         }
         let white = line(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        let b = CTLineGetImageBounds(white, ctx)
+        var b = CTLineGetImageBounds(white, ctx)
+        if lineHeight {
+            var asc: CGFloat = 0, desc: CGFloat = 0
+            _ = CTLineGetTypographicBounds(white, &asc, &desc, nil)
+            b = CGRect(x: b.minX, y: -desc, width: b.width, height: asc + desc)
+        }
         guard b.width > 1, b.height > 1 else { return nil }
         let aspect = Float(b.width / b.height)
         let margin = CGFloat(canvas) * 0.08
@@ -10494,9 +10514,12 @@ final class WorldSession {
 
         guard koganeMenuOpen, highlightLayer >= 0 else { return }
         let gold = Self.packTint(232, 184, 64)
-        // Head-locked panel: head * (right*ox + up*oy - fwd*dist). Centred, upright.
+        // Head-locked panel on the HUD window, not a fifth head-locked depth
+        // (it used to float at 0.6 m, the near edge of comfortable text). The
+        // layout below is in metres at 0.58 m and scales out to the HUD depth.
+        let k = Self.hudDepth * hudK / 0.58
         func at(_ dist: Float, _ ox: Float, _ oy: Float) -> SIMD3<Float> {
-            headPos + hf * dist + hr * ox + hu * oy
+            headPos + hf * (dist * k) + hr * (ox * k) + hu * (oy * k)
         }
         // Panel sized for the current option count (title + n rows), so nothing
         // runs off the backdrop.
@@ -10508,17 +10531,18 @@ final class WorldSession {
         // centred on the rows with the title's margin mirrored below, which left
         // an empty band under the last option.
         let backTop = titleOy + 0.055, backBottom = -topOy - 0.045
-        appendQuad(center: at(0.60, 0, (backTop + backBottom) * 0.5), right: hr, up: hu, hw: 0.17, hh: (backTop - backBottom) * 0.5,
+        appendQuad(center: at(0.60, 0, (backTop + backBottom) * 0.5), right: hr, up: hu, hw: 0.17 * k, hh: (backTop - backBottom) * 0.5 * k,
                    layer: highlightLayer, tint: Self.packTint(24, 22, 30), v: &v, idx: &idx)
         if koganeTitleLayer >= 0 {
-            appendQuad(center: at(0.58, 0, titleOy), right: hr, up: hu, hw: 0.05, hh: 0.04,
+            let hh: Float = 0.016 * k
+            appendQuad(center: at(0.58, 0, titleOy), right: hr, up: hu, hw: hh * koganeTitleAspect, hh: hh,
                        layer: koganeTitleLayer, tint: gold, v: &v, idx: &idx)
         }
         for (i, layer) in koganeOptionLayers.enumerated() where layer >= 0 {
             let oy = topOy - Float(i) * rowStep
             if i == koganeSel {
                 appendQuad(center: at(0.575, -0.12, oy), right: hr, up: hu,
-                           hw: 0.009, hh: 0.009, layer: highlightLayer, tint: gold, v: &v, idx: &idx)
+                           hw: 0.009 * k, hh: 0.009 * k, layer: highlightLayer, tint: gold, v: &v, idx: &idx)
             }
             // Toggles show their state as a dot (green = on, grey = off).
             let label = i < koganeOptions.count ? koganeOptions[i] : ""
@@ -10526,11 +10550,12 @@ final class WorldSession {
                 let on = label == "Coordinates" ? coordsShown == true : label == "Biome" ? biomeShown == true
                     : label == "Minimap" ? ViewSettings.shared.minimap
                     : label == "Toggle music" ? VolumeSettings.shared.music > 0 : VolumeSettings.shared.sfx > 0
-                appendQuad(center: at(0.575, 0.12, oy), right: hr, up: hu, hw: 0.013, hh: 0.013,
+                appendQuad(center: at(0.575, 0.12, oy), right: hr, up: hu, hw: 0.013 * k, hh: 0.013 * k,
                            layer: highlightLayer, tint: on ? Self.packTint(60, 210, 90) : Self.packTint(70, 70, 78),
                            v: &v, idx: &idx)
             }
-            appendQuad(center: at(0.58, 0, oy), right: hr, up: hu, hw: 0.075, hh: 0.0375,
+            let hh: Float = 0.0105 * k, aspect = i < koganeOptionAspects.count ? koganeOptionAspects[i] : 4
+            appendQuad(center: at(0.58, 0, oy), right: hr, up: hu, hw: hh * aspect, hh: hh,
                        layer: layer, tint: i == koganeSel ? gold : 16777215, v: &v, idx: &idx)
         }
     }
