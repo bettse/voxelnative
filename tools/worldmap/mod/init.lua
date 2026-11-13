@@ -13,8 +13,11 @@ local cx = math.floor(tonumber(S:get("worldmap_cx")) or 0)
 local cz = math.floor(tonumber(S:get("worldmap_cz")) or 0)
 local R = math.floor(tonumber(S:get("worldmap_radius")) or 384)
 local step = math.max(1, math.floor(tonumber(S:get("worldmap_step")) or 2))
-local ymin = math.floor(tonumber(S:get("worldmap_ymin")) or -64)
-local ymax = math.floor(tonumber(S:get("worldmap_ymax")) or 255)
+local nether = S:get_bool("worldmap_nether", false)
+local ymin = math.floor(tonumber(S:get("worldmap_ymin")) or (nether and -29067 or -64))
+local ymax = math.floor(tonumber(S:get("worldmap_ymax")) or (nether and -28944 or 255))
+-- The nether's lava sea fills carved space at or below this height.
+local NETHER_LAVA = -29036
 local out = minetest.get_worldpath()
 
 local pois = {}
@@ -74,6 +77,24 @@ local function scan()
 		if not n then n = minetest.get_name_from_content_id(c); names[c] = n end
 		return n
 	end
+	local walkable = {}
+	for name, def in pairs(minetest.registered_nodes) do
+		if def.walkable ~= false then walkable[minetest.get_content_id(name)] = true end
+	end
+	walkable[c_air] = nil; walkable[c_ignore] = nil
+	local c_nlava = minetest.get_content_id("mcl_nether:nether_lava_source")
+	-- Nether: what you would see from above. The lava sea where it is open
+	-- to the air, else the lowest walkable floor above the lava level, else
+	-- solid rock.
+	local function nether_column(data, area, x, z)
+		local lava = data[area:index(x, NETHER_LAVA, z)]
+		if lava == c_nlava and data[area:index(x, NETHER_LAVA + 1, z)] == c_air then return NETHER_LAVA, "lava" end
+		for y = NETHER_LAVA, ymax - 1 do
+			local c = data[area:index(x, y, z)]
+			if walkable[c] and not walkable[data[area:index(x, y + 1, z)]] then return y, name_of(c) end
+		end
+		return ymax, "solid"
+	end
 	-- One VoxelManip per 80x80 tile keeps memory flat.
 	local tile = 80
 	for tx = cx - R, cx + R - 1, tile do
@@ -86,20 +107,26 @@ local function scan()
 				if (x - (cx - R)) % step == 0 then
 					for z = tz, math.min(tz + tile - 1, cz + R - 1) do
 						if (z - (cz - R)) % step == 0 then
-							local y = ymax
-							local c = data[area:index(x, y, z)]
-							while y > ymin and (c == c_air or c == c_ignore) do
-								y = y - 1
+							local y, c, cname
+							if nether then
+								y, cname = nether_column(data, area, x, z)
+							else
+								y = ymax
 								c = data[area:index(x, y, z)]
+								while y > ymin and (c == c_air or c == c_ignore) do
+									y = y - 1
+									c = data[area:index(x, y, z)]
+								end
+								cname = name_of(c)
 							end
 							local b = minetest.get_biome_data({x = x, y = y, z = z})
 							local bn = b and minetest.get_biome_name(b.biome) or ""
 							-- Under water: where the floor is, for depth shading.
 							local fy = y
-							if liquid[c] then
+							if c and liquid[c] then
 								while fy > ymin and liquid[data[area:index(x, fy, z)]] do fy = fy - 1 end
 							end
-							lines[#lines + 1] = x .. "," .. z .. "," .. y .. "," .. name_of(c) .. "," .. bn .. "," .. fy
+							lines[#lines + 1] = x .. "," .. z .. "," .. y .. "," .. cname .. "," .. bn .. "," .. fy
 						end
 					end
 				end

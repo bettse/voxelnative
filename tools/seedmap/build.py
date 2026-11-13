@@ -7,7 +7,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 R = sys.argv[1]
 META = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~/Library/Application Support/minetest/worlds/vrdev/map_meta.txt")
 # structures.js's Node-only shim redeclares names the inlined gen.js defines
-gen = open(os.path.join(HERE, "gen.js")).read() + "\n" + "\n".join(l for l in open(os.path.join(HERE, "structures.js")).read().split("\n") if not l.startswith("if (typeof module"))
+gen = open(os.path.join(HERE, "gen.js")).read()
+for extra in ("structures.js", "nether.js"):
+    gen += "\n" + "\n".join(l for l in open(os.path.join(HERE, extra)).read().split("\n") if not l.startswith("if (typeof module"))
 biomes = json.load(open(R + "/world/worldmap_biomes.json"))
 biomes = [{k: b[k] for k in ("id", "name", "heat", "humidity", "y_min", "y_max", "vertical_blend", "weight", "min_pos", "max_pos", "node_top")} for b in biomes]
 for b in biomes:
@@ -19,13 +21,13 @@ keep = []
 lines = meta.split("\n"); i = 0
 while i < len(lines):
     l = lines[i]
-    m = re.match(r"^(mgv7_np_(terrain_base|terrain_alt|terrain_persist|height_select|mount_height|mountain|ridge|ridge_uwater)|mg_biome_np_(heat|heat_blend|humidity|humidity_blend))\s*=\s*\{", l)
+    m = re.match(r"^(mgv7_np_(terrain_base|terrain_alt|terrain_persist|height_select|mount_height|mountain|ridge|ridge_uwater|cave1|cave2|cavern)|mg_biome_np_(heat|heat_blend|humidity|humidity_blend))\s*=\s*\{", l)
     if m:
         while True:
             keep.append(lines[i]); 
             if lines[i].startswith("}"): break
             i += 1
-    elif re.match(r"^(water_level|mgv7_spflags|mgv7_mount_zero_level|mg_name)\s*=", l):
+    elif re.match(r"^(water_level|mgv7_spflags|mgv7_mount_zero_level|mg_name|mg_flags|mgv7_cave_width|mgv7_cavern_limit|mgv7_cavern_taper|mgv7_cavern_threshold)\s*=", l):
         keep.append(l)
     i += 1
 meta_default = "\n".join(keep) + "\n"

@@ -200,4 +200,4 @@ function makeStructures(gen, decorations, structs, groups, biomesByName) {
   return { chunkStructures, chunkOrigin, strongholds: (cpu) => strongholds(S.seed, cpu) };
 }
 
-if (typeof module !== "undefined") module.exports = { makeStructures, strongholds, blockSeed2, PseudoRandom };
+if (typeof module !== "undefined") module.exports = { makeStructures, strongholds, blockSeed2, hashNodePos, PseudoRandom };

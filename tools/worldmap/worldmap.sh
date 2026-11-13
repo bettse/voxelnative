@@ -12,7 +12,10 @@
 #
 # Usage: tools/worldmap/worldmap.sh --seed N [--meta map_meta.txt]
 #          [--from-world DIR] [--center X,Z] [--radius R] [--step S]
-#          [--out DIR] [--port P] [--png] [--all]
+#          [--out DIR] [--port P] [--png] [--all] [--nether]
+# --nether generates the nether layer (y -29067..-28939) instead: each column
+# reports the open lava sea, else the lowest floor above it, else solid, and
+# the structures the game placed there. No picture is rendered for it.
 # Writes worldmap-SEED.html, a self-contained viewer (serve it or open it).
 # --png writes a static picture instead; --all labels terrain features too.
 # --probe FILE (x,y,z per line, e.g. a logged path) writes the nodes below,
@@ -20,7 +23,7 @@
 set -e
 HERE=${0:A:h}
 LUANTI=/Applications/luanti.app/Contents/MacOS/luanti
-SEED="" META="" FROM="" PROBE="" RENDER_ARGS="" FORMAT=html CX=0 CZ=0 RADIUS=384 STEP=2 PORT=30123 OUT=""
+SEED="" META="" FROM="" PROBE="" RENDER_ARGS="" FORMAT=html CX=0 CZ=0 RADIUS=384 STEP=2 PORT=30123 OUT="" NETHER=""
 while (( $# )); do
   case $1 in
     --seed) SEED=$2; shift 2 ;;
@@ -34,12 +37,13 @@ while (( $# )); do
     --step) STEP=$2; shift 2 ;;
     --out) OUT=$2; shift 2 ;;
     --port) PORT=$2; shift 2 ;;
+    --nether) NETHER=1; shift ;;
     *) echo "unknown option $1"; exit 2 ;;
   esac
 done
 if [[ -z $SEED && -n $META ]]; then SEED=$(awk -F' = ' '$1=="seed"{print $2}' "$META"); fi
 [[ -n $SEED ]] || { echo "need --seed or --meta"; exit 2; }
-OUT=${OUT:-${TMPDIR:-/tmp}/worldmap-$SEED-$CX,$CZ-r$RADIUS${FROM:+-copy}}
+OUT=${OUT:-${TMPDIR:-/tmp}/worldmap-$SEED-$CX,$CZ-r$RADIUS${FROM:+-copy}${NETHER:+-nether}}
 WORLD=$OUT/world
 rm -rf "$WORLD"; mkdir -p "$WORLD/worldmods"
 cp -R "$HERE/mod" "$WORLD/worldmods/worldmap"
@@ -64,6 +68,9 @@ worldmap_cz = $CZ
 worldmap_radius = $RADIUS
 worldmap_step = $STEP
 EOF
+if [[ -n $NETHER ]]; then
+  printf 'worldmap_nether = true\nworldmap_ymin = -29067\nworldmap_ymax = -28944\n' >> "$OUT/worldmap.conf"
+fi
 echo "generating $((2*RADIUS))x$((2*RADIUS)) around $CX,$CZ for seed $SEED (log: $OUT/server.log)"
 "$LUANTI" --server --gameid mineclone2 --world "$WORLD" --port "$PORT" \
   --config "$OUT/worldmap.conf" --logfile "$OUT/server.log" >/dev/null 2>&1 &
@@ -76,4 +83,5 @@ while kill -0 $PID 2>/dev/null; do
   sleep 2
 done
 [[ -f $WORLD/worldmap_done ]] || { echo "server exited without a map; see $OUT/server.log"; tail -5 "$OUT/server.log"; exit 1; }
+if [[ -n $NETHER ]]; then echo "nether columns and pois in $WORLD"; exit 0; fi
 python3 "$HERE/render.py" "$WORLD" "$OUT/worldmap-$SEED.$FORMAT" $RENDER_ARGS

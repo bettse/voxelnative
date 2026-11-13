@@ -103,6 +103,58 @@ function valueMap2D(np, x, y, stepX, stepY, seed, sx, sy, out) {
     if (v >= 1.0) { v = fr(v - 1.0); noisey++; }
   }
 }
+// 3D map (Noise::valueMap3D + noiseMap3D): the engine's incremental lattice
+// walk, sx * sy * sz results indexed [(k * sy + j) * sx + i] for the volume
+// at (x, y, z) (x along i, y along j, z along k). Caves and caverns use it.
+function valueMap3D(np, x, y, z, stepX, stepY, stepZ, seed, sx, sy, sz, out) {
+  const eased = eased3d(np);
+  const x0 = Math.floor(x), y0 = Math.floor(y), z0 = Math.floor(z);
+  let u = fr(x - x0), v = fr(y - y0), w = fr(z - z0);
+  const origU = u, origV = v;
+  const nlx = ((u + sx * stepX) >>> 0) + 2, nly = ((v + sy * stepY) >>> 0) + 2, nlz = ((w + sz * stepZ) >>> 0) + 2;
+  const buf = new Float32Array(nlx * nly * nlz);
+  let k = 0;
+  for (let kz = 0; kz !== nlz; kz++) for (let j = 0; j !== nly; j++) for (let i = 0; i !== nlx; i++) buf[k++] = noise3d(x0 + i, y0 + j, z0 + kz, seed);
+  const idx = (i, j, kz) => kz * nly * nlx + j * nlx + i;
+  let index = 0, noisey = 0, noisez = 0;
+  for (let kz = 0; kz !== sz; kz++) {
+    v = origV; noisey = 0;
+    for (let j = 0; j !== sy; j++) {
+      let v000 = buf[idx(0, noisey, noisez)], v100 = buf[idx(1, noisey, noisez)], v010 = buf[idx(0, noisey + 1, noisez)], v110 = buf[idx(1, noisey + 1, noisez)];
+      let v001 = buf[idx(0, noisey, noisez + 1)], v101 = buf[idx(1, noisey, noisez + 1)], v011 = buf[idx(0, noisey + 1, noisez + 1)], v111 = buf[idx(1, noisey + 1, noisez + 1)];
+      u = origU; let noisex = 0;
+      for (let i = 0; i !== sx; i++) {
+        out[index++] = trilerp(v000, v100, v010, v110, v001, v101, v011, v111, u, v, w, eased);
+        u = fr(u + stepX);
+        if (u >= 1.0) {
+          u = fr(u - 1.0); noisex++;
+          v000 = v100; v010 = v110;
+          v100 = buf[idx(noisex + 1, noisey, noisez)]; v110 = buf[idx(noisex + 1, noisey + 1, noisez)];
+          v001 = v101; v011 = v111;
+          v101 = buf[idx(noisex + 1, noisey, noisez + 1)]; v111 = buf[idx(noisex + 1, noisey + 1, noisez + 1)];
+        }
+      }
+      v = fr(v + stepY);
+      if (v >= 1.0) { v = fr(v - 1.0); noisey++; }
+    }
+    w = fr(w + stepZ);
+    if (w >= 1.0) { w = fr(w - 1.0); noisez++; }
+  }
+}
+function noiseMap3D(np, x, y, z, seed, sx, sy, sz) {
+  const n = sx * sy * sz, result = new Float32Array(n), vbuf = new Float32Array(n);
+  let f = fr(1), g = fr(1);
+  x = fr(x / np.spread[0]); y = fr(y / np.spread[1]); z = fr(z / np.spread[2]);
+  for (let oct = 0; oct < np.octaves; oct++) {
+    valueMap3D(np, fr(x * f), fr(y * f), fr(z * f), fr(f / np.spread[0]), fr(f / np.spread[1]), fr(f / np.spread[2]), (seed + np.seed + oct) | 0, sx, sy, sz, vbuf);
+    if (np.flags.absvalue) for (let i = 0; i < n; i++) result[i] = fr(result[i] + fr(g * Math.abs(vbuf[i])));
+    else for (let i = 0; i < n; i++) result[i] = fr(result[i] + fr(g * vbuf[i]));
+    f = fr(f * np.lacunarity); g = fr(g * np.persist);
+  }
+  if (Math.abs(np.offset) > 0.00001 || Math.abs(np.scale - 1) > 0.00001)
+    for (let i = 0; i < n; i++) result[i] = fr(fr(result[i] * np.scale) + np.offset);
+  return result;
+}
 function noiseMap2D(np, x, y, seed, sx, sy, persistMap) {
   const n = sx * sy, result = new Float32Array(n), vbuf = new Float32Array(n);
   let f = fr(1), g = fr(1);
@@ -303,7 +355,18 @@ function parseMapMeta(text) {
     np_ridge: get("mgv7_np_ridge"), np_ridge_uwater: get("mgv7_np_ridge_uwater"),
     np_heat: get("mg_biome_np_heat"), np_heat_blend: get("mg_biome_np_heat_blend"),
     np_humidity: get("mg_biome_np_humidity"), np_humidity_blend: get("mg_biome_np_humidity_blend"),
+    // caves (the nether): mapgen v7's defaults when the meta has no line
+    caves: !/\bnocaves\b/.test(S.mg_flags || "") && (!S.mg_flags || /\bcaves\b/.test(S.mg_flags)),
+    caverns: /\bcaverns\b/.test(S.mgv7_spflags || "mountains,ridges,caverns") && !/\bnocaverns\b/.test(S.mgv7_spflags || ""),
+    np_cave1: get("mgv7_np_cave1") || np(0, 12, [61, 61, 61], 52534, 3, 0.5, 2),
+    np_cave2: get("mgv7_np_cave2") || np(0, 12, [67, 67, 67], 10325, 3, 0.5, 2),
+    np_cavern: get("mgv7_np_cavern") || np(0, 1, [384, 128, 384], 723, 5, 0.63, 2),
+    cave_width: fr(Number(S.mgv7_cave_width ?? 0.09)), cavern_limit: fr(Number(S.mgv7_cavern_limit ?? -256)),
+    cavern_taper: fr(Number(S.mgv7_cavern_taper ?? 256)), cavern_threshold: fr(Number(S.mgv7_cavern_threshold ?? 0.2)),
   };
+  function np(offset, scale, spread, seed, octaves, persist, lacunarity) {
+    return { offset, scale, spread, seed, octaves, persist, lacunarity, flags: { defaults: true } };
+  }
 }
 
-if (typeof module !== "undefined") module.exports = { makeGen, parseMapMeta, noise2d, fractal2d, noiseMap2D, Pcg };
+if (typeof module !== "undefined") module.exports = { makeGen, parseMapMeta, noise2d, noise3d, fractal2d, noiseMap2D, noiseMap3D, Pcg };

@@ -77,6 +77,9 @@ body { overscroll-behavior: none; }
   <div class="zoom" role="group" aria-label="Zoom">
     <button data-z="0.5">½×</button><button data-z="1">1×</button><button data-z="2" aria-pressed="true">2×</button><button data-z="4">4×</button><button data-z="8">8×</button>
   </div>
+  <div class="zoom" role="group" aria-label="Realm">
+    <button data-realm="overworld" aria-pressed="true">Overworld</button><button data-realm="nether">Nether</button>
+  </div>
   <span class="status" id="status">ready</span>
 </div>
 <main>
@@ -95,6 +98,7 @@ body { overscroll-behavior: none; }
     </details>
     <p>Terrain and biomes follow Luanti's generator (mapgen v7 and the biome picker) bit for bit, and landmarks follow the engine's decoration placer and VoxeLibre's placement rules; both checked against a headless render of the same seed. A village marked with ? is a chunk where the game attempts one; whether it is built depends on terrain checks the map approximates. Caves that open at the surface are not carved.</p>
     <p>North (+z) is up and east (+x) is right, as on the game's minimap. Overworld sea level is y = 1. Hover or tap for height and biome; drag to pan, scroll or pinch to zoom, double-tap to zoom in.</p>
+    <p>The Nether view shows what you would see from above its roof: the lava sea where it is open to the air, otherwise the lowest floor above the lava (brighter the higher it sits), and dark where the rock is solid. Biomes and the cave shapes follow the engine's noise; nether outposts, bulwarks, bridges and ruined portals follow the game's placement rules on those floors. A portal links overworld x,z to nether x,z divided by 8; switching realms moves the view accordingly.</p>
   </details>
 </main>
 
@@ -106,11 +110,24 @@ self.onmessage = function (e) {
     self.gen = makeGen(parseMapMeta(m.meta), m.biomes);
     self.biomeIndex = new Map(m.biomes.map((b, i) => [b.name, i]));
     self.structs = makeStructures(self.gen, m.decos, m.structs, m.groups);
+    self.nether = makeNether(self.gen, m.decos, m.structs, m.groups);
     postMessage({ type: "ready", strongholds: self.structs.strongholds(m.cpu) });
     return;
   }
   if (m.type === "chunk") {
-    postMessage({ type: "chunk", id: m.id, ox: m.ox, oz: m.oz, list: self.structs.chunkStructures(m.ox, m.oz) });
+    const list = m.realm === "nether" ? self.nether.chunkStructures(m.ox, m.oz) : self.structs.chunkStructures(m.ox, m.oz);
+    postMessage({ type: "chunk", id: m.id, realm: m.realm, ox: m.ox, oz: m.oz, list });
+    return;
+  }
+  if (m.type === "ntile") {
+    const n = m.n, step = m.step || 1, h = new Int16Array(n * n), k = new Uint8Array(n * n), b = new Uint16Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const x = m.x0 + i * step, z = m.z0 + j * step, q = j * n + i;
+      const c = self.nether.column(x, z);
+      h[q] = c.y; k[q] = c.kind;
+      b[q] = c.biome ? self.biomeIndex.get(c.biome.name) : 65535;
+    }
+    postMessage({ type: "tile", id: m.id, realm: "nether", x0: m.x0, z0: m.z0, n, step, h, k, b }, [h.buffer, k.buffer, b.buffer]);
     return;
   }
   if (m.type === "tile") {
@@ -122,7 +139,7 @@ self.onmessage = function (e) {
       const bb = self.gen.biomeAt(x, c.y, z);
       b[k] = bb ? self.biomeIndex.get(bb.name) : 65535;
     }
-    postMessage({ type: "tile", id: m.id, x0: m.x0, z0: m.z0, n, step, h, w, b, f }, [h.buffer, w.buffer, b.buffer, f.buffer]);
+    postMessage({ type: "tile", id: m.id, realm: "overworld", x0: m.x0, z0: m.z0, n, step, h, w, b, f }, [h.buffer, w.buffer, b.buffer, f.buffer]);
   }
 };
 </script>
@@ -138,6 +155,8 @@ const KIND = {   // landmark kinds: label and marker colour
   woodland_cabin: ["Woodland mansion", "#8a5a3a"], ruined_portal_overworld: ["Ruined portal", "#c58cff"],
   shipwreck: ["Shipwreck", "#7fb8e6"], ocean_temple: ["Ocean monument", "#3fd1c8"], cold_ocean_ruins: ["Ocean ruins", "#7fb8e6"],
   warm_ocean_ruins: ["Ocean ruins", "#7fb8e6"], desert_well: ["Desert well", "#e8c76a"], stronghold: ["Stronghold", "#ff4d6d"],
+  nether_outpost: ["Nether outpost", "#f2c232"], nether_bulwark: ["Bulwark", "#e05a3a"], nether_bridge: ["Nether bridge", "#9c6ad6"],
+  ruined_portal_nether: ["Ruined portal", "#c58cff"],
 };
 const kindInfo = k => KIND[k] || [k.replace(/_/g, " "), "#dddddd"];
 const META_DEFAULT = /*__META__*/;
@@ -149,7 +168,9 @@ const PALETTE = [
   ["ice",[190,220,240]],["snow",[235,240,245]],["cold",[170,200,200]],["megataiga",[70,110,80]],["megaspruce",[70,110,80]],
   ["taiga",[90,130,100]],["roofed",[40,80,35]],["birch",[120,165,90]],["flower",[130,180,80]],["forest",[70,130,55]],
   ["sunflower",[150,195,85]],["plains",[130,185,85]],["stonebeach",[140,140,140]],["extremehills",[120,130,120]],["hills",[125,140,110]],
+  ["soulsand",[120,95,70]],["crimson",[165,45,70]],["warped",[45,135,125]],["basaltdelta",[95,95,105]],["nether",[150,55,50]],
 ];
+const LAVA = [230, 110, 30];
 function hashHue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; }
 function hsv(h, s, v) { const f = (n, k = (n + h / 60) % 6) => v - v * s * Math.max(Math.min(k, 4 - k, 1), 0); return [f(5) * 255, f(3) * 255, f(1) * 255]; }
 const biomeColour = BIOMES.map(b => { const low = b.name.toLowerCase(); for (const [k, c] of PALETTE) if (low.includes(k)) return c; return hsv(hashHue(b.name), 0.35, 0.75); });
@@ -159,13 +180,15 @@ const TILE = 64;                                  // samples per tile side
 // Below 1x each sample stands for a 2x2 block of nodes (its own tile set),
 // so the far view fills in four times faster.
 const stepFor = z => (z < 1 ? 2 : 1);
-const tileKey = (step, x0, z0) => step + ":" + x0 + "," + z0;
+const tileKey = (step, x0, z0, r = realm) => r[0] + step + ":" + x0 + "," + z0;
+const chunkKey = (ox, oz, r = realm) => r[0] + ox + "," + oz;
 const canvas = document.getElementById("map"), ctx = canvas.getContext("2d");
 const status = document.getElementById("status"), readout = document.getElementById("readout"), legendEl = document.getElementById("legend");
 const seedIn = document.getElementById("seed"), metaIn = document.getElementById("meta");
 let zoom = 2, cx = 0, cz = 0;                  // node coordinates at the canvas centre
+let realm = "overworld";                        // or "nether": its own tiles, chunks and marker
 let tiles = new Map(), pending = new Map(), worker = null, ready = false, nextId = 1, generation = 0;
-let marker = null;
+let markers = { overworld: null, nether: null };
 let chunks = new Map(), chunkPending = new Map(), strongholdList = [];
 const CHUNK = 80, chunkOrigin = v => Math.floor((v + 32) / CHUNK) * CHUNK - 32;
 const cpuSel = document.getElementById("cpu");
@@ -178,17 +201,32 @@ let viewSaveTimer = null;
 function saveView() {
   clearTimeout(viewSaveTimer);
   viewSaveTimer = setTimeout(() => {
-    try { localStorage.setItem("seedmap.view", JSON.stringify({ seed: seedIn.value.trim(), cx, cz, zoom, marker })); } catch (_) {}
+    try { localStorage.setItem("seedmap.view", JSON.stringify({ seed: seedIn.value.trim(), cx, cz, zoom, realm, markers })); } catch (_) {}
   }, 400);
 }
 try {
   const v = JSON.parse(localStorage.getItem("seedmap.view") || "null");
   if (v && v.seed === seedIn.value.trim() && isFinite(v.cx) && isFinite(v.cz)) {
     cx = v.cx; cz = v.cz; zoom = [0.5, 1, 2, 4, 8].includes(v.zoom) ? v.zoom : 2;
-    if (Array.isArray(v.marker) && v.marker.length === 2) { marker = v.marker; document.getElementById("mark").value = v.marker.join(", "); }
-    for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
+    if (v.realm === "nether") realm = "nether";
+    if (v.markers) for (const r of ["overworld", "nether"]) if (Array.isArray(v.markers[r]) && v.markers[r].length === 2) markers[r] = v.markers[r];
+    else if (Array.isArray(v.marker) && v.marker.length === 2) markers.overworld = v.marker;
+    if (markers[realm]) document.getElementById("mark").value = markers[realm].join(", ");
+    for (const b of document.querySelectorAll(".zoom button[data-z]")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
+    for (const b of document.querySelectorAll(".zoom button[data-realm]")) b.setAttribute("aria-pressed", String(b.dataset.realm === realm));
   }
 } catch (_) {}
+// A link can carry the view: ?seed=N&realm=nether&x=12&z=-40&zoom=2
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get("seed")) seedIn.value = q.get("seed").replace(/[^0-9-]/g, "");
+  if (q.get("realm") === "nether" || q.get("realm") === "overworld") realm = q.get("realm");
+  if (isFinite(+q.get("x")) && q.get("x") !== null) cx = +q.get("x");
+  if (isFinite(+q.get("z")) && q.get("z") !== null) cz = +q.get("z");
+  if ([0.5, 1, 2, 4, 8].includes(+q.get("zoom"))) zoom = +q.get("zoom");
+  for (const b of document.querySelectorAll(".zoom button[data-z]")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
+  for (const b of document.querySelectorAll(".zoom button[data-realm]")) b.setAttribute("aria-pressed", String(b.dataset.realm === realm));
+}
 
 function metaWithSeed() {
   const seed = seedIn.value.trim().replace(/[^0-9-]/g, "") || "0";
@@ -202,6 +240,26 @@ function metaWithSeed() {
 // from the slope, water darkened by depth.
 function paintTile(m) {
   const n = m.n, img = ctx.createImageData(n, n), d = img.data;
+  if (m.realm === "nether") {
+    // Lava sea flat orange, floors in the biome colour lit by height (and
+    // the slope to the east and north), solid rock dark.
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const k = j * n + i, c = m.b[k] === 65535 ? [128, 128, 128] : biomeColour[m.b[k]];
+      let r, g, b;
+      if (m.k[k] === 2) { r = LAVA[0] * 0.85 + c[0] * 0.15; g = LAVA[1] * 0.85 + c[1] * 0.15; b = LAVA[2] * 0.85 + c[2] * 0.15; }
+      else if (m.k[k] === 1) {
+        const y = m.h[k];
+        const e = i + 1 < n && m.k[k + 1] === 1 ? m.h[k + 1] : y, s = j + 1 < n && m.k[k + n] === 1 ? m.h[k + n] : y;
+        const slope = (y - e) + (y - s);
+        const lift = 0.7 + 0.5 * Math.max(0, Math.min(1, (y + 29035) / 70));
+        const shade = Math.max(0.6, Math.min(1.3, lift + slope * 0.04));
+        r = c[0] * shade; g = c[1] * shade; b = c[2] * shade;
+      } else { r = c[0] * 0.22; g = c[1] * 0.22; b = c[2] * 0.22; }
+      const o = ((n - 1 - j) * n + i) * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+    }
+    const off = document.createElement("canvas"); off.width = n; off.height = n; off.getContext("2d").putImageData(img, 0, 0);
+    return { img: off, h: m.h, k: m.k, b: m.b, step: m.step || 1, realm: "nether" };
+  }
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const k = j * n + i, y = m.h[k];
     let c = m.b[k] === 65535 ? [128, 128, 128] : biomeColour[m.b[k]];
@@ -221,7 +279,7 @@ function paintTile(m) {
     const o = ((n - 1 - j) * n + i) * 4; d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;   // north (+z) at the top
   }
   const off = document.createElement("canvas"); off.width = n; off.height = n; off.getContext("2d").putImageData(img, 0, 0);
-  return { img: off, h: m.h, w: m.w, b: m.b, f: m.f, step: m.step || 1 };
+  return { img: off, h: m.h, w: m.w, b: m.b, f: m.f, step: m.step || 1, realm: "overworld" };
 }
 
 // Tiles the view needs, nearest the centre first; at most 6 in flight.
@@ -239,22 +297,22 @@ function request() {
   while (pending.size < 6 && want.length) {
     const [tx, tz] = want.shift(); const id = nextId++;
     pending.set(id, tileKey(step, tx, tz));
-    worker.postMessage({ type: "tile", id, x0: tx, z0: tz, n: TILE, step });
+    worker.postMessage({ type: realm === "nether" ? "ntile" : "tile", id, x0: tx, z0: tz, n: TILE, step });
   }
   // structures per 80-node chunk, after the tiles in view
   const cwant = [];
   for (let cz = chunkOrigin(z0); cz <= z1; cz += CHUNK) for (let cxx = chunkOrigin(x0); cxx <= x1; cxx += CHUNK) {
-    const key = cxx + "," + cz;
+    const key = chunkKey(cxx, cz);
     if (chunks.has(key) || [...chunkPending.values()].includes(key)) continue;
     cwant.push([cxx, cz, (cxx + CHUNK / 2 - cx) ** 2 + (cz + CHUNK / 2 - cz) ** 2]);
   }
   cwant.sort((a, b) => a[2] - b[2]);
   while (!want.length && pending.size < 6 && chunkPending.size < 2 && cwant.length) {
     const [cxx, cz] = cwant.shift(); const id = nextId++;
-    chunkPending.set(id, cxx + "," + cz);
-    worker.postMessage({ type: "chunk", id, ox: cxx, oz: cz });
+    chunkPending.set(id, chunkKey(cxx, cz));
+    worker.postMessage({ type: "chunk", id, realm, ox: cxx, oz: cz });
   }
-  status.textContent = pending.size ? `generating ${pending.size + want.length} tiles` : chunkPending.size ? `placing structures (${chunkPending.size + cwant.length} chunks)` : `${tiles.size} tiles · ${zoom}× · seed ${seedIn.value.trim()}`;
+  status.textContent = pending.size ? `generating ${pending.size + want.length} tiles` : chunkPending.size ? `placing structures (${chunkPending.size + cwant.length} chunks)` : `${realm} · ${zoom}× · seed ${seedIn.value.trim()}`;
   if (!pending.size) updateLegend();
 }
 
@@ -264,7 +322,7 @@ function draw() {
   ctx.imageSmoothingEnabled = false;
   const step = stepFor(zoom), TS = TILE * step;
   for (const [key, t] of tiles) {
-    if (t.step !== step) continue;
+    if (t.step !== step || t.realm !== realm) continue;
     const [tx, tz] = key.slice(key.indexOf(":") + 1).split(",").map(Number);
     const px = (tx - cx) * zoom + W / 2, py = (cz - (tz + TS)) * zoom + H / 2;   // north up: +z runs toward the top
     if (px > W || py > H || px + TS * zoom < 0 || py + TS * zoom < 0) continue;
@@ -272,8 +330,8 @@ function draw() {
   }
   // landmarks: a dot with a label at 2x and up; strongholds from the seed
   const all = [];
-  for (const list of chunks.values()) for (const p of list) all.push(p);
-  for (const p of strongholdList) all.push(p);
+  for (const [key, list] of chunks) if (key[0] === realm[0]) for (const p of list) all.push(p);
+  if (realm === "overworld") for (const p of strongholdList) all.push(p);
   ctx.font = "500 11px " + getComputedStyle(document.body).getPropertyValue("--font");
   ctx.textBaseline = "middle";
   for (const p of all) {
@@ -293,6 +351,7 @@ function draw() {
   ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1;
   const ox = (0 - cx) * zoom + W / 2, oz = (cz - 0) * zoom + H / 2;
   ctx.beginPath(); ctx.moveTo(ox - 6, oz); ctx.lineTo(ox + 6, oz); ctx.moveTo(ox, oz - 6); ctx.lineTo(ox, oz + 6); ctx.stroke();
+  const marker = markers[realm];
   if (marker) {
     const mx = (marker[0] + 0.5 - cx) * zoom + W / 2, mz = (cz - (marker[1] + 0.5)) * zoom + H / 2;
     ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#b5472b"; ctx.lineWidth = 2;
@@ -306,13 +365,14 @@ function columnAt(x, z) {
   const tx = Math.floor(x / TS) * TS, tz = Math.floor(z / TS) * TS, t = tiles.get(tileKey(step, tx, tz));
   if (!t) return null;
   const k = Math.floor((z - tz) / step) * TILE + Math.floor((x - tx) / step);
+  if (t.realm === "nether") return { y: t.h[k], kind: t.k[k], biome: t.b[k] === 65535 ? "?" : BIOMES[t.b[k]].name };
   return { y: t.h[k], water: !!t.w[k], floor: t.f[k], biome: t.b[k] === 65535 ? "?" : BIOMES[t.b[k]].name };
 }
 function updateLegend() {
   const W = view.w, H = view.h, counts = new Map();
   const step = stepFor(zoom), TS = TILE * step;
   for (const [key, t] of tiles) {
-    if (t.step !== step) continue;
+    if (t.step !== step || t.realm !== realm) continue;
     const [tx, tz] = key.slice(key.indexOf(":") + 1).split(",").map(Number);
     if ((tx - cx) * zoom + W / 2 > W || (cz - (tz + TS)) * zoom + H / 2 > H || (tx + TS - cx) * zoom + W / 2 < 0 || (cz - tz) * zoom + H / 2 < 0) continue;
     for (let k = 0; k < t.b.length; k++) counts.set(t.b[k], (counts.get(t.b[k]) || 0) + 1);
@@ -344,9 +404,13 @@ function readoutAt(clientX, clientY, pin) {
   const x = Math.floor(cx + (clientX - r.left - r.width / 2) / zoom), z = Math.floor(cz - (clientY - r.top - r.height / 2) / zoom);
   const c = columnAt(x, z);
   let near = null, nd = (pin ? 20 : 12) / zoom;
-  for (const list of chunks.values()) for (const p of list) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
-  for (const p of strongholdList) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
-  readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + (c ? (c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`) : "not generated yet")
+  for (const [key, list] of chunks) if (key[0] === realm[0]) for (const p of list) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
+  if (realm === "overworld") for (const p of strongholdList) { const d = Math.hypot(p.x - x, p.z - z); if (d < nd) { nd = d; near = p; } }
+  let where;
+  if (!c) where = "not generated yet";
+  else if (realm === "nether") where = (c.kind === 2 ? "lava sea" : c.kind === 1 ? `floor y ${c.y}` : "solid rock") + `<br>${c.biome}<br>overworld ${x * 8}, ${z * 8}`;
+  else where = c.water ? `sea floor y ${c.floor} · ${WATER_LEVEL - c.floor} deep<br>${c.biome}` : `y ${c.y}<br>${c.biome}`;
+  readout.innerHTML = `<b>x</b> ${x} <b>z</b> ${z}<br>` + where
     + (near ? `<br><span style="color:${kindInfo(near.kind)[1]}">●</span> ${kindInfo(near.kind)[0]} at ${near.x}, ${near.z}${near.note ? " (" + near.note + ")" : ""}` : "");
   readout.classList.toggle("pinned", !!pin);
 }
@@ -413,13 +477,23 @@ canvas.addEventListener("wheel", (e) => {
 }, { passive: false });
 function setZoom(z) {
   zoom = Math.max(0.5, Math.min(8, z));
-  for (const b of document.querySelectorAll(".zoom button")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
+  for (const b of document.querySelectorAll(".zoom button[data-z]")) b.setAttribute("aria-pressed", String(+b.dataset.z === zoom));
   draw(); request(); saveView();
 }
-for (const b of document.querySelectorAll(".zoom button")) b.addEventListener("click", () => setZoom(+b.dataset.z));
+for (const b of document.querySelectorAll(".zoom button[data-z]")) b.addEventListener("click", () => setZoom(+b.dataset.z));
+// Realm: the view follows a portal (nether x,z = overworld x,z / 8).
+function setRealm(r) {
+  if (r === realm) return;
+  if (r === "nether") { cx /= 8; cz /= 8; } else { cx *= 8; cz *= 8; }
+  realm = r;
+  for (const b of document.querySelectorAll(".zoom button[data-realm]")) b.setAttribute("aria-pressed", String(b.dataset.realm === realm));
+  document.getElementById("mark").value = markers[realm] ? markers[realm].join(", ") : "";
+  draw(); request(); saveView();
+}
+for (const b of document.querySelectorAll(".zoom button[data-realm]")) b.addEventListener("click", () => setRealm(b.dataset.realm));
 function parseXZ(s) { const m = s.match(/(-?\d+)\s*[, ]\s*(-?\d+)/); return m ? [+m[1], +m[2]] : null; }
 document.getElementById("goto").addEventListener("change", (e) => { const p = parseXZ(e.target.value); if (p) { cx = p[0]; cz = p[1]; draw(); request(); saveView(); } });
-document.getElementById("mark").addEventListener("change", (e) => { marker = parseXZ(e.target.value); if (marker) { cx = marker[0]; cz = marker[1]; } draw(); request(); saveView(); });
+document.getElementById("mark").addEventListener("change", (e) => { const m = parseXZ(e.target.value); markers[realm] = m; if (m) { cx = m[0]; cz = m[1]; } draw(); request(); saveView(); });
 function bigSeed() { const d = Number(seedIn.value.trim().replace(/[^0-9-]/g, "") || "0"); return Math.abs(d) >= 2 ** 63; }
 function updateCpuRow() { document.getElementById("cpuRow").hidden = !bigSeed(); }
 seedIn.addEventListener("input", updateCpuRow);
@@ -439,8 +513,8 @@ function generate() {
     if (gen !== generation) return;
     const m = e.data;
     if (m.type === "ready") { ready = true; strongholdList = m.strongholds || []; request(); return; }
-    if (m.type === "tile") { pending.delete(m.id); tiles.set(tileKey(m.step || 1, m.x0, m.z0), paintTile(m)); draw(); request(); }
-    if (m.type === "chunk") { chunkPending.delete(m.id); chunks.set(m.ox + "," + m.oz, m.list); draw(); request(); }
+    if (m.type === "tile") { pending.delete(m.id); tiles.set(tileKey(m.step || 1, m.x0, m.z0, m.realm), paintTile(m)); draw(); request(); }
+    if (m.type === "chunk") { chunkPending.delete(m.id); chunks.set(chunkKey(m.ox, m.oz, m.realm), m.list); draw(); request(); }
   };
   worker.onerror = (e) => { status.textContent = "generator error: " + e.message; };
   worker.postMessage({ type: "init", meta, biomes: BIOMES, decos: DECOS, structs: STRUCTS, groups: GROUPS, cpu: cpuSel.value });
