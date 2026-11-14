@@ -42,6 +42,7 @@ struct ContentView: View {
     @State private var autojump = MoveSettings.shared.autojump
     @State private var physicalMove = MoveSettings.shared.physicalMove
     @State private var hudDistance = ViewSettings.shared.hudDistance
+    @State private var hudSpread = ViewSettings.shared.hudSpread
 
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
@@ -454,6 +455,15 @@ struct ContentView: View {
             }
             .frame(maxWidth: 360)
             Text("How far the health, hunger and other readouts float from your head (1.0x is the default).")
+                .font(.footnote).foregroundStyle(.secondary)
+            HStack {
+                Text("HUD spread")
+                Slider(value: $hudSpread, in: ViewSettings.spreadMin...ViewSettings.spreadMax)
+                    .onChange(of: hudSpread) { _, v in ViewSettings.shared.hudSpread = v }
+                Text(String(format: "%.2fx", hudSpread)).monospacedDigit().foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: 360)
+            Text("How far out from the centre of your view the readouts sit. Sizes stay the same; 1.0x keeps them close in.")
                 .font(.footnote).foregroundStyle(.secondary)
             Toggle("Auto-jump", isOn: $autojump)
                 .frame(maxWidth: 360)

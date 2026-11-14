@@ -1890,11 +1890,12 @@ actor Renderer {
         // translucent panel in the same low band the hearts/hunger rows occupy,
         // projected against the head like the icons so it tracks with them.
         let gd = 1.35 * ViewSettings.shared.hudDistance * scale   // follows the HUD distance setting
+        let hs = ViewSettings.shared.hudSpread                     // and the spread, like the rows it backs
         func bandDir(_ az: Float, _ e: Float) -> SIMD3<Float> { simd_normalize(fwd + right * tan(az) + up * tan(e)) }
-        let pc = headPos + bandDir(0, -0.30) * gd
+        let pc = headPos + bandDir(0, -0.30 * hs) * gd
         // Hug the vitals rows (they reach ~az ±0.185, one row tall) instead of a
         // wide slab -- Eric: the backing read too big on device.
-        let hw = gd * tan(0.27), hh = gd * tan(0.05)
+        let hw = gd * tan(0.07 + 0.20 * hs), hh = gd * tan(0.05)
         let bl = pc - right * hw - up * hh, br = pc + right * hw - up * hh
         hudScratchGV.removeAll(keepingCapacity: true)
         pushQuadV9(&hudScratchGV, bl, br, br + up * (2 * hh), bl + up * (2 * hh), layer: 0, shade: 1, light: 255, tint: 16777215)

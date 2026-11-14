@@ -68,6 +68,22 @@ final class ViewSettings {
             defaults.set(hudCached, forKey: "view.hudDistance")
         }
     }
+    // How far out from the centre of view the head-locked HUD spreads: a
+    // multiplier on every angular position (hearts, hunger, XP, the server's
+    // corner elements, notices), never on sizes. 1.0 is the layout tuned for
+    // a +-0.36 rad window, which hugged the middle of the view on the device.
+    static let spreadMin: Float = 1.0, spreadMax: Float = 1.6
+    private var spreadCached: Float = {
+        let v = UserDefaults.standard.float(forKey: "view.hudSpread")
+        return v == 0 ? 1.25 : max(ViewSettings.spreadMin, min(ViewSettings.spreadMax, v))
+    }()
+    var hudSpread: Float {
+        get { spreadCached }
+        set {
+            spreadCached = max(Self.spreadMin, min(Self.spreadMax, newValue))
+            defaults.set(spreadCached, forKey: "view.hudSpread")
+        }
+    }
     // Pause-menu minimap toggle. Ours, not the server's.
     private var minimapCached = UserDefaults.standard.bool(forKey: "view.minimap")
     var minimap: Bool {
