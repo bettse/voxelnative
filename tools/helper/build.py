@@ -180,6 +180,7 @@ for g in guides:
         if n.get("item"): pick_items.add(n["item"])
         if n.get("mob"): pick_mobs.add(n["mob"])
         if n.get("brew"): pick_items.add(n["brew"])
+        if n.get("ingredient"): pick_items.add(n["ingredient"])
 # recipe ingredients and mob drops, one level deep, so detail cards have icons and names
 def add_recipe_items(name):
     it = ITEMS.get(name)
@@ -223,7 +224,20 @@ for name, it in items_out.items():
                 groups_out[ing] = {"d": GROUP_LABEL.get(g, "any " + g.replace("_", " ")), "i": items_out.get(rep, {}).get("i", "") or icon(ITEMS.get(rep, {}).get("image", "")) if rep else ""}
 SPAWN_ICON = {"mobs_mc:rover": "enderman", "mobs_mc:elemental_fire": "blaze", "mobs_mc:villager_zombie": "zombie_villager", "mobs_mc:zombified_piglin": "zombie_pigman",
               "mobs_mc:polar_bear": "polarbear", "mobs_mc:magma_cube_big": "magmacube", "mobs_mc:enderdragon": "dragon", "mobs_mc:guardian_elder": "guardian_elder"}
-MOB_ICON = {"mobs_mc:witherskeleton": "mcl_heads_wither_skeleton.png", "mobs_mc:piglin": "mcl_core_gold_nugget.png", "mobs_mc:strider": "mcl_crimson_warped_fungus.png"}
+MOB_ICON = {"mobs_mc:witherskeleton": "mcl_heads_wither_skeleton.png"}
+# Mobs without a spawn icon: the face square of their skin (x0, y0, x1, y1).
+MOB_FACE = {"mobs_mc:strider": ("extra_mobs_strider.png", (16, 16, 32, 32)), "mobs_mc:piglin": ("extra_mobs_piglin.png", (8, 8, 16, 16)),
+            "mobs_mc:piglin_brute": ("extra_mobs_piglin_brute.png", (8, 8, 16, 16)), "mobs_mc:hoglin": ("extra_mobs_hoglin.png", (0, 0, 16, 16)),
+            "mobs_mc:zombified_piglin": ("extra_mobs_zombified_piglin.png", (8, 8, 16, 16))}
+def face_icon(tex, box):
+    key = "%s|%s" % (tex, box)
+    if key in icon_cache: return icon_cache[key]
+    img = load_png(tex)
+    if img is None: icon_cache[key] = ""; return ""
+    img = img.crop(box).resize((32, 32), Image.NEAREST)
+    buf = io.BytesIO(); img.save(buf, "PNG", optimize=True)
+    icon_cache[key] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return icon_cache[key]
 def spawn_text(name):
     rules = [s for s in gd.get("spawns", []) if s["name"] == name]
     if not rules: return ""
@@ -241,8 +255,9 @@ for name in sorted(pick_mobs):
         missing.append(name); continue
     short = name.split(":")[1]
     ic = MOB_ICON.get(name) or ("mobs_mc_spawn_icon_%s.png" % SPAWN_ICON.get(name, short))
+    face = MOB_FACE.get(name)
     drops = [{"n": d["name"], "c": d.get("chance"), "a": d.get("min"), "b": d.get("max")} for d in (m.get("drops") or []) if d.get("name") in items_out]
-    mobs_out[name] = {"d": m["desc"], "i": icon(ic), "t": m.get("type"), "drops": drops, "s": spawn_text(name)}
+    mobs_out[name] = {"d": m["desc"], "i": face_icon(*face) if face else icon(ic), "t": m.get("type"), "drops": drops, "s": spawn_text(name)}
 brew_out = {"water": brew.get("outputs", {}).get("mcl_potions:water") or {}, "awkward": brew.get("outputs", {}).get("mcl_potions:awkward") or {},
             "mods": {k: {a: b for a, b in v.items() if a in items_out} for k, v in (brew.get("modifiers") or {}).items() if isinstance(v, dict)}}
 for g in guides:

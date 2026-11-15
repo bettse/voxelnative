@@ -1,4 +1,5 @@
 <title>VoxeLibre Helper</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one working screen. A thin control bar on top, the map fills the
@@ -82,7 +83,7 @@ main[hidden] { display: none !important; }
 .ghead h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
 .ghead p { margin: 0; color: var(--muted); max-width: 70ch; }
 .gdiagram { flex: 1; overflow: auto; padding: 8px 18px 18px; }
-.gdiagram svg { display: block; font: 12px var(--font); }
+.gdiagram svg { display: block; font: 12px var(--font); margin: 0 auto; }
 .gdiagram .edge { fill: none; stroke: var(--muted); stroke-width: 1.3; opacity: 0.7; }
 .gdiagram .edge.hot { stroke: var(--accent); opacity: 1; stroke-width: 2; }
 .gdiagram .elabel { fill: var(--muted); font-size: 10.5px; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
@@ -116,6 +117,7 @@ main[hidden] { display: none !important; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 4px; background: var(--bg); cursor: pointer; font: 12px var(--font); color: var(--ink); }
 .chip:hover { border-color: var(--ink); }
 .chip .via { color: var(--muted); }
+.chip.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); padding: 6px 12px; }
 .drops, .brew { width: 100%; border-collapse: collapse; font-size: 12px; }
 .drops td, .brew td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
 .drops td:first-child, .brew td:first-child { width: 28px; }
@@ -639,10 +641,12 @@ function iconOf(itemName) {
 function img(src, alt) { return src ? `<img src="${src}" alt="${esc(alt || "")}">` : `<span class="glyph" aria-hidden="true"></span>`; }
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
-// Layered layout: depth = longest path from a source, rows ordered by the
-// mean row of the predecessors (two sweeps), columns centred vertically.
-const NW = 150, NH = 46, GX = 58, GY = 14;
-function layout(g) {
+// Layered layout, top to bottom: depth = longest path from a source gives
+// the layer (row), siblings sit side by side ordered by the mean position
+// of their predecessors (two sweeps). A layer wider than the pane wraps
+// into more rows, so phones get a tall column and desktops a few across.
+const NW = 150, NH = 46, GX = 18, GY = 26, GL = 50;
+function layout(g, avail) {
   const nodes = g.nodes.map(n => ({ ...n, preds: [], succs: [] }));
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
   const edges = g.edges.filter(e => byId[e[0]] && byId[e[1]]).map(e => ({ from: byId[e[0]], to: byId[e[1]], label: e[2] || "" }));
@@ -657,27 +661,35 @@ function layout(g) {
     depth.set(n, v); return v;
   }
   for (const n of nodes) d(n);
-  const cols = [];
-  for (const n of nodes) { const c = depth.get(n); (cols[c] = cols[c] || []).push(n); }
-  for (const col of cols) col.forEach((n, i) => n.row = i);
-  const mean = (list) => list.length ? list.reduce((a, b) => a + b.row, 0) / list.length : null;
+  const layers = [];
+  for (const n of nodes) { const c = depth.get(n); (layers[c] = layers[c] || []).push(n); }
+  for (const l of layers) l.forEach((n, i) => n.pos = i);
+  const mean = (list) => list.length ? list.reduce((a, b) => a + b.pos, 0) / list.length : null;
   for (let pass = 0; pass < 3; pass++) {
-    for (let c = 1; c < cols.length; c++) {
-      cols[c].sort((a, b) => (mean(a.preds) ?? a.row) - (mean(b.preds) ?? b.row));
-      cols[c].forEach((n, i) => n.row = i);
+    for (let c = 1; c < layers.length; c++) {
+      layers[c].sort((a, b) => (mean(a.preds) ?? a.pos) - (mean(b.preds) ?? b.pos));
+      layers[c].forEach((n, i) => n.pos = i);
     }
-    for (let c = cols.length - 2; c >= 0; c--) {
-      cols[c].sort((a, b) => (mean(a.succs) ?? a.row) - (mean(b.succs) ?? b.row));
-      cols[c].forEach((n, i) => n.row = i);
+    for (let c = layers.length - 2; c >= 0; c--) {
+      layers[c].sort((a, b) => (mean(a.succs) ?? a.pos) - (mean(b.succs) ?? b.pos));
+      layers[c].forEach((n, i) => n.pos = i);
     }
   }
-  const maxRows = Math.max(...cols.map(c => c.length));
-  const H = maxRows * (NH + GY) - GY + 24, W = cols.length * (NW + GX) - GX + 24;
-  for (let c = 0; c < cols.length; c++) {
-    const off = (maxRows - cols[c].length) * (NH + GY) / 2;
-    for (const n of cols[c]) { n.x = 12 + c * (NW + GX); n.y = 12 + off + n.row * (NH + GY); }
+  const perRow = Math.max(1, Math.floor((avail - 24 + GX) / (NW + GX)));
+  const widest = Math.min(perRow, Math.max(...layers.map(l => l.length)));
+  const W = 24 + widest * (NW + GX) - GX;
+  let y = 12;
+  for (const l of layers) {
+    for (let i = 0; i < l.length; i += perRow) {
+      const chunk = l.slice(i, i + perRow);
+      const width = chunk.length * (NW + GX) - GX;
+      const x0 = 12 + (W - 24 - width) / 2;
+      chunk.forEach((n, k) => { n.x = x0 + k * (NW + GX); n.y = y; });
+      y += NH + GY;
+    }
+    y += GL - GY;
   }
-  return { nodes, edges, W, H };
+  return { nodes, edges, W, H: y - GL + 12 };
 }
 
 function wrapLabel(text, max = 20) {
@@ -691,23 +703,37 @@ function wrapLabel(text, max = 20) {
 }
 
 function drawGuide(g) {
-  const L = layout(g);
+  const host = document.getElementById("gdiagram");
+  const L = layout(g, Math.max(320, host.clientWidth - 36));
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${L.W} ${L.H}`); svg.setAttribute("width", L.W); svg.setAttribute("height", L.H);
   svg.innerHTML = `<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker>
     <marker id="arrHot" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent)"/></marker></defs>`;
   for (const e of L.edges) {
-    const x1 = e.from.x + NW, y1 = e.from.y + NH / 2, x2 = e.to.x, y2 = e.to.y + NH / 2;
-    const dx = Math.max(30, (x2 - x1) / 2);
+    const x1 = e.from.x + NW / 2, y1 = e.from.y + NH, x2 = e.to.x + NW / 2, y2 = e.to.y;
+    const dy = Math.max(22, (y2 - y1) / 2);
     const p = document.createElementNS(svgNS, "path");
-    p.setAttribute("d", `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`);
+    p.setAttribute("d", `M${x1},${y1} C${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`);
     p.setAttribute("class", "edge"); p.setAttribute("marker-end", "url(#arr)");
     p.dataset.from = e.from.id; p.dataset.to = e.to.id;
     svg.appendChild(p);
     if (e.label) {
+      // Label a third of the way down, under the source, so labels of edges
+      // that meet at one target do not pile up on each other.
+      // Put the label at the end with fewer neighbours: right above the
+      // target when one source fans out (each target then carries its own
+      // label), right below the source when many edges meet at one target,
+      // and mid-way for a sideways edge between two singletons.
+      const fanOut = e.from.succs.length, fanIn = e.to.preds.length;
+      let lx, ly;
+      if (fanOut > fanIn) { lx = x2; ly = y2 - 9; }
+      else if (fanIn > fanOut) { lx = x1; ly = y1 + 8; }
+      else { const k = Math.abs(x2 - x1) > 40 ? 0.5 : 0.32, u = 1 - k;
+        lx = u * u * u * x1 + 3 * u * u * k * x1 + 3 * u * k * k * x2 + k * k * k * x2;
+        ly = u * u * u * y1 + 3 * u * u * k * (y1 + dy) + 3 * u * k * k * (y2 - dy) + k * k * k * y2; }
       const t = document.createElementNS(svgNS, "text");
-      t.setAttribute("x", (x1 + x2) / 2); t.setAttribute("y", (y1 + y2) / 2 - 4); t.setAttribute("text-anchor", "middle"); t.setAttribute("class", "elabel");
+      t.setAttribute("x", lx); t.setAttribute("y", ly + 4); t.setAttribute("text-anchor", "middle"); t.setAttribute("class", "elabel");
       t.textContent = e.label; svg.appendChild(t);
     }
   }
@@ -718,20 +744,16 @@ function drawGuide(g) {
     const lines = wrapLabel(nodeLabel(n));
     const ic = nodeIcon(n);
     const iconHtml = ic ? `<image href="${ic}" x="8" y="${(NH - 28) / 2}" width="28" height="28"/>`
-                        : `<text class="glyph" x="22" y="${NH / 2 + 7}" text-anchor="middle">${KIND_GLYPH[nodeKind(n)] || "\u2022"}</text>`;
+                        : `<text class="glyph" x="22" y="${NH / 2 + 7}" text-anchor="middle">${KIND_GLYPH[nodeKind(n)] || "•"}</text>`;
     const ty = lines.length === 1 ? NH / 2 + 4 : NH / 2 - 3;
     grp.innerHTML = `<rect width="${NW}" height="${NH}"/><title>${esc(nodeLabel(n))}</title>${iconHtml}` +
       lines.map((l, i) => `<text x="44" y="${ty + i * 14}">${esc(l)}</text>`).join("");
     grp.addEventListener("click", () => selectNode(n.id));
+    if (nodeKind(n) === "goto") grp.addEventListener("dblclick", () => showGuide(n.guide));
     grp.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectNode(n.id); } });
     svg.appendChild(grp);
   }
-  const host = document.getElementById("gdiagram");
   host.innerHTML = ""; host.appendChild(svg);
-  // fit the width on narrow screens; wide diagrams scroll
-  const avail = host.clientWidth - 36;
-  // shrink a little to fit the pane; past that the diagram scrolls sideways
-  if (L.W > avail && avail > 320) { const s = Math.max(0.82, avail / L.W); svg.setAttribute("width", L.W * s); svg.setAttribute("height", L.H * s); }
   return L;
 }
 
@@ -776,7 +798,6 @@ function brewTable(table, inv) {
 function selectNode(id) {
   const n = curGuide.nodes.find(x => x.id === id);
   if (!n) return;
-  if (nodeKind(n) === "goto") { showGuide(n.guide); return; }
   curNode = id;
   for (const el of document.querySelectorAll("#gdiagram .node")) el.classList.toggle("sel", el.dataset.id === id);
   for (const el of document.querySelectorAll("#gdiagram .edge")) {
@@ -787,6 +808,7 @@ function selectNode(id) {
   let h = `<h3>${img(nodeIcon(n), "")}<span>${esc(nodeLabel(n))}</span></h3><div class="kind">${kind === "mob" ? (mob && mob.t ? mob.t : "mob") : kind}${it && nodeLabel(n) !== it.d ? " \u00b7 " + esc(it.d) : ""}</div>`;
   if (n.note) h += `<p>${esc(n.note)}</p>`;
   if (it && it.l) h += `<p class="game">${esc(it.l)}</p>`;
+  if (n.ingredient) h += `<h4>Brew</h4><div class="recipe"><div class="out">${img(iconOf("mcl_potions:awkward"))} Awkward Potion</div><span class="arrow">+</span><div class="out">${img(iconOf(n.ingredient), nameOf(n.ingredient))} ${esc(nameOf(n.ingredient))}</div><span class="arrow">\u2192</span><div class="out">${img(nodeIcon(n))} ${esc(nodeLabel(n))}</div></div>`;
   if (it && it.r && it.r.filter(r => r.t !== "fuel").length) h += `<h4>Recipe</h4>` + it.r.map(recipeHtml).join("");
   if (mob) {
     if (mob.s) h += `<p class="game">${esc(mob.s)}</p>`;
@@ -803,10 +825,12 @@ function selectNode(id) {
   const chip = (nid, via) => { const m = curGuide.nodes.find(x => x.id === nid); if (!m) return ""; return `<button class="chip" data-n="${nid}">${img(nodeIcon(m))}${esc(nodeLabel(m))}${via ? ` <span class="via">${esc(via)}</span>` : ""}</button>`; };
   if (inE.length) h += `<h4>Comes from</h4><div class="chips">${inE.map(e => chip(e[0], e[2])).join("")}</div>`;
   if (outE.length) h += `<h4>Leads to</h4><div class="chips">${outE.map(e => chip(e[1], e[2])).join("")}</div>`;
-  if (n.guide) h += `<p><button class="chip" data-g="${n.guide}">${esc((guideById[n.guide] || {}).title || n.guide)} guide \u2197</button></p>`;
+  if (n.guide) h += `<p><button class="chip go" data-g="${n.guide}">Open the ${esc((guideById[n.guide] || {}).title || n.guide)} guide \u2197</button></p>`;
   h += `<p class="version">Recipes and numbers from VoxeLibre ${esc(GAMEVERSION)}.</p>`;
   const det = document.getElementById("gdetail");
   det.innerHTML = h; det.scrollTop = 0;
+  // stacked layout (phone): the card sits under the diagram, bring it up
+  if (window.matchMedia("(max-width: 900px)").matches) det.scrollIntoView({ behavior: "smooth", block: "start" });
   for (const b of det.querySelectorAll(".chip[data-n]")) b.addEventListener("click", () => selectNode(b.dataset.n));
   for (const b of det.querySelectorAll(".chip[data-g]")) b.addEventListener("click", () => showGuide(b.dataset.g));
   saveGuideUrl();
