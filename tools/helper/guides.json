@@ -1,0 +1,244 @@
+{
+  "guides": [
+    {
+      "id": "start",
+      "title": "First days",
+      "blurb": "The chain from punching a tree to a diamond pickaxe. Every other guide hangs off the end of this one.",
+      "nodes": [
+        {"id": "log", "item": "mcl_core:tree", "label": "Logs", "note": "Punch any tree. One log makes four planks."},
+        {"id": "planks", "item": "mcl_core:wood", "label": "Planks"},
+        {"id": "table", "item": "mcl_crafting_table:crafting_table", "note": "Four planks in your 2x2 grid. Opens the 3x3 grid everything else needs."},
+        {"id": "stick", "item": "mcl_core:stick"},
+        {"id": "woodpick", "item": "mcl_tools:pick_wood", "note": "Only good for the first few stone blocks."},
+        {"id": "cobble", "item": "mcl_core:cobble", "note": "Mine stone with any pickaxe."},
+        {"id": "stonepick", "item": "mcl_tools:pick_stone", "note": "Mines iron ore. Make a stone sword and axe while you are at it."},
+        {"id": "furnace", "item": "mcl_furnaces:furnace", "note": "Eight cobblestone. Burns coal, charcoal, planks or sticks."},
+        {"id": "coal", "item": "mcl_core:coal_lump", "note": "Coal ore is everywhere underground and on cliff faces. No coal yet? Smelt logs into charcoal."},
+        {"id": "torch", "item": "mcl_torches:torch", "note": "Coal on a stick makes four. Monsters spawn in the dark, so light everything."},
+        {"id": "ironore", "item": "mcl_core:stone_with_iron", "note": "Common from the surface down. Needs a stone pickaxe or better."},
+        {"id": "iron", "item": "mcl_core:iron_ingot", "note": "Smelt the ore. Iron buys you a bucket, shears, a shield, armour and better tools."},
+        {"id": "ironpick", "item": "mcl_tools:pick_iron", "note": "The first pickaxe that can mine diamonds, gold, redstone and lapis."},
+        {"id": "bed", "item": "mcl_beds:bed_red_bottom", "label": "Bed", "note": "Three wool from sheep plus three planks. Sleeping skips the night and sets your respawn point."},
+        {"id": "diamond", "item": "mcl_core:diamond", "note": "Only in the bottom twelve layers of the world, so dig to around y -50 and below. Mind the lava pools down there."},
+        {"id": "diapick", "item": "mcl_tools:pick_diamond", "note": "Mines obsidian, which opens the Nether and enchanting."}
+      ],
+      "edges": [
+        ["log", "planks", "4 each"], ["planks", "table", "4"], ["planks", "stick", "2 make 4"],
+        ["stick", "woodpick"], ["planks", "woodpick"], ["woodpick", "cobble", "mines"], ["cobble", "stonepick"], ["stick", "stonepick"],
+        ["cobble", "furnace", "8"], ["stonepick", "coal", "mines"], ["coal", "torch"], ["stick", "torch"],
+        ["stonepick", "ironore", "mines"], ["ironore", "iron", "smelt"], ["furnace", "iron"], ["coal", "iron", "fuel"],
+        ["iron", "ironpick", "3"], ["stick", "ironpick"], ["ironpick", "diamond", "mines"], ["diamond", "diapick", "3"], ["planks", "bed", "3"]
+      ]
+    },
+    {
+      "id": "nether",
+      "title": "Into the Nether",
+      "blurb": "Obsidian, a portal, and what waits on the other side. The Nether feeds the brewing, beacon and netherite guides.",
+      "nodes": [
+        {"id": "diapick", "item": "mcl_tools:pick_diamond", "note": "Obsidian breaks with nothing less. See First days."},
+        {"id": "lava", "item": "mcl_core:lava_source", "label": "Lava source", "note": "Pour water onto a lava source block and it turns to obsidian. Flowing lava only makes cobblestone."},
+        {"id": "obsidian", "item": "mcl_core:obsidian", "note": "Ten for the smallest portal. Ruined portals come with a few blocks already placed, and piglins barter it for gold."},
+        {"id": "flint", "item": "mcl_core:flint", "note": "Dig gravel; about one in ten drops flint instead."},
+        {"id": "fns", "item": "mcl_fire:flint_and_steel", "note": "Click the inside of the frame to light it."},
+        {"id": "portal", "kind": "step", "label": "Nether portal", "icon": "mcl_portals_portal.png", "note": "An upright obsidian rectangle, at least 4 wide and 5 tall (corners optional) and up to 23 by 23, with the inside empty. Light it and step in. The Nether is eight times smaller: overworld x and z divided by 8 give the nether coordinates, which is why portals make fast travel."},
+        {"id": "ruined", "kind": "place", "label": "Ruined portal", "note": "Broken frames in both the overworld and the Nether, usually with crying obsidian mixed in and a chest nearby. Replace the missing blocks and you have a working portal. The seed map marks them."},
+        {"id": "thenether", "kind": "place", "label": "The Nether", "note": "A 128 block tall cave world: a lava sea, netherrack, glowstone on the ceiling, quartz, nether gold, soul sand valleys, crimson and warped forests, basalt deltas. No water, no beds (they explode). Fire resistance potions make it much safer."},
+        {"id": "outpost", "kind": "place", "label": "Nether outpost", "note": "A blackstone tower with a Fire Elemental spawner at its heart and nether wart planted inside. The seed map's Nether view marks them."},
+        {"id": "elemental", "mob": "mobs_mc:elemental_fire", "note": "Flies and shoots fire. Only at outposts, which is where flaming rods come from."},
+        {"id": "bulwark", "kind": "place", "label": "Nether bulwark", "note": "A big blackstone fort. Piglins, brutes and hoglins live there and the chests can hold ancient debris and netherite scrap. Wear one piece of gold armour and piglins leave you alone."},
+        {"id": "piglin", "mob": "mobs_mc:piglin", "note": "Drop a gold ingot in front of one and it barters: ender pearls, obsidian, crying obsidian, enchanted books and more."},
+        {"id": "ghast", "mob": "mobs_mc:ghast", "note": "Floats over open spaces and shoots fireballs. Hit the fireball back with a hand or sword. Tears brew Regeneration."},
+        {"id": "magma", "mob": "mobs_mc:magma_cube_big", "label": "Magma cube", "note": "Splits into smaller cubes. Magma cream brews Fire Resistance."},
+        {"id": "strider", "mob": "mobs_mc:strider", "note": "Walks on lava. With a saddle and a warped fungus on a stick you can ride one across the lava sea."},
+        {"id": "brewing", "kind": "goto", "guide": "brewing", "label": "Brewing guide"},
+        {"id": "beacon", "kind": "goto", "guide": "beacon", "label": "Beacon guide"},
+        {"id": "netherite", "kind": "goto", "guide": "netherite", "label": "Netherite guide"}
+      ],
+      "edges": [
+        ["diapick", "obsidian", "mines"], ["lava", "obsidian", "water on it"], ["ruined", "obsidian", "some"], ["piglin", "obsidian", "barter"],
+        ["obsidian", "portal", "10 or more"], ["flint", "fns"], ["fns", "portal", "lights"], ["ruined", "portal", "repair"],
+        ["portal", "thenether"], ["thenether", "outpost"], ["outpost", "elemental", "spawner"], ["thenether", "bulwark"], ["bulwark", "piglin"],
+        ["thenether", "ghast"], ["thenether", "magma"], ["thenether", "strider"],
+        ["elemental", "brewing"], ["bulwark", "beacon"], ["bulwark", "netherite"]
+      ]
+    },
+    {
+      "id": "beacon",
+      "title": "Beacon",
+      "blurb": "From a block of chiseled blackstone to a pyramid that gives Haste or Regeneration to everyone nearby.",
+      "nodes": [
+        {"id": "bulwark", "kind": "place", "label": "Nether bulwark", "note": "About one chunk in 900 of the Nether. Its walls and interior use chiseled polished blackstone, so wither skeletons keep appearing inside."},
+        {"id": "bridge", "kind": "place", "label": "Nether bridge", "note": "Blackstone bridges over the lava sea, about one chunk in 500. Wither skeletons are placed on them when they generate."},
+        {"id": "chiseled", "item": "mcl_blackstone:blackstone_chiseled_polished", "note": "The spawn block. Anywhere in the Nether above the lava sea, each block rolls a 1 in 15 chance every minute to spawn a wither skeleton, up to four nearby. Craft your own and lay a pad near your portal to farm them."},
+        {"id": "witherskel", "mob": "mobs_mc:witherskeleton", "note": "Never spawns in the open: only on chiseled polished blackstone. Its hits give the Wither effect, which drains health for ten seconds. The skull is a 2.5% drop, so budget about 40 kills per skull. Looting improves the odds."},
+        {"id": "skull", "item": "mcl_heads:wither_skeleton", "note": "You need three."},
+        {"id": "soulsand", "item": "mcl_nether:soul_sand", "note": "Four blocks in a T: three in a row and one under the middle. Soul soil works too. Both are all over the Nether floor, thickest in soul sand valleys."},
+        {"id": "wither", "mob": "mobs_mc:wither", "note": "Placing the third skull on top of the T wakes it. It explodes when it wakes, flies, and shoots wither skulls. Build the T somewhere you do not mind losing, bring a strong bow or sword, good armour and healing. It always drops exactly one nether star."},
+        {"id": "star", "item": "mcl_mobitems:nether_star", "note": "The only source is the Wither."},
+        {"id": "glass", "item": "mcl_core:glass", "note": "Five. Smelt sand."},
+        {"id": "obsidian", "item": "mcl_core:obsidian", "note": "Three. See Into the Nether."},
+        {"id": "beacon", "item": "mcl_beacons:beacon", "icon": "beacon_achievement_icon.png", "note": "Place it on top of the pyramid with clear sky (or only glass) above it. Right click to pick an effect."},
+        {"id": "pyramid", "item": "mcl_core:ironblock", "label": "Pyramid base", "note": "One to four square layers under the beacon, mixed as you like from iron, gold, diamond, emerald or netherite blocks: 3x3, then 5x5, 7x7 and 9x9 below it. That is 9, 34, 83 or 164 blocks in total."},
+        {"id": "payment", "item": "mcl_core:iron_ingot", "label": "Activation item", "note": "Each time you set the effect, the beacon takes one iron ingot, gold ingot, diamond, emerald or netherite ingot."},
+        {"id": "effects", "kind": "step", "label": "Effects", "note": "One layer: Speed or Haste. Two layers add Resistance and Jump Boost. Three add Strength and Absorption. Four add Regeneration and raise every effect to level II. Everyone within range gets it, refreshed every few seconds, for as long as they stay near."}
+      ],
+      "edges": [
+        ["bulwark", "chiseled", "built from"], ["bridge", "chiseled", "built from"], ["chiseled", "witherskel", "spawns on it"],
+        ["witherskel", "skull", "drops, 2.5%"], ["skull", "wither", "3 on top"], ["soulsand", "wither", "4 in a T"],
+        ["wither", "star", "drops 1"], ["star", "beacon"], ["glass", "beacon", "5"], ["obsidian", "beacon", "3"],
+        ["beacon", "effects"], ["pyramid", "effects", "under it"], ["payment", "effects", "per change"]
+      ]
+    },
+    {
+      "id": "enchanting",
+      "title": "Enchanting",
+      "blurb": "The table, the bookshelves around it, lapis and levels, and the anvil that moves enchantments from books onto gear.",
+      "nodes": [
+        {"id": "reeds", "item": "mcl_core:reeds", "label": "Sugar cane", "note": "Grows on sand or dirt next to water. Three make three paper. Farm it early: books eat a lot of paper."},
+        {"id": "paper", "item": "mcl_core:paper"},
+        {"id": "leather", "item": "mcl_mobitems:leather", "note": "Cows, horses and hoglins drop it."},
+        {"id": "book", "item": "mcl_books:book", "note": "Three paper and one leather, any arrangement. One for the table, three per bookshelf."},
+        {"id": "diamond", "item": "mcl_core:diamond", "note": "Two for the table. See First days."},
+        {"id": "obsidian", "item": "mcl_core:obsidian", "note": "Four for the table. See Into the Nether."},
+        {"id": "etable", "item": "mcl_enchanting:table", "note": "Put the item top left and one to three lapis next to it. Three enchantments are offered; the lower ones cost fewer levels and less lapis. The top one needs 15 bookshelves to reach level 30."},
+        {"id": "bookshelf", "item": "mcl_books:bookshelf", "note": "Six planks around three books. Fifteen of them, one block away from the table on the same level or one above, with air in between, give the strongest offers. More than fifteen do nothing."},
+        {"id": "lapis", "item": "mcl_core:lapis", "note": "One to three per enchantment. Lapis ore is deep underground, close to diamond depth; an iron pickaxe mines it."},
+        {"id": "xp", "kind": "step", "label": "Experience levels", "note": "Up to 30 levels for the top offer. Mining coal, redstone, lapis, diamonds and emeralds, smelting, breeding animals and killing mobs all give experience."},
+        {"id": "enchanted", "kind": "step", "label": "Enchanted gear", "note": "The table picks the enchantments; you only see the first one in the offer. Enchant a book instead to keep the result for later."},
+        {"id": "ebook", "item": "mcl_enchanting:book_enchanted", "note": "From the table (enchant a plain book), from librarians (a book plus 5 to 64 emeralds), or from piglin bartering. Mending, Frost Walker, Soul Speed, Swift Sneak and the curses never come from the table, only as books."},
+        {"id": "librarian", "mob": "mobs_mc:villager", "label": "Librarian", "note": "A villager that has claimed a lectern. Its enchanted book trade is random; place a new lectern to reroll before the first trade."},
+        {"id": "ironblock", "item": "mcl_core:ironblock", "note": "Three blocks plus four ingots: 31 iron for an anvil."},
+        {"id": "anvil", "item": "mcl_anvils:anvil", "note": "Item in the left slot, book in the right slot, take the result. Also combines two of the same enchanted item, repairs with the tool's material and renames. No level cost in VoxeLibre, but each use has a 12% chance to chip the anvil; it breaks after three."},
+        {"id": "grindstone", "item": "mcl_grindstone:grindstone", "note": "Strips every enchantment except curses and pays back some experience. Also repairs two of the same item into one."}
+      ],
+      "edges": [
+        ["reeds", "paper", "3 make 3"], ["paper", "book", "3"], ["leather", "book", "1"], ["book", "etable", "1"], ["diamond", "etable", "2"], ["obsidian", "etable", "4"],
+        ["book", "bookshelf", "3"], ["bookshelf", "etable", "15 around it"], ["lapis", "etable", "1 to 3"], ["xp", "etable", "levels"],
+        ["etable", "enchanted"], ["etable", "ebook", "enchant a book"], ["librarian", "ebook", "trade"],
+        ["ironblock", "anvil", "3"], ["ebook", "anvil", "right slot"], ["anvil", "enchanted", "applies"], ["enchanted", "grindstone", "strip"]
+      ]
+    },
+    {
+      "id": "brewing",
+      "title": "Brewing",
+      "blurb": "Everything starts with a flaming rod from a nether outpost and nether wart in a water bottle.",
+      "nodes": [
+        {"id": "outpost", "kind": "place", "label": "Nether outpost", "note": "The blackstone tower with the Fire Elemental spawner. Nether wart grows in planters inside, so one trip covers both ingredients."},
+        {"id": "elemental", "mob": "mobs_mc:elemental_fire", "note": "Kill them near the spawner. They burn you, so a Fire Resistance potion or snowballs help."},
+        {"id": "rod", "item": "mcl_mobitems:flaming_rod", "note": "One for the stand, the rest become powder."},
+        {"id": "powder", "item": "mcl_mobitems:flaming_powder", "note": "The stand's only fuel: one powder runs 20 brews. Also the Strength ingredient, and half of an eye of ender."},
+        {"id": "stand", "item": "mcl_brewing:stand_000", "note": "Powder in the fuel slot, ingredient on top, up to three bottles below. Each brew takes about 20 seconds."},
+        {"id": "wart", "item": "mcl_nether:nether_wart_item", "note": "Found planted in nether outposts and bulwark gardens. Replant on soul sand; it grows in four stages and drops two to four."},
+        {"id": "bottle", "item": "mcl_potions:glass_bottle", "note": "Three glass make three. Fill from water or a cauldron."},
+        {"id": "water", "item": "mcl_potions:water", "label": "Water bottle", "brew": "mcl_potions:water", "note": "The starting bottle. Nether wart turns it into the Awkward potion; a fermented spider eye straight into water gives Weakness."},
+        {"id": "awkward", "item": "mcl_potions:awkward", "brew": "mcl_potions:awkward", "note": "No effect itself, but the base for nearly every potion. Add one ingredient for the effect below."},
+        {"id": "mods", "kind": "step", "label": "Modifiers", "brewmods": true, "note": "Brew a finished potion again with: redstone for a longer effect, glowstone dust for level II, gunpowder to make it a splash potion, dragon's breath to turn a splash into a lingering cloud, or a fermented spider eye to invert it (Healing becomes Harming, Swiftness becomes Slowness, Night Vision becomes Invisibility)."},
+        {"id": "sugar", "item": "mcl_core:sugar", "label": "Swiftness: sugar"},
+        {"id": "melon", "item": "mcl_potions:speckled_melon", "label": "Healing: glistering melon", "note": "A melon slice in eight gold nuggets."},
+        {"id": "cream", "item": "mcl_mobitems:magma_cream", "label": "Fire Resistance: magma cream", "note": "Magma cubes drop it; also slimeball plus flaming powder."},
+        {"id": "tear", "item": "mcl_mobitems:ghast_tear", "label": "Regeneration: ghast tear"},
+        {"id": "strength", "item": "mcl_mobitems:flaming_powder", "label": "Strength: flaming powder"},
+        {"id": "gcarrot", "item": "mcl_farming:carrot_item_gold", "label": "Night Vision: golden carrot"},
+        {"id": "puffer", "item": "mcl_fishing:pufferfish_raw", "label": "Water Breathing: pufferfish"},
+        {"id": "foot", "item": "mcl_mobitems:rabbit_foot", "label": "Leaping: rabbit's foot"},
+        {"id": "eye", "item": "mcl_mobitems:spider_eye", "label": "Poison: spider eye"},
+        {"id": "gapple", "item": "mcl_core:apple_gold", "label": "Resistance: golden apple"},
+        {"id": "fermented", "item": "mcl_potions:fermented_spider_eye", "label": "Weakness or invert: fermented spider eye", "note": "Spider eye, brown mushroom and sugar."}
+      ],
+      "edges": [
+        ["outpost", "elemental", "spawner"], ["outpost", "wart", "planted inside"], ["elemental", "rod", "drops"], ["rod", "powder", "1 makes 2"], ["rod", "stand", "+ 3 cobblestone"],
+        ["powder", "stand", "fuel"], ["bottle", "water", "fill"], ["water", "awkward", "+ nether wart"], ["wart", "awkward"],
+        ["awkward", "sugar"], ["awkward", "melon"], ["awkward", "cream"], ["awkward", "tear"], ["awkward", "strength"], ["awkward", "gcarrot"], ["awkward", "puffer"], ["awkward", "foot"], ["awkward", "eye"], ["awkward", "gapple"],
+        ["water", "fermented", "Weakness"], ["sugar", "mods"], ["melon", "mods"], ["cream", "mods"], ["tear", "mods"], ["strength", "mods"], ["gcarrot", "mods"], ["puffer", "mods"], ["foot", "mods"], ["eye", "mods"], ["gapple", "mods"]
+      ]
+    },
+    {
+      "id": "end",
+      "title": "The End",
+      "blurb": "Ender pearls and flaming powder find the stronghold; twelve eyes open the portal; the dragon, then the cities beyond.",
+      "nodes": [
+        {"id": "rover", "mob": "mobs_mc:rover", "label": "Rover (enderman)", "note": "Spawns in the dark almost everywhere in the overworld, in the Nether (warped forests are full of them) and in the End. Looking at its face angers it. Stand under a two block ceiling and it cannot reach you. Drops up to one pearl."},
+        {"id": "pearl", "item": "mcl_throwing:ender_pearl", "note": "Also two to six at a time from piglin bartering, which is the quickest way to get a dozen. Throwing one teleports you to where it lands."},
+        {"id": "powder", "item": "mcl_mobitems:flaming_powder", "note": "From flaming rods. See Brewing."},
+        {"id": "eye", "item": "mcl_end:ender_eye", "note": "Twelve for the portal plus a few to throw. Use the attack key to release one: it flies toward the nearest stronghold and sometimes shatters."},
+        {"id": "stronghold", "kind": "place", "label": "Stronghold", "note": "Underground stone brick maze with the portal room. Follow thrown eyes; the seed map draws the rings they generate on. Watch for infested bricks, which release silverfish when broken."},
+        {"id": "frame", "item": "mcl_portals:end_portal_frame", "note": "Twelve frames already arranged around a 3x3 pool. Click an eye into each empty socket; some are filled when you arrive."},
+        {"id": "endportal", "kind": "step", "label": "End portal", "note": "Opens when the twelfth eye goes in. Jump in. You arrive on an obsidian platform; there is no way back until the dragon is dead or you die."},
+        {"id": "theend", "kind": "place", "label": "The End", "note": "A floating end stone island in the void with obsidian pillars. End crystals on the pillars heal the dragon: shoot or climb to every crystal before fighting it. Rovers everywhere, so wear a pumpkin or avoid their eyes."},
+        {"id": "dragon", "mob": "mobs_mc:enderdragon", "note": "Hits hard and knocks you about. Arrows while it circles, a sword when it perches. Dying drops a lot of experience, the dragon egg and opens the exit portal home."},
+        {"id": "crystal", "item": "mcl_end:crystal", "note": "Craftable: place four on the exit portal to bring the dragon back for another fight."},
+        {"id": "gateway", "kind": "step", "label": "End gateway", "note": "A small portal that appears after the dragon dies. Throw an ender pearl into it to reach the outer islands, and the one on the far side brings you back."},
+        {"id": "city", "kind": "place", "label": "End city", "note": "Purpur towers on the outer islands, guarded by shulkers. The chests hold gear, and the ship moored to some cities carries the elytra."},
+        {"id": "elytra", "item": "mcl_armor:elytra", "note": "Only in end ships. Wear it in the chest slot and jump from a height to glide; fireworks give a boost."},
+        {"id": "shulker", "mob": "mobs_mc:shulker", "note": "Sits in a shell and shoots homing bullets that make you float. Half of them drop a shell."},
+        {"id": "box", "item": "mcl_chests:violet_shulker_box", "label": "Shulker box", "note": "Two shells around a chest. Keeps its contents when broken and picked up; dye it any colour."},
+        {"id": "echest", "item": "mcl_chests:ender_chest", "note": "Eight obsidian around an eye of ender. Every ender chest shows the same private inventory, in any dimension."}
+      ],
+      "edges": [
+        ["rover", "pearl", "drops"], ["pearl", "eye"], ["powder", "eye"], ["eye", "stronghold", "throw to find"], ["stronghold", "frame", "portal room"],
+        ["eye", "endportal", "12"], ["frame", "endportal", "12"], ["endportal", "theend"], ["theend", "dragon"], ["crystal", "dragon", "respawns"],
+        ["dragon", "gateway", "after the kill"], ["gateway", "city", "outer islands"], ["pearl", "gateway", "throw in"], ["city", "elytra", "end ship chest"], ["city", "shulker"],
+        ["shulker", "box", "2 shells + chest"], ["eye", "echest", "+ 8 obsidian"]
+      ]
+    },
+    {
+      "id": "netherite",
+      "title": "Netherite",
+      "blurb": "Ancient debris from the bottom of the Nether, scrap and gold into ingots, and the smithing table that upgrades diamond gear.",
+      "nodes": [
+        {"id": "debris", "item": "mcl_nether:ancient_debris", "note": "Rare and only in the Nether, between 8 and 22 blocks above the bedrock floor (around y -29059 to -29045 there). Needs a diamond pickaxe. It survives explosions, so TNT or a bed blown up at that height is a classic way to expose it. Bulwark chests sometimes hold a piece."},
+        {"id": "scrap", "item": "mcl_nether:netherite_scrap", "note": "Smelt the debris, one scrap each."},
+        {"id": "gold", "item": "mcl_core:gold_ingot", "note": "Nether gold ore is common in the Nether; zombie piglins drop nuggets."},
+        {"id": "ingot", "item": "mcl_nether:netherite_ingot", "note": "Four scrap and four gold ingots, any arrangement. One ingot per upgrade."},
+        {"id": "smithing", "item": "mcl_smithing_table:table", "note": "Two iron ingots over four planks. Diamond item on the left, netherite ingot in the middle, take the netherite item. No upgrade template is needed in VoxeLibre. Enchantments carry over."},
+        {"id": "diamondgear", "item": "mcl_tools:pick_diamond", "label": "Diamond gear", "note": "Any diamond tool, sword or armour piece."},
+        {"id": "netheritegear", "item": "mcl_armor:chestplate_netherite", "label": "Netherite gear", "note": "Tougher and more durable than diamond, and it does not burn when dropped in lava. Armour can also be crafted straight from ingots, but upgrading is far cheaper."},
+        {"id": "block", "item": "mcl_nether:netheriteblock", "note": "Nine ingots. Counts as a beacon pyramid block."}
+      ],
+      "edges": [
+        ["debris", "scrap", "smelt"], ["scrap", "ingot", "4"], ["gold", "ingot", "4"], ["ingot", "smithing", "1"], ["diamondgear", "smithing"], ["smithing", "netheritegear"], ["ingot", "block", "9"]
+      ]
+    },
+    {
+      "id": "villagers",
+      "title": "Villagers",
+      "blurb": "Finding a village, giving villagers jobs, trading for emeralds, curing zombie villagers and building an iron golem.",
+      "nodes": [
+        {"id": "village", "kind": "place", "label": "Village", "note": "Houses around a bell in plains, savanna, desert and taiga style biomes. The seed map marks the chunks where the game tries to build one. Villagers sleep in the beds and work at their job blocks by day."},
+        {"id": "villager", "mob": "mobs_mc:villager", "note": "Right click to trade. A villager with no job takes the nearest free job block. Trades unlock as you buy; each one can be used a few times before it needs to restock at the job block."},
+        {"id": "jobs", "kind": "step", "label": "Job blocks", "note": "Lectern: librarian (enchanted books). Composter: farmer. Barrel: fisherman. Fletching table: fletcher. Loom: shepherd. Cartography table: cartographer. Blast furnace: armorer. Smoker: butcher. Cauldron: leatherworker (saddles). Grindstone: weaponsmith. Smithing table: toolsmith. Brewing stand: cleric. Stonecutter: mason."},
+        {"id": "emerald", "item": "mcl_core:emerald", "note": "The currency. Farmers buy crops, fletchers buy sticks and string, librarians buy paper. Emerald ore is rare and only under extreme hills. Evokers and vindicators drop them."},
+        {"id": "breed", "kind": "step", "label": "Breeding", "note": "Villagers breed on their own when they have spare beds and enough food: bread, carrots, potatoes or beetroot. Throw food at them or give them a farm."},
+        {"id": "zvillager", "mob": "mobs_mc:villager_zombie", "note": "Spawns like a zombie and when a zombie kills a villager. Right click it with a golden apple: it shakes for three to five minutes and comes back as a villager. No Weakness potion is needed in VoxeLibre. Keep it out of daylight while it cures."},
+        {"id": "gapple", "item": "mcl_core:apple_gold", "note": "An apple in eight gold ingots."},
+        {"id": "ironblock", "item": "mcl_core:ironblock", "note": "Four blocks: three in a row with one below the middle, standing or lying flat."},
+        {"id": "pumpkin", "item": "mcl_farming:pumpkin", "note": "Place it on top last, pumpkin or jack o'lantern. The iron blocks must have air beside the arms."},
+        {"id": "golem", "mob": "mobs_mc:iron_golem", "note": "Guards villagers and attacks monsters. Villages also spawn their own. Each one you kill drops three to five iron ingots, which is the start of an iron farm."}
+      ],
+      "edges": [
+        ["village", "villager"], ["jobs", "villager", "profession"], ["villager", "emerald", "trades"], ["emerald", "villager", "buys"], ["villager", "breed"],
+        ["zvillager", "villager", "cured"], ["gapple", "zvillager", "feed"], ["ironblock", "golem", "4 in a T"], ["pumpkin", "golem", "on top"], ["golem", "villager", "protects"]
+      ]
+    },
+    {
+      "id": "riding",
+      "title": "Getting around",
+      "blurb": "Saddles and the animals that take them, plus boats, minecarts and the elytra.",
+      "nodes": [
+        {"id": "saddle", "item": "mcl_mobitems:saddle", "note": "Not craftable. Dungeon, desert temple and jungle temple chests, fishing treasure, or a leatherworker villager."},
+        {"id": "horse", "mob": "mobs_mc:horse", "note": "Plains and savannas. Mount it with an empty hand until it stops throwing you; apples, golden apples and golden carrots speed that up and golden food breeds them. A saddle lets you steer. Horse armour is dungeon loot."},
+        {"id": "donkey", "mob": "mobs_mc:donkey", "note": "Slower than a horse, but a chest on its back gives you storage on the move. Mules are a horse and donkey cross."},
+        {"id": "pig", "mob": "mobs_mc:pig", "note": "Saddle it and steer with a carrot on a stick. Slow, but it works anywhere."},
+        {"id": "carrotstick", "item": "mcl_mobitems:carrot_on_a_stick", "note": "A fishing rod and a carrot."},
+        {"id": "strider", "mob": "mobs_mc:strider", "note": "The Nether's lava walker. Saddle plus a warped fungus on a stick, and the lava sea becomes a road."},
+        {"id": "fungusstick", "item": "mcl_mobitems:warped_fungus_on_a_stick", "note": "A fishing rod and a warped fungus from a warped forest."},
+        {"id": "boat", "item": "mcl_boats:boat", "note": "Five planks. Faster than swimming and animals can ride along."},
+        {"id": "minecart", "item": "mcl_minecarts:minecart", "note": "Five iron. Needs rails: six iron and a stick make sixteen. Powered rails (gold, a stick and redstone) keep it moving."},
+        {"id": "elytra", "item": "mcl_armor:elytra", "note": "Wings from an end ship chest. See The End."}
+      ],
+      "edges": [
+        ["saddle", "horse", "steer"], ["saddle", "donkey"], ["saddle", "pig"], ["carrotstick", "pig", "steer"], ["saddle", "strider"], ["fungusstick", "strider", "steer"]
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-<title>VoxeLibre Seed Map</title>
+<title>VoxeLibre Helper</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
 /* Layout: one working screen. A thin control bar on top, the map fills the
@@ -65,11 +65,78 @@ details#side p { color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
 }
 @media (hover: none) { .readout::after { content: "tap the map to read a spot"; display: block; color: var(--muted); font-size: 10px; } .readout.pinned::after { content: ""; display: none; } }
 body { overscroll-behavior: none; }
+/* Tabs: the seed map and the guides share the bar; only the map's controls hide. */
+.tabs { display: flex; gap: 2px; margin-right: 6px; }
+.tabs button { padding: 6px 12px; }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.bar-rest { display: contents; }
+body[data-tab="guides"] .mapOnly { display: none; }
+/* Guides: a list of guides, the diagram, and a detail card for the selected step. */
+main[hidden] { display: none !important; }
+#guideMain { display: flex; min-width: 0; overflow: hidden; }
+.glist { width: 170px; flex: none; border-right: 1px solid var(--line); background: var(--panel); padding: 10px 8px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.glist button { text-align: left; border: 0; background: transparent; padding: 7px 10px; border-radius: 4px; font-weight: 500; }
+.glist button[aria-current="true"] { background: var(--accent); color: var(--accent-ink); }
+.gbody { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ghead { padding: 12px 18px 4px; }
+.ghead h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+.ghead p { margin: 0; color: var(--muted); max-width: 70ch; }
+.gdiagram { flex: 1; overflow: auto; padding: 8px 18px 18px; }
+.gdiagram svg { display: block; font: 12px var(--font); }
+.gdiagram .edge { fill: none; stroke: var(--muted); stroke-width: 1.3; opacity: 0.7; }
+.gdiagram .edge.hot { stroke: var(--accent); opacity: 1; stroke-width: 2; }
+.gdiagram .elabel { fill: var(--muted); font-size: 10.5px; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.gdiagram .node { cursor: pointer; }
+.gdiagram .node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; rx: 6; }
+.gdiagram .node:hover rect { stroke: var(--ink); }
+.gdiagram .node.sel rect { stroke: var(--accent); stroke-width: 2; }
+.gdiagram .node.place rect { stroke-dasharray: 4 3; }
+.gdiagram .node.goto rect { fill: transparent; }
+.gdiagram .node text { fill: var(--ink); font-size: 12px; }
+.gdiagram .node .kind { fill: var(--muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; }
+.gdiagram .node image, .gdiagram .node .glyph { image-rendering: pixelated; image-rendering: crisp-edges; }
+.gdiagram .node .glyph { font-size: 18px; }
+.gdetail { width: 320px; flex: none; border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 14px 16px; font-size: 13px; }
+.gdetail .hint { color: var(--muted); }
+.gdetail h3 { margin: 0; font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.gdetail h3 img { width: 32px; height: 32px; image-rendering: pixelated; }
+.gdetail .kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 4px 0 10px; }
+.gdetail p { margin: 8px 0; line-height: 1.5; }
+.gdetail .game { color: var(--muted); }
+.gdetail h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 16px 0 6px; }
+.grid { display: inline-grid; grid-template-columns: repeat(3, 34px); gap: 3px; vertical-align: middle; }
+.grid.w2 { grid-template-columns: repeat(2, 34px); } .grid.w1 { grid-template-columns: 34px; }
+.grid span { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+.grid img, .out img, .chip img, .drops img, .brew img { width: 24px; height: 24px; image-rendering: pixelated; }
+.recipe { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+.recipe .arrow { color: var(--muted); }
+.out { display: flex; align-items: center; gap: 6px; }
+.recipe .how { color: var(--muted); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px 3px 4px; background: var(--bg); cursor: pointer; font: 12px var(--font); color: var(--ink); }
+.chip:hover { border-color: var(--ink); }
+.chip .via { color: var(--muted); }
+.drops, .brew { width: 100%; border-collapse: collapse; font-size: 12px; }
+.drops td, .brew td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+.drops td:first-child, .brew td:first-child { width: 28px; }
+.drops .num, .brew .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+.gdetail .version { color: var(--muted); font-size: 11px; margin-top: 18px; }
+@media (max-width: 900px) {
+  #guideMain { flex-direction: column; overflow: auto; }
+  .glist { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px 10px; }
+  .glist button { white-space: nowrap; }
+  .gbody { overflow: visible; flex: none; }
+  .gdiagram { overflow-x: auto; padding: 4px 12px 12px; }
+  .gdetail { width: auto; border-left: 0; border-top: 1px solid var(--line); }
+  .bar-rest { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; width: 100%; }
+}
 @media (prefers-reduced-motion: no-preference) { .readout { transition: opacity 120ms; } }
 </style>
 
 <div class="bar">
-  <h1>VoxeLibre Seed Map</h1>
+  <h1>VoxeLibre Helper</h1>
+  <div class="tabs" role="tablist" aria-label="Sections"><button role="tab" data-tab="map" aria-selected="true">Seed map</button><button role="tab" data-tab="guides" aria-selected="false">Guides</button></div>
+  <div class="mapOnly bar-rest">
   <div class="field"><label for="seed">Seed</label><input type="text" id="seed" inputmode="numeric" autocomplete="off"></div>
   <button class="primary" id="go">Generate</button>
   <div class="field"><label for="goto">Go to</label><input type="text" id="goto" placeholder="x, z" inputmode="numeric" enterkeyhint="go" autocomplete="off"></div>
@@ -81,8 +148,9 @@ body { overscroll-behavior: none; }
     <button data-realm="overworld" aria-pressed="true">Overworld</button><button data-realm="nether">Nether</button>
   </div>
   <span class="status" id="status">ready</span>
+  </div>
 </div>
-<main>
+<main id="mapMain">
   <canvas id="map" aria-label="World map"></canvas>
   <div class="readout" id="readout"><b>x</b> — <b>z</b> —<br>hover the map</div>
   <details open id="side"><summary>Legend and settings</summary>
@@ -100,6 +168,14 @@ body { overscroll-behavior: none; }
     <p>North (+z) is up and east (+x) is right, as on the game's minimap. Overworld sea level is y = 1. Hover or tap for height and biome; drag to pan, scroll or pinch to zoom, double-tap to zoom in.</p>
     <p>The Nether view shows what you would see from above its roof: the lava sea where it is open to the air, otherwise the lowest floor above the lava (brighter the higher it sits), and dark where the rock is solid. Biomes and the cave shapes follow the engine's noise; nether outposts, bulwarks, bridges and ruined portals follow the game's placement rules on those floors. A portal links overworld x,z to nether x,z divided by 8; switching realms moves the view accordingly.</p>
   </details>
+</main>
+<main id="guideMain" hidden>
+  <nav class="glist" id="glist" aria-label="Guides"></nav>
+  <section class="gbody">
+    <div class="ghead"><h2 id="gtitle"></h2><p id="gblurb"></p></div>
+    <div class="gdiagram" id="gdiagram"></div>
+  </section>
+  <aside class="gdetail" id="gdetail"><p class="hint">Pick a step in the diagram to see what it is, how it is made and where it comes from.</p></aside>
 </main>
 
 <script id="genSrc" type="text/plain">
@@ -524,4 +600,235 @@ document.getElementById("go").addEventListener("click", generate);
 seedIn.addEventListener("keydown", (e) => { if (e.key === "Enter") generate(); });
 if (window.matchMedia("(max-width: 720px)").matches) document.getElementById("side").open = false;
 generate();
+</script>
+
+<script>
+// ---- Guides tab: progression trees drawn from guides.json, with the game's
+// own recipes, drops and brewing tables (gamedata/dump.sh) in the detail card.
+const GUIDES = /*__GUIDES__*/;
+const ITEMS = /*__ITEMS__*/;        // name -> {d: description, i: icon data URI, r: recipes, l: long text, u: usage}
+const GROUPITEMS = /*__GROUPITEMS__*/;
+const MOBS = /*__MOBS__*/;          // name -> {d, i, t, drops: [{n, c, a, b}], s: spawn text}
+const BREW = /*__BREW__*/;          // water / awkward ingredient tables and the modifier tables
+const GAMEVERSION = /*__GAMEVERSION__*/;
+const KIND_GLYPH = { place: "\u2691", step: "\u2692", goto: "\u2197" };
+const guideById = Object.fromEntries(GUIDES.map(g => [g.id, g]));
+let curGuide = null, curNode = null;
+
+function nodeLabel(n) {
+  if (n.label) return n.label;
+  if (n.item && ITEMS[n.item]) return ITEMS[n.item].d;
+  if (n.mob && MOBS[n.mob]) return MOBS[n.mob].d;
+  return n.id;
+}
+function nodeIcon(n) {
+  if (n.iconData) return n.iconData;
+  if (n.item && ITEMS[n.item]) return ITEMS[n.item].i;
+  if (n.mob && MOBS[n.mob]) return MOBS[n.mob].i;
+  return "";
+}
+function nodeKind(n) { return n.kind || (n.mob ? "mob" : n.item ? "item" : "step"); }
+function nameOf(itemName) {
+  if (itemName.startsWith("group:")) return (GROUPITEMS[itemName] || {}).d || itemName.slice(6);
+  const it = ITEMS[itemName]; return it ? it.d : itemName.replace(/^[a-z_]+:/, "").replace(/_/g, " ");
+}
+function iconOf(itemName) {
+  if (itemName.startsWith("group:")) return (GROUPITEMS[itemName] || {}).i || "";
+  return (ITEMS[itemName] || {}).i || "";
+}
+function img(src, alt) { return src ? `<img src="${src}" alt="${esc(alt || "")}">` : `<span class="glyph" aria-hidden="true"></span>`; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+// Layered layout: depth = longest path from a source, rows ordered by the
+// mean row of the predecessors (two sweeps), columns centred vertically.
+const NW = 150, NH = 46, GX = 58, GY = 14;
+function layout(g) {
+  const nodes = g.nodes.map(n => ({ ...n, preds: [], succs: [] }));
+  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  const edges = g.edges.filter(e => byId[e[0]] && byId[e[1]]).map(e => ({ from: byId[e[0]], to: byId[e[1]], label: e[2] || "" }));
+  for (const e of edges) { e.from.succs.push(e.to); e.to.preds.push(e.from); }
+  const depth = new Map();
+  const seen = new Set();
+  function d(n) {
+    if (depth.has(n)) return depth.get(n);
+    if (seen.has(n)) return 0;                 // a cycle: break it here
+    seen.add(n);
+    const v = n.preds.length ? Math.max(...n.preds.map(d)) + 1 : 0;
+    depth.set(n, v); return v;
+  }
+  for (const n of nodes) d(n);
+  const cols = [];
+  for (const n of nodes) { const c = depth.get(n); (cols[c] = cols[c] || []).push(n); }
+  for (const col of cols) col.forEach((n, i) => n.row = i);
+  const mean = (list) => list.length ? list.reduce((a, b) => a + b.row, 0) / list.length : null;
+  for (let pass = 0; pass < 3; pass++) {
+    for (let c = 1; c < cols.length; c++) {
+      cols[c].sort((a, b) => (mean(a.preds) ?? a.row) - (mean(b.preds) ?? b.row));
+      cols[c].forEach((n, i) => n.row = i);
+    }
+    for (let c = cols.length - 2; c >= 0; c--) {
+      cols[c].sort((a, b) => (mean(a.succs) ?? a.row) - (mean(b.succs) ?? b.row));
+      cols[c].forEach((n, i) => n.row = i);
+    }
+  }
+  const maxRows = Math.max(...cols.map(c => c.length));
+  const H = maxRows * (NH + GY) - GY + 24, W = cols.length * (NW + GX) - GX + 24;
+  for (let c = 0; c < cols.length; c++) {
+    const off = (maxRows - cols[c].length) * (NH + GY) / 2;
+    for (const n of cols[c]) { n.x = 12 + c * (NW + GX); n.y = 12 + off + n.row * (NH + GY); }
+  }
+  return { nodes, edges, W, H };
+}
+
+function wrapLabel(text, max = 20) {
+  const words = text.split(" "), lines = [""];
+  for (const w of words) {
+    if ((lines[lines.length - 1] + " " + w).trim().length > max && lines[lines.length - 1]) lines.push(w);
+    else lines[lines.length - 1] = (lines[lines.length - 1] + " " + w).trim();
+  }
+  if (lines.length > 2) { lines.length = 2; lines[1] = lines[1].replace(/\s*\S*$/, "") + "\u2026"; }
+  return lines;
+}
+
+function drawGuide(g) {
+  const L = layout(g);
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${L.W} ${L.H}`); svg.setAttribute("width", L.W); svg.setAttribute("height", L.H);
+  svg.innerHTML = `<defs><marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker>
+    <marker id="arrHot" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent)"/></marker></defs>`;
+  for (const e of L.edges) {
+    const x1 = e.from.x + NW, y1 = e.from.y + NH / 2, x2 = e.to.x, y2 = e.to.y + NH / 2;
+    const dx = Math.max(30, (x2 - x1) / 2);
+    const p = document.createElementNS(svgNS, "path");
+    p.setAttribute("d", `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`);
+    p.setAttribute("class", "edge"); p.setAttribute("marker-end", "url(#arr)");
+    p.dataset.from = e.from.id; p.dataset.to = e.to.id;
+    svg.appendChild(p);
+    if (e.label) {
+      const t = document.createElementNS(svgNS, "text");
+      t.setAttribute("x", (x1 + x2) / 2); t.setAttribute("y", (y1 + y2) / 2 - 4); t.setAttribute("text-anchor", "middle"); t.setAttribute("class", "elabel");
+      t.textContent = e.label; svg.appendChild(t);
+    }
+  }
+  for (const n of L.nodes) {
+    const grp = document.createElementNS(svgNS, "g");
+    grp.setAttribute("class", "node " + nodeKind(n)); grp.setAttribute("transform", `translate(${n.x},${n.y})`); grp.dataset.id = n.id;
+    grp.setAttribute("tabindex", "0"); grp.setAttribute("role", "button");
+    const lines = wrapLabel(nodeLabel(n));
+    const ic = nodeIcon(n);
+    const iconHtml = ic ? `<image href="${ic}" x="8" y="${(NH - 28) / 2}" width="28" height="28"/>`
+                        : `<text class="glyph" x="22" y="${NH / 2 + 7}" text-anchor="middle">${KIND_GLYPH[nodeKind(n)] || "\u2022"}</text>`;
+    const ty = lines.length === 1 ? NH / 2 + 4 : NH / 2 - 3;
+    grp.innerHTML = `<rect width="${NW}" height="${NH}"/><title>${esc(nodeLabel(n))}</title>${iconHtml}` +
+      lines.map((l, i) => `<text x="44" y="${ty + i * 14}">${esc(l)}</text>`).join("");
+    grp.addEventListener("click", () => selectNode(n.id));
+    grp.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectNode(n.id); } });
+    svg.appendChild(grp);
+  }
+  const host = document.getElementById("gdiagram");
+  host.innerHTML = ""; host.appendChild(svg);
+  // fit the width on narrow screens; wide diagrams scroll
+  const avail = host.clientWidth - 36;
+  // shrink a little to fit the pane; past that the diagram scrolls sideways
+  if (L.W > avail && avail > 320) { const s = Math.max(0.82, avail / L.W); svg.setAttribute("width", L.W * s); svg.setAttribute("height", L.H * s); }
+  return L;
+}
+
+let curLayout = null;
+function showGuide(id, nodeId) {
+  const g = guideById[id] || GUIDES[0];
+  curGuide = g; curNode = null;
+  for (const b of document.querySelectorAll("#glist button")) b.setAttribute("aria-current", String(b.dataset.g === g.id));
+  document.getElementById("gtitle").textContent = g.title;
+  document.getElementById("gblurb").textContent = g.blurb;
+  curLayout = drawGuide(g);
+  document.getElementById("gdetail").innerHTML = '<p class="hint">Pick a step in the diagram to see what it is, how it is made and where it comes from.</p>' +
+    `<p class="version">Recipes and numbers from VoxeLibre ${esc(GAMEVERSION)}.</p>`;
+  if (nodeId && g.nodes.some(n => n.id === nodeId)) selectNode(nodeId); else saveGuideUrl();
+}
+function saveGuideUrl() {
+  const q = new URLSearchParams(location.search);
+  q.set("tab", "guides"); q.set("g", curGuide.id); if (curNode) q.set("n", curNode); else q.delete("n");
+  history.replaceState(null, "", "?" + q.toString());
+}
+function chance(c) {
+  if (!c || c <= 1) return "always";
+  if (c <= 2) return "1 in 2";
+  const pct = 100 / c;
+  return pct >= 10 ? Math.round(pct) + "%" : pct >= 1 ? pct.toFixed(1) + "%" : "1 in " + Math.round(c);
+}
+function recipeHtml(r) {
+  const out = r.o.split(" "), count = out[1] ? " \u00d7" + out[1] : "";
+  if (r.t === "cooking") return `<div class="recipe"><div class="out">${img(iconOf(r.i[0]), nameOf(r.i[0]))} ${esc(nameOf(r.i[0]))}</div><span class="arrow">\u2192</span><div class="out">${img(iconOf(out[0]))} ${esc(nameOf(out[0]))}${count}</div><span class="how">smelt in a furnace</span></div>`;
+  if (r.t === "fuel") return "";
+  const w = r.w || (r.i.length <= 4 ? 2 : 3), cells = [];
+  const n = r.w ? Math.ceil(r.i.length / w) * w : r.i.length;
+  for (let k = 0; k < n; k++) { const ing = r.i[k] || ""; cells.push(`<span title="${esc(ing ? nameOf(ing) : "")}">${ing ? img(iconOf(ing), nameOf(ing)) : ""}</span>`); }
+  const how = r.w ? "" : `<span class="how">any arrangement</span>`;
+  const names = [...new Set(r.i.filter(Boolean))].map(nameOf).join(", ");
+  return `<div class="recipe"><div class="grid w${w}">${cells.join("")}</div><span class="arrow">\u2192</span><div class="out">${img(iconOf(out[0]))} ${esc(nameOf(out[0]))}${count}</div>${how}</div><p class="game">${esc(names)}</p>`;
+}
+function brewTable(table, inv) {
+  const rows = Object.entries(table).sort((a, b) => nameOf(a[1]).localeCompare(nameOf(b[1])));
+  return `<table class="brew">${rows.map(([ing, out]) => `<tr><td>${img(iconOf(ing))}</td><td>${esc(nameOf(ing))}</td><td class="num">\u2192</td><td>${img(iconOf(out))}</td><td>${esc(nameOf(out))}</td></tr>`).join("")}</table>`;
+}
+function selectNode(id) {
+  const n = curGuide.nodes.find(x => x.id === id);
+  if (!n) return;
+  if (nodeKind(n) === "goto") { showGuide(n.guide); return; }
+  curNode = id;
+  for (const el of document.querySelectorAll("#gdiagram .node")) el.classList.toggle("sel", el.dataset.id === id);
+  for (const el of document.querySelectorAll("#gdiagram .edge")) {
+    const hot = el.dataset.from === id || el.dataset.to === id;
+    el.classList.toggle("hot", hot); el.setAttribute("marker-end", hot ? "url(#arrHot)" : "url(#arr)");
+  }
+  const kind = nodeKind(n), it = n.item ? ITEMS[n.item] : null, mob = n.mob ? MOBS[n.mob] : null;
+  let h = `<h3>${img(nodeIcon(n), "")}<span>${esc(nodeLabel(n))}</span></h3><div class="kind">${kind === "mob" ? (mob && mob.t ? mob.t : "mob") : kind}${it && nodeLabel(n) !== it.d ? " \u00b7 " + esc(it.d) : ""}</div>`;
+  if (n.note) h += `<p>${esc(n.note)}</p>`;
+  if (it && it.l) h += `<p class="game">${esc(it.l)}</p>`;
+  if (it && it.r && it.r.filter(r => r.t !== "fuel").length) h += `<h4>Recipe</h4>` + it.r.map(recipeHtml).join("");
+  if (mob) {
+    if (mob.s) h += `<p class="game">${esc(mob.s)}</p>`;
+    if (mob.drops.length) h += `<h4>Drops</h4><table class="drops">` + mob.drops.map(d => `<tr><td>${img(iconOf(d.n))}</td><td>${esc(nameOf(d.n))}</td><td class="num">${d.a === d.b ? d.b : d.a + "\u2013" + d.b}</td><td class="num">${chance(d.c)}</td></tr>`).join("") + `</table>`;
+  }
+  if (n.brew === "mcl_potions:water") h += `<h4>Water bottle + ingredient</h4>` + brewTable(BREW.water);
+  if (n.brew === "mcl_potions:awkward") h += `<h4>Awkward potion + ingredient</h4>` + brewTable(BREW.awkward);
+  if (n.brewmods) {
+    const inv = BREW.mods["mcl_potions:fermented_spider_eye"] || {};
+    const shown = Object.entries(inv).filter(([a]) => !/_splash$|_lingering$/.test(a));
+    if (shown.length) h += `<h4>Fermented spider eye inverts</h4><table class="brew">${shown.map(([a, b]) => `<tr><td>${img(iconOf(a))}</td><td>${esc(nameOf(a))}</td><td class="num">\u2192</td><td>${img(iconOf(b))}</td><td>${esc(nameOf(b))}</td></tr>`).join("")}</table>`;
+  }
+  const inE = curGuide.edges.filter(e => e[1] === id && e[0] !== id), outE = curGuide.edges.filter(e => e[0] === id && e[1] !== id);
+  const chip = (nid, via) => { const m = curGuide.nodes.find(x => x.id === nid); if (!m) return ""; return `<button class="chip" data-n="${nid}">${img(nodeIcon(m))}${esc(nodeLabel(m))}${via ? ` <span class="via">${esc(via)}</span>` : ""}</button>`; };
+  if (inE.length) h += `<h4>Comes from</h4><div class="chips">${inE.map(e => chip(e[0], e[2])).join("")}</div>`;
+  if (outE.length) h += `<h4>Leads to</h4><div class="chips">${outE.map(e => chip(e[1], e[2])).join("")}</div>`;
+  if (n.guide) h += `<p><button class="chip" data-g="${n.guide}">${esc((guideById[n.guide] || {}).title || n.guide)} guide \u2197</button></p>`;
+  h += `<p class="version">Recipes and numbers from VoxeLibre ${esc(GAMEVERSION)}.</p>`;
+  const det = document.getElementById("gdetail");
+  det.innerHTML = h; det.scrollTop = 0;
+  for (const b of det.querySelectorAll(".chip[data-n]")) b.addEventListener("click", () => selectNode(b.dataset.n));
+  for (const b of det.querySelectorAll(".chip[data-g]")) b.addEventListener("click", () => showGuide(b.dataset.g));
+  saveGuideUrl();
+}
+function setTab(tab) {
+  document.body.dataset.tab = tab;
+  for (const b of document.querySelectorAll(".tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === tab));
+  document.getElementById("mapMain").hidden = tab !== "map";
+  document.getElementById("guideMain").hidden = tab !== "guides";
+  if (tab === "guides") { if (!curGuide) showGuide(new URLSearchParams(location.search).get("g"), new URLSearchParams(location.search).get("n")); else { drawGuide(curGuide); if (curNode) selectNode(curNode); } }
+  else { const q = new URLSearchParams(location.search); q.delete("tab"); q.delete("g"); q.delete("n"); history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString() : "")); window.dispatchEvent(new Event("resize")); }
+  try { localStorage.setItem("helper.tab", tab); } catch (_) {}
+}
+{
+  const list = document.getElementById("glist");
+  for (const g of GUIDES) { const b = document.createElement("button"); b.textContent = g.title; b.dataset.g = g.id; b.addEventListener("click", () => showGuide(g.id)); list.appendChild(b); }
+  for (const b of document.querySelectorAll(".tabs button")) b.addEventListener("click", () => setTab(b.dataset.tab));
+  let tab = "map";
+  const q = new URLSearchParams(location.search);
+  if (q.get("tab") === "guides") tab = "guides";
+  else if (!q.get("seed")) { try { if (localStorage.getItem("helper.tab") === "guides") tab = "guides"; } catch (_) {} }
+  if (tab !== "map") setTab(tab); else document.body.dataset.tab = "map";
+  window.addEventListener("resize", () => { if (document.body.dataset.tab === "guides" && curGuide) { drawGuide(curGuide); if (curNode) selectNode(curNode); } });
+}
 </script>
