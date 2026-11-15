@@ -8595,10 +8595,26 @@ final class WorldSession {
         if nodeModelFailed.contains(file) { return nil }
         guard let data = client.media.store[file] else { return nil }
         let lower = file.lowercased()
-        let mesh = lower.hasSuffix(".obj") ? OBJLoader.load(data)
-                 : lower.hasSuffix(".b3d") ? B3DLoader.load(data) : nil
+        let mesh = (lower.hasSuffix(".obj") ? OBJLoader.load(data)
+                 : lower.hasSuffix(".b3d") ? B3DLoader.load(data) : nil).map(Self.nodeSpace)
         if let mesh { nodeModelCache[file] = mesh } else { nodeModelFailed.insert(file) }
         return mesh
+    }
+
+    /// A node model scaled the way the engine does it (NodeVisuals::updateMesh):
+    /// a static mesh (.obj, or a b3d without animation keys) is authored at one
+    /// unit per node and gets scaled by BS; an animated b3d is an entity model
+    /// at ten units per node and is left in BS space, so it lands at a tenth.
+    /// VoxeLibre's dummy chest node (what placement predicts until the server
+    /// swaps in the real one) uses the animated chest b3d: at one unit per
+    /// node it drew nine nodes wide, a brown wall over the whole view for a
+    /// tick every time you placed a chest.
+    private static func nodeSpace(_ m: B3DLoader.Mesh) -> B3DLoader.Mesh {
+        guard m.isAnimated else { return m }
+        var s = m
+        for i in s.positions.indices { s.positions[i] *= 0.1 }
+        s.minBounds *= 0.1; s.maxBounds *= 0.1
+        return s
     }
 
     private func nodeModels() -> [UInt16: B3DLoader.Mesh] {
@@ -8608,15 +8624,15 @@ final class WorldSession {
             if nodeModelFailed.contains(file) { continue }
             guard let data = client.media.store[file] else { continue }   // not downloaded yet
             let lower = file.lowercased()
-            let mesh = lower.hasSuffix(".obj") ? OBJLoader.load(data)
-                     : lower.hasSuffix(".b3d") ? B3DLoader.load(data) : nil
+            let mesh = (lower.hasSuffix(".obj") ? OBJLoader.load(data)
+                     : lower.hasSuffix(".b3d") ? B3DLoader.load(data) : nil).map(Self.nodeSpace)
             if let mesh {
                 nodeModelCache[file] = mesh; out[id] = mesh
                 // A mesh-node model just arrived. Force a full rebuild this pass so
                 // any block meshed before it (flower pots, lanterns placed earlier)
                 // picks it up now instead of staying invisible until re-dirtied.
                 fullRemesh = true
-                print("[nodemesh] loaded \(file) (\(mesh.surfaces.count) surfaces)"); fflush(stdout)
+                print("[nodemesh] loaded \(file) (\(mesh.surfaces.count) surfaces\(mesh.isAnimated ? ", animated: BS units, scaled 0.1" : ""))"); fflush(stdout)
             } else {
                 nodeModelFailed.insert(file)
                 print("[nodemesh] FAILED to parse \(file)"); fflush(stdout)
