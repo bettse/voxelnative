@@ -145,7 +145,11 @@ function makeNether(gen, decorations, structs, groups) {
             let above = !carvedAt(c, col, nmaxY);
             for (let y = nmaxY - 1; y >= nminY; y--) {
               const solid = !carvedAt(c, col, y);
-              if (solid && !above && y >= d.y_min && y <= d.y_max && d.placeOn.has("mcl_nether:netherrack")) events.push([x, y, z]);
+              // Floors below the nether's bottom are in the void layer the
+              // game fills afterwards; their stone is not in any place_on
+              // list, so the engine never places on them (a bridge the port
+              // put at y -29070 on the dev seed was not built by the game).
+              if (solid && !above && y >= d.y_min && y <= d.y_max && y >= NETHER.min && d.placeOn.has("mcl_nether:netherrack")) events.push([x, y, z]);
               above = solid;
             }
           }
