@@ -73,7 +73,7 @@
           "kind": "goto",
           "guide": "beacon",
           "label": "Beacon",
-          "note": "Hardest. Around 120 wither skeleton kills for three skulls, the Wither fight, then 9 to 164 blocks of iron or better for the pyramid."
+          "note": "Hardest. Wither skeletons live only on nether bridges, around 120 kills for three skulls, then the Wither fight, then 9 to 164 blocks of iron or better for the pyramid."
         }
       ],
       "edges": [
@@ -948,7 +948,7 @@
           "id": "bulwark",
           "kind": "place",
           "label": "Nether bulwark",
-          "note": "A big blackstone fort. Piglins, brutes and hoglins live there and the chests can hold ancient debris and netherite scrap. Wear one piece of gold armour and the piglins leave you alone."
+          "note": "A big blackstone fort. Piglins, brutes and hoglins live there (they respawn on the polished brick floors) and the chests can hold ancient debris and netherite scrap. Wear one piece of gold armour and the piglins leave you alone. No wither skeletons here despite the chiseled blocks."
         },
         {
           "id": "piglin",
@@ -1676,31 +1676,25 @@
       "blurb": "From one block of chiseled blackstone to a pyramid that hands out Haste or Regeneration to everyone nearby.",
       "nodes": [
         {
-          "id": "bulwark",
-          "kind": "place",
-          "label": "Nether bulwark",
-          "note": "About one chunk in 900 of the Nether. The walls and interior use chiseled polished blackstone, so wither skeletons keep showing up inside."
-        },
-        {
           "id": "bridge",
           "kind": "place",
           "label": "Nether bridge",
-          "note": "Blackstone bridges over the lava sea, about one chunk in 500. Wither skeletons are placed on them when they generate."
+          "note": "Blackstone bridges over the lava sea, about one chunk in 500 of the Nether. This is the only place wither skeletons exist: five are placed when the bridge generates, and the chiseled blocks under open air on it keep spawning more. The seed map's Nether view marks bridges."
         },
         {
           "id": "chiseled",
           "item": "mcl_blackstone:blackstone_chiseled_polished",
-          "note": "The spawn block. Anywhere in the Nether above the lava sea, each block rolls a 1 in 15 chance every minute to spawn a wither skeleton, up to four nearby. Craft your own and lay a pad near your portal: that's a skull farm."
+          "note": "The spawn block, but only the ones a bridge was built from: the game tags those at generation, and a block you place yourself does nothing. Each tagged block with air above rolls a 1 in 15 chance every minute, up to four skeletons nearby, and only while there aren't more than about 14 mobs and items around (which is why a bulwark, full of piglins, never spawns any even though it has the same block)."
         },
         {
           "id": "witherskel",
           "mob": "mobs_mc:witherskeleton",
-          "note": "Never spawns in the open, only on chiseled polished blackstone. Its hits give you the Wither effect (health drains for ten seconds). The skull is a 2.5% drop, so budget about 40 kills per skull. Looting helps."
+          "note": "Never spawns in the open and never in bulwarks, only on a nether bridge's tagged chiseled blocks. Its hits give you the Wither effect (health drains for ten seconds). The skull is a 2.5% drop, so budget about 40 kills per skull. Looting helps. Camp on a bridge and clear other mobs so the spawn cap stays free."
         },
         {
           "id": "skull",
           "item": "mcl_heads:wither_skeleton",
-          "note": "You need three. This is the grind."
+          "note": "You need three. This is the grind: find a bridge and stay on it."
         },
         {
           "id": "soulsand",
@@ -1753,11 +1747,6 @@
         }
       ],
       "edges": [
-        [
-          "bulwark",
-          "chiseled",
-          "built from"
-        ],
         [
           "bridge",
           "chiseled",
