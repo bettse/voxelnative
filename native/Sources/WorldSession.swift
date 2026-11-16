@@ -7095,6 +7095,11 @@ final class WorldSession {
                 // lines fit like desktop while lone text keeps its full size.
                 var gap = Float.infinity
                 for o in textLines where o.id != id && o.pos == e.pos && abs(o.off.x - e.offset.x) < 40 {
+                    // The coordinate block and the potion rows share the top-right
+                    // anchor but the potions hang a block lower on screen, so
+                    // their offsets are not neighbours (the biome line sat 4 px
+                    // from an effect label in offset space and drew as a smudge).
+                    if Self.isCoordinateId(o.id) != Self.isCoordinateId(id) { continue }
                     // Under 3 px is the same line, not a neighbour: mcl_info draws
                     // a black copy 1 px off as a shadow, which squeezed the
                     // coordinate readout to a smudge.
