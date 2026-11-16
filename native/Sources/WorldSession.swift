@@ -7058,6 +7058,11 @@ final class WorldSession {
             // over its bar, a label over its timer) stays proportional; only the
             // normalised position stays pinned to the screen edge.
             var anchor = e.pos * hudScreen + e.offset * Self.hudSizeBoost
+            // The coordinate columns (our redraw of mcl_info's readout, ids
+            // 2_100_0xx) move out at half the HUD spread: at the full rate
+            // they were the first thing to leave the comfortable reading zone
+            // (Eric: at 1.15x the coordinates were too far out, the rest fine).
+            if (2_100_000...2_100_030).contains(id) { anchor.x += (hudS - 1) * Self.hudScreenBase.x * 0.25 }
             // The minimap takes the top-right corner; potion icons and their
             // timers (anchored there) hang below it instead. (Sliding them left
             // put the timers on the boss bar's right end.)
