@@ -6620,22 +6620,23 @@ final class WorldSession {
             if let c = name.firstIndex(of: ",") { name = String(name[..<c]).trimmingCharacters(in: .whitespaces) }
             var el = Client.HudElement()
             el.type = 1; el.text = name; el.pos = SIMD2(1, 0); el.align = SIMD2(-1, 1)
-            el.offset = SIMD2(-6, 82); el.number = 0xCCCAC0; el.zIndex = 100; el.style = 1
+            el.offset = SIMD2(-6, 54); el.number = 0xCCCAC0; el.zIndex = 100; el.style = 1
             out.append((2_100_030, el))
         }
         for (k, axis) in ["x", "y", "z"].enumerated() {
             guard let v = value(axis) else { continue }
             // Column centres 52 px apart in from the right edge (z nearest the
-            // edge so x y z still read left to right), text rows 50 and 65.
+            // edge so x y z still read left to right), text rows 22 and 37
+            // (tight under the minimap: at 50 and 65 the gap read as a hole).
             // Top right, under the minimap when it shows: top left put them
             // out at the edge of the comfortable zone once the HUD spread
             // grew, and the right side already has the minimap to sit under.
             let cx: Float = -(30 + 52 * Float(2 - k))
             var label = Client.HudElement()
             label.type = 1; label.text = axis; label.pos = SIMD2(1, 0); label.align = SIMD2(0, 1)
-            label.offset = SIMD2(cx, 50); label.number = 0xCCCAC0; label.zIndex = 100; label.style = 1
+            label.offset = SIMD2(cx, 22); label.number = 0xCCCAC0; label.zIndex = 100; label.style = 1
             var val = label
-            val.text = String(v); val.offset = SIMD2(cx, 65); val.number = 0xFFFFFF
+            val.text = String(v); val.offset = SIMD2(cx, 37); val.number = 0xFFFFFF
             out.append((2_100_000 + k, label)); out.append((2_100_010 + k, val))
         }
         return out
@@ -7069,7 +7070,7 @@ final class WorldSession {
             // (Sliding the effects left put the timers on the boss bar's end.)
             if e.pos.x >= 0.99, e.pos.y <= 0.01 {
                 if minimapDrawn { anchor.y += 2 * Self.minimapRadiusPx + 30 }
-                if hasCoords, !Self.isCoordinateId(id) { anchor.y += 112 * Self.hudSizeBoost }   // the coordinate block: rows 50 to 82, the biome line, and a gap
+                if hasCoords, !Self.isCoordinateId(id) { anchor.y += 84 * Self.hudSizeBoost }   // the coordinate block: rows 22 to 54, the biome line, and a gap
             }
             switch e.type {
             case 1:                                              // text
