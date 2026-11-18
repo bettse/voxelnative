@@ -72,10 +72,12 @@ final class ViewSettings {
     // multiplier on every angular position (hearts, hunger, XP, the server's
     // corner elements, notices), never on sizes. 1.0 is the layout tuned for
     // a +-0.36 rad window, which hugged the middle of the view on the device.
-    static let spreadMin: Float = 1.0, spreadMax: Float = 1.6
+    // 1.15 is what read best on the headset once the coordinates moved under
+    // the minimap: wider pushed the corner text past comfortable reading.
+    static let spreadMin: Float = 1.0, spreadMax: Float = 1.6, spreadDefault: Float = 1.15
     private var spreadCached: Float = {
         let v = UserDefaults.standard.float(forKey: "view.hudSpread")
-        return v == 0 ? 1.25 : max(ViewSettings.spreadMin, min(ViewSettings.spreadMax, v))
+        return v == 0 ? ViewSettings.spreadDefault : max(ViewSettings.spreadMin, min(ViewSettings.spreadMax, v))
     }()
     var hudSpread: Float {
         get { spreadCached }
