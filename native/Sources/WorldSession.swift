@@ -321,6 +321,14 @@ final class WorldSession {
     private var entitySkinSpecs = Set<String>()
     private var skinUnseenSince: [String: TimeInterval] = [:]
     private var skinSweepAt: TimeInterval = 0
+    /// How long a skin no live entity uses keeps its layer. Sim scenes shorten
+    /// it (-vrdev.skinKeep seconds) to exercise the release and re-bake path.
+    private static let skinKeepSeconds: TimeInterval = {
+        let v = UserDefaults.standard.double(forKey: "vrdev.skinKeep")
+        if v > 0 { return v }
+        return UserDefaults.standard.bool(forKey: "vrdev.skinTest") ? 3 : 120
+    }()
+    private var skinReleasedTotal = 0   // layers the sweep has released this session (skinTest checks it ran)
     private var lastModelTexTilesCount = -1
     private var simMobPhase = 0                       // -vrdev.spawnMob framing state
     private var simMobTimer: Double = 0
@@ -2086,6 +2094,43 @@ final class WorldSession {
         // menu does, type via prefill, press Done, and expect the [bugnote] line
         // + Documents/bug-notes.txt. Eric's device sessions closed the keyboard
         // without a note ever landing (the completion was nilled before use).
+        // -vrdev.skinTest 1: skins released while away come back. Count the
+        // textured mesh entities on the pad, leave for long enough that the
+        // sweep (3 s keep in this scene) releases their skins, return, and
+        // check every nearby mesh entity has a layer for each non-blank skin
+        // again. Before the on-demand bake in appendModel they all drew
+        // nothing until an unrelated new skin forced a rescan.
+        if UserDefaults.standard.bool(forKey: "vrdev.skinTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            func nearMesh() -> [ActiveObjects.Entity] {
+                let feet = player.physics().feet
+                return client.objects.snapshot().filter { $0.visual == "mesh" && !$0.isPlayer && simd_distance($0.pos, feet) < 40 }
+            }
+            func unresolved(_ e: ActiveObjects.Entity) -> [String] {
+                e.textures.filter { !Self.isBlankSpec($0) && modelTexLayer[$0] == nil }
+            }
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                simTeleportToPad(); simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 8:
+                let near = nearMesh()
+                simScratchCount = near.count
+                print("[skintest] on the pad: near=\(near.count) unresolved=\(near.filter { !unresolved($0).isEmpty }.count) released=\(skinReleasedTotal)"); fflush(stdout)
+                client.sendChat("/teleport 0 160 600")
+                simDigPhase = 2; simDigTimer = 0
+            case 2 where simDigTimer > 14:
+                print("[skintest] away: released=\(skinReleasedTotal)"); fflush(stdout)
+                simTeleportToPad(); simDigPhase = 3; simDigTimer = 0
+            case 3 where simDigTimer > 10:
+                let near = nearMesh()
+                let missing = near.filter { !unresolved($0).isEmpty }
+                let names = missing.prefix(4).map { "\($0.name){\(unresolved($0).map { String($0.prefix(40)) }.joined(separator: "|"))}" }
+                let pass = simScratchCount > 0 && near.count > 0 && missing.isEmpty && skinReleasedTotal > 0
+                print("[skintest] RESULT before=\(simScratchCount) near=\(near.count) missing=\(missing.count) released=\(skinReleasedTotal) \(names.joined(separator: " ")) pass=\(pass)"); fflush(stdout)
+                simDigPhase = 99
+            default: break
+            }
+        }
         if UserDefaults.standard.bool(forKey: "vrdev.bugNoteTest"), client.objects.localPlayerId != 0, atlasBuilt {
             simDigTimer += Double(dt)
             switch simDigPhase {
@@ -8363,6 +8408,14 @@ final class WorldSession {
             let withLayer = near.filter { ($0.textures.first).map { modelTexLayer[$0] != nil } ?? false }
             let nearest = mob.map { simd_distance($0.pos, s.feet) }.min() ?? -1
             print("[model] ents=\(ents.count) mob=\(mob.count) near=\(near.count) withLayer=\(withLayer.count) nearest=\(Int(nearest)) skins=\(modelTexCount) verts=\(mv.count/9)"); fflush(stdout)
+            // Name the nearby mesh entities that have a non-blank skin with no
+            // layer: those draw nothing, and the one-shot miss log above may
+            // have already fired for the name.
+            let nolayer = near.filter { e in e.textures.contains { !Self.isBlankSpec($0) && modelTexLayer[$0] == nil } }
+            if !nolayer.isEmpty {
+                let desc = nolayer.prefix(5).map { e in "\(e.name)#\(e.id){\(e.textures.filter { !Self.isBlankSpec($0) && modelTexLayer[$0] == nil }.map { String($0.prefix(50)) }.joined(separator: "|"))}" }
+                print("[model] nolayer \(nolayer.count): \(desc.joined(separator: " "))"); fflush(stdout)
+            }
             // Vertical-placement probe for the sunk-mob bug: the nearest
             // mob's pos.y, collision box, and the ground under it. If pos.y sits
             // at/above the ground, the model draws from pos.y up, so a sink means
@@ -9055,8 +9108,15 @@ final class WorldSession {
                 else { return nil }
             }
         }
-        if d == nil, let spec = droppedItemSpec(itemStr), let layer = modelTexLayer[spec] {
-            d = .card(layer: layer, uv: modelTexUV[spec] ?? SIMD2(1, 1))
+        if d == nil, let spec = droppedItemSpec(itemStr) {
+            // Same release-and-return gap as the mob skins (appendModel): a
+            // dropped item's picture released by the sweep never re-baked.
+            if modelTexLayer[spec] == nil, assignModelTexture(spec) {
+                modelTexturesDirty = true; entitySkinSpecs.insert(spec)
+            }
+            if let layer = modelTexLayer[spec] {
+                d = .card(layer: layer, uv: modelTexUV[spec] ?? SIMD2(1, 1))
+            }
         }
         if let d, !provisional { itemDrawCache[itemStr] = d }
         return d
@@ -9297,27 +9357,39 @@ final class WorldSession {
         // a session). Every 15 s, a spec no live entity has referenced for two
         // minutes gives its layer back for reuse. Only specs this scan
         // registered: HUD images, icons and text have their own owners.
-        if frameUptime - skinSweepAt > 15 {
+        if frameUptime - skinSweepAt > min(15, Self.skinKeepSeconds) {
             skinSweepAt = frameUptime
             var live = Set<String>()
             for e in ents {
                 if e.visual == "mesh" { for t in e.textures { live.insert(t) } }
-                else if e.name == "__builtin:item", let itemStr = e.textures.first, let spec = droppedItemSpec(itemStr) { live.insert(spec) }
+                else if e.visual == "wielditem" || e.visual == "item" {
+                    // Dropped items, item frames, falling nodes and held items
+                    // all draw through itemDraw, which bakes their picture on
+                    // demand; count them as live or the sweep churns them.
+                    let itemStr = !e.wieldItem.isEmpty ? e.wieldItem : (e.textures.first ?? "")
+                    if let spec = droppedItemSpec(itemStr) { live.insert(spec) }
+                }
             }
             var freed = 0
+            var freedNames: [String] = []
             for spec in entitySkinSpecs {
                 if live.contains(spec) { skinUnseenSince[spec] = nil; continue }
                 let since = skinUnseenSince[spec] ?? frameUptime
                 skinUnseenSince[spec] = since
-                guard frameUptime - since > 120, let layer = modelTexLayer[spec] else { continue }
+                guard frameUptime - since > Self.skinKeepSeconds, let layer = modelTexLayer[spec] else { continue }
                 modelTexLayer[spec] = nil; modelTexUV[spec] = nil
                 freeModelLayers.append(layer)
                 entitySkinSpecs.remove(spec); skinUnseenSince[spec] = nil
-                freed += 1
+                freed += 1; skinReleasedTotal += 1
+                if freedNames.count < 6 { freedNames.append(String(spec.prefix(60))) }
             }
             if freed > 0 {
                 itemDrawCache.removeAll()   // resolved dropped-item draws pointed at these layers
-                print("[modeltex] released \(freed) unused skin layers (\(freeModelLayers.count) free of \(modelTexCount))"); fflush(stdout)
+                // Let a mob that can't draw log again: the one-shot miss log
+                // fired at startup for most names, so a miss after a release
+                // (the skin gone and never re-baked) left no trace on device.
+                mobMissLogged.removeAll()
+                print("[modeltex] released \(freed) unused skin layers (\(freeModelLayers.count) free of \(modelTexCount)): \(freedNames.joined(separator: ", "))"); fflush(stdout)
             }
         }
         // Rebuild when we've registered new layers, OR when the renderer's array
@@ -9412,6 +9484,17 @@ final class WorldSession {
             // Compose the modified layer on demand; until it's ready, draw the
             // base so the mob never vanishes waiting for the overlay.
             var spec = base
+            // Bake the skin here if it has no layer. The per-tick skin scan
+            // only runs when a texture string the session has never seen
+            // appears, and the two-minute sweep releases skins nothing in
+            // range uses: a mob, chest or villager coming back after that
+            // had a known string and a released layer, so nothing ever baked
+            // it again and it drew nothing until some unrelated new skin
+            // forced a rescan (Eric's invisible double chests, stalkers and
+            // hoglins).
+            if modelTexLayer[base] == nil, assignModelTexture(base) {
+                modelTexturesDirty = true; entitySkinSpecs.insert(base)
+            }
             if !e.textureMod.isEmpty {
                 let modded = base + e.textureMod
                 if modelTexLayer[modded] != nil { spec = modded }
