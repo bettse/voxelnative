@@ -310,6 +310,19 @@ final class WorldSession {
     private var lastModelVerts = 0
     private var lastModelIdx = 0
     private var lastOverlayVerts = 0, lastOverlayIdx = 0, lastBlendVerts = 0, lastBlendIdx = 0
+    private var lastXrayVerts = 0, lastXrayIdx = 0
+    // Ore finder: the content ids it outlines (diamond ore, deepslate diamond
+    // ore, ancient debris; .max until the registry has them), the last scan's
+    // hits nearest first, and when it ran. Scanned on the tick thread only.
+    private var oreIdDiamond: UInt16 = .max, oreIdDeepDiamond: UInt16 = .max, oreIdDebris: UInt16 = .max
+    private var oreIdsVersion = -1
+    private var oreScanAt: Double = -1
+    private var oreHits: [(pos: SIMD3<Int>, debris: Bool, d2: Int)] = []
+    private var oreLoggedCount = -1
+    static let oreRange = 30
+    private static let oreMaxDrawn = 64
+    private var simOreBefore: [SIMD3<Int>: String] = [:]   // -vrdev.oreTest: nodes to put back, by position
+    private var simOreResult = ""                           // -vrdev.oreTest: RESULT line, printed after cleanup
     private var seenEntityTiles: Set<String> = []   // entity texture strings already offered to the atlas
     // Gate for ensureModelTextures' entity scan: only walk all entities'
     // textures when a new one appeared (objects.tiles is a monotonic "seen" set,
@@ -2128,6 +2141,52 @@ final class WorldSession {
                 let pass = simScratchCount > 0 && near.count > 0 && missing.isEmpty && skinReleasedTotal > 0
                 print("[skintest] RESULT before=\(simScratchCount) near=\(near.count) missing=\(missing.count) released=\(skinReleasedTotal) \(names.joined(separator: " ")) pass=\(pass)"); fflush(stdout)
                 simDigPhase = 99
+            default: break
+            }
+        }
+        // -vrdev.oreTest 1: the ore finder sees buried ore. Bury a diamond ore
+        // and an ancient debris node ten below the pad, each capped on all six
+        // sides with stone, wait for the blocks to stream back, and check the
+        // scan lists both and the see-through stream has geometry. Every node
+        // goes back to what it was (chat-rate paced), then RESULT prints.
+        if UserDefaults.standard.bool(forKey: "vrdev.oreTest"), client.objects.localPlayerId != 0, atlasBuilt {
+            simDigTimer += Double(dt)
+            let spots: [(SIMD3<Int>, String, Bool)] = [(SIMD3(5, 110, 5), "mcl_core:stone_with_diamond", false),
+                                                       (SIMD3(-5, 110, -5), "mcl_nether:ancient_debris", true)]
+            let caps: [SIMD3<Int>] = [SIMD3(1,0,0), SIMD3(-1,0,0), SIMD3(0,1,0), SIMD3(0,-1,0), SIMD3(0,0,1), SIMD3(0,0,-1)]
+            switch simDigPhase {
+            case 0 where simDigTimer > 2:
+                simTeleportToPad(); simDigPhase = 1; simDigTimer = 0
+            case 1 where simDigTimer > 5:
+                simOreBefore = [:]; simChatQueue = []
+                for (c, ore, _) in spots {
+                    for p in [c] + caps.map({ c &+ $0 }) {
+                        let name = client.nodes.name(client.world.nodeId(p))
+                        simOreBefore[p] = (name == "?" || name == "ignore") ? "air" : name
+                    }
+                    simChatQueue.append("/setblock \(c.x),\(c.y),\(c.z) \(ore)")
+                    for d in caps { let p = c &+ d; simChatQueue.append("/setblock \(p.x),\(p.y),\(p.z) mcl_core:stone") }
+                }
+                let kinds = Set(simOreBefore.values).sorted()
+                print("[oretest] burying \(spots.count) ores (\(simChatQueue.count) setblocks); nodes there now: \(kinds)"); fflush(stdout)
+                simDigPhase = 2; simDigTimer = 1.3
+            case 2 where simDigTimer > 1.3:   // one chat command per 1.3 s (server allows 8 per 10 s)
+                simDigTimer = 0
+                if simChatQueue.isEmpty { simDigPhase = 3 } else { client.sendChat(simChatQueue.removeFirst()) }
+            case 3 where simDigTimer > 2:
+                let found = spots.filter { sp in oreHits.contains { $0.pos == sp.0 && $0.debris == sp.2 } }
+                if found.count < spots.count && simDigTimer < 15 { break }   // still streaming in
+                let pass = found.count == spots.count && lastXrayIdx > 0
+                simOreResult = "[oretest] RESULT found=\(found.count)/\(spots.count) inRange=\(oreHits.count) xrayIdx=\(lastXrayIdx) pass=\(pass)"
+                // No "RESULT" in this line: the suite stops the app on that word, and the cleanup must run first.
+                print("[oretest] found=\(found.count)/\(spots.count) xrayIdx=\(lastXrayIdx); putting \(simOreBefore.count) nodes back"); fflush(stdout)
+                simChatQueue = simOreBefore.keys.sorted { ($0.x, $0.y, $0.z) < ($1.x, $1.y, $1.z) }
+                    .map { "/setblock \($0.x),\($0.y),\($0.z) \(simOreBefore[$0]!)" }
+                simDigPhase = 4; simDigTimer = 1.3
+            case 4 where simDigTimer > 1.3:
+                simDigTimer = 0
+                if simChatQueue.isEmpty { print(simOreResult); fflush(stdout); simDigPhase = 99 }
+                else { client.sendChat(simChatQueue.removeFirst()) }
             default: break
             }
         }
@@ -7925,6 +7984,8 @@ final class WorldSession {
         mv.reserveCapacity(lastModelVerts); mi.reserveCapacity(lastModelIdx)
         var bv: [Float] = []; var bi: [UInt32] = []   // use_texture_alpha mobs (blended pass)
         bv.reserveCapacity(lastBlendVerts); bi.reserveCapacity(lastBlendIdx)
+        var xv: [Float] = []; var xi: [UInt32] = []   // ore finder outlines (drawn through walls)
+        xv.reserveCapacity(lastXrayVerts); xi.reserveCapacity(lastXrayIdx)
         // Nametags to draw this frame (emitted into the overlay stream below,
         // which is declared after this loop).
         var nametagJobs: [(pos: SIMD3<Float>, text: String, color: UInt32)] = []
@@ -8293,6 +8354,16 @@ final class WorldSession {
             appendHighlight(node: hit.under, layer: highlightLayer,
                             eye: eye, cosY: cy, sinY: sy, v: &mv, idx: &mi)
         }
+        // Ore finder: a coloured outline on every diamond ore / ancient debris
+        // node within oreRange, into the see-through stream. The scan walks
+        // mapblocks twice a second; the outlines rebuild every tick (cheap, and
+        // they have to follow the eye like everything else in this stream).
+        if ViewSettings.shared.oreFinder {
+            if frameUptime - oreScanAt > 0.5 { oreScanAt = frameUptime; scanOres(feet: s.feet) }
+            appendOreOutlines(eye: eye, cosY: cy, sinY: sy, v: &xv, idx: &xi)
+        } else if !oreHits.isEmpty {
+            oreHits = []; oreLoggedCount = -1
+        }
         // Dig-crack overlay on the node being mined (advances with digElapsed).
         if let dn = digNode, digTime > 0, !crackTex.isEmpty {
             let frac = max(0, min(0.999, digElapsed / digTime))
@@ -8379,7 +8450,9 @@ final class WorldSession {
         lastModelVerts = mv.count; lastModelIdx = mi.count   // seed next tick's reserve
         lastOverlayVerts = ov.count; lastOverlayIdx = oi.count
         lastBlendVerts = bv.count; lastBlendIdx = bi.count
-        modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi, pose: (eye, s.yaw))
+        lastXrayVerts = xv.count; lastXrayIdx = xi.count
+        modelHandoff.post(mv, mi, overlayVerts: ov, overlayIndices: oi, blendVerts: bv, blendIndices: bi,
+                          xrayVerts: xv, xrayIndices: xi, pose: (eye, s.yaw))
         if !doorDebugDone, !client.nodes.allNames().isEmpty {
             doorDebugDone = true
             // Only the wooden door + a fence gate: enough to see box geometry
@@ -11016,19 +11089,92 @@ final class WorldSession {
             boxes = [(nb, nb + SIMD3(1, 1, 1))]
         }
         for box in boxes {
-            let lo = box.lo - SIMD3(inset, inset, inset), hi = box.hi + SIMD3(inset, inset, inset)
-            for a in [lo.y, hi.y] { for b in [lo.z, hi.z] {   // X edges
-                appendBox(lo: SIMD3(lo.x - th, a - th, b - th), hi: SIMD3(hi.x + th, a + th, b + th),
-                          layer: layer, tint: 0, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
-            } }
-            for a in [lo.x, hi.x] { for b in [lo.z, hi.z] {   // Y edges
-                appendBox(lo: SIMD3(a - th, lo.y - th, b - th), hi: SIMD3(a + th, hi.y + th, b + th),
-                          layer: layer, tint: 0, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
-            } }
-            for a in [lo.x, hi.x] { for b in [lo.y, hi.y] {   // Z edges
-                appendBox(lo: SIMD3(a - th, b - th, lo.z - th), hi: SIMD3(a + th, b + th, hi.z + th),
-                          layer: layer, tint: 0, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
-            } }
+            appendEdges(lo: box.lo - SIMD3(inset, inset, inset), hi: box.hi + SIMD3(inset, inset, inset), th: th,
+                        layer: layer, tint: 0, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
+        }
+    }
+
+    /// The 12 edges of the box [lo, hi] as thin cuboids of half-thickness `th`:
+    /// the selection-box wireframe, in whatever colour `tint` says.
+    private func appendEdges(lo: SIMD3<Float>, hi: SIMD3<Float>, th: Float, layer: Int, tint: Float, light: Float,
+                             eye: SIMD3<Float>, cosY: Float, sinY: Float, v: inout [Float], idx: inout [UInt32]) {
+        for a in [lo.y, hi.y] { for b in [lo.z, hi.z] {   // X edges
+            appendBox(lo: SIMD3(lo.x - th, a - th, b - th), hi: SIMD3(hi.x + th, a + th, b + th),
+                      layer: layer, tint: tint, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
+        } }
+        for a in [lo.x, hi.x] { for b in [lo.z, hi.z] {   // Y edges
+            appendBox(lo: SIMD3(a - th, lo.y - th, b - th), hi: SIMD3(a + th, hi.y + th, b + th),
+                      layer: layer, tint: tint, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
+        } }
+        for a in [lo.x, hi.x] { for b in [lo.y, hi.y] {   // Z edges
+            appendBox(lo: SIMD3(a - th, b - th, lo.z - th), hi: SIMD3(a + th, b + th, hi.z + th),
+                      layer: layer, tint: tint, light: light, eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
+        } }
+    }
+
+    // MARK: - Ore finder
+
+    /// Re-resolve the outlined content ids whenever NODEDEF changes.
+    private func refreshOreIds() {
+        let v = client.nodes.version()
+        guard v != oreIdsVersion else { return }
+        oreIdsVersion = v
+        oreIdDiamond = client.nodes.id(for: "mcl_core:stone_with_diamond") ?? .max
+        oreIdDeepDiamond = client.nodes.id(for: "mcl_deepslate:deepslate_with_diamond") ?? .max
+        oreIdDebris = client.nodes.id(for: "mcl_nether:ancient_debris") ?? .max
+    }
+
+    /// Every diamond ore / ancient debris node within oreRange of the feet,
+    /// nearest first. Walks whole mapblocks (param0 is one flat 4096 array)
+    /// instead of 61^3 node lookups: about 125 blocks, one compare per node
+    /// against three ids, well under a millisecond. Only blocks the server has
+    /// sent count, so ore sealed behind two blocks of rock that the server's
+    /// occlusion culling held back is still a secret.
+    private func scanOres(feet: SIMD3<Float>) {
+        refreshOreIds()
+        let a = oreIdDiamond, b = oreIdDeepDiamond, c = oreIdDebris
+        guard a != .max || b != .max || c != .max else { oreHits = []; return }
+        let r = Self.oreRange, r2 = r * r
+        let fc = SIMD3<Int>(Int(floor(feet.x)), Int(floor(feet.y)), Int(floor(feet.z)))
+        let bl = WorldMap.blockPos(fc &- SIMD3(repeating: r)), bh = WorldMap.blockPos(fc &+ SIMD3(repeating: r))
+        var hits: [(pos: SIMD3<Int>, debris: Bool, d2: Int)] = []
+        for bx in bl.x...bh.x { for by in bl.y...bh.y { for bz in bl.z...bh.z {
+            guard let blk = client.world.blocks[SIMD3(bx, by, bz)] else { continue }
+            let base = blk.pos &* 16
+            blk.param0.withUnsafeBufferPointer { p in
+                for i in 0..<WorldMap.NODES_PER_BLOCK {
+                    let id = p[i]
+                    guard id == a || id == b || id == c else { continue }
+                    let n = base &+ SIMD3(i & 15, (i >> 4) & 15, i >> 8)   // WorldMap.index is (z*16 + y)*16 + x
+                    let d = n &- fc
+                    let d2 = d.x * d.x + d.y * d.y + d.z * d.z
+                    if d2 <= r2 { hits.append((n, id == c, d2)) }
+                }
+            }
+        } } }
+        hits.sort { $0.d2 < $1.d2 }
+        oreHits = hits
+        if hits.count != oreLoggedCount {
+            oreLoggedCount = hits.count
+            let near = hits.first.map { "\($0.debris ? "debris" : "diamond") at \($0.pos.x),\($0.pos.y),\($0.pos.z) d=\(Int(Double($0.d2).squareRoot().rounded()))" } ?? "-"
+            print("[orefinder] \(hits.count) in range, nearest \(near)"); fflush(stdout)
+        }
+    }
+
+    /// Wireframe every node the last scan found (nearest oreMaxDrawn), cyan for
+    /// diamond and orange for debris, into the see-through stream. Edges thicken
+    /// with distance so a far one still reads as a few pixels rather than a
+    /// flicker; up close they match the selection box.
+    private func appendOreOutlines(eye: SIMD3<Float>, cosY: Float, sinY: Float, v: inout [Float], idx: inout [UInt32]) {
+        guard highlightLayer >= 0, !oreHits.isEmpty else { return }
+        let inset: Float = 0.004
+        let cyan = Self.packTint(80, 220, 255), orange = Self.packTint(235, 125, 60)
+        for h in oreHits.prefix(Self.oreMaxDrawn) {
+            let th = Float(max(0.006, 0.0012 * Double(h.d2).squareRoot()))
+            let nb = SIMD3<Float>(Float(h.pos.x), Float(h.pos.y), Float(h.pos.z))
+            appendEdges(lo: nb - SIMD3(repeating: inset), hi: nb + SIMD3(repeating: 1 + inset), th: th,
+                        layer: highlightLayer, tint: h.debris ? orange : cyan, light: 255,
+                        eye: eye, cosY: cosY, sinY: sinY, v: &v, idx: &idx)
         }
     }
 

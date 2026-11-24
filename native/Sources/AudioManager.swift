@@ -86,6 +86,15 @@ final class ViewSettings {
             defaults.set(spreadCached, forKey: "view.hudSpread")
         }
     }
+    // Ore finder: outline diamond ore and ancient debris within 30 nodes,
+    // drawn through whatever is in the way. A VR concession: scanning a rock
+    // face for the odd blue speck is far slower in the headset than at a desk.
+    // On unless turned off (the key is stored inverted so "unset" means on).
+    private var oreFinderCached = !UserDefaults.standard.bool(forKey: "view.oreFinderOff")
+    var oreFinder: Bool {
+        get { oreFinderCached }
+        set { oreFinderCached = newValue; defaults.set(!newValue, forKey: "view.oreFinderOff"); print("[view] ore finder \(newValue)"); fflush(stdout) }
+    }
     // Pause-menu minimap toggle. Ours, not the server's.
     private var minimapCached = UserDefaults.standard.bool(forKey: "view.minimap")
     var minimap: Bool {

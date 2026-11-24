@@ -238,11 +238,15 @@ actor Renderer {
     var overlayVertexBuffer: MTLBuffer
     var overlayIndexBuffer: MTLBuffer
     var overlayIndexCount: Int = 0
+    var xrayVertexBuffer: MTLBuffer
+    var xrayIndexBuffer: MTLBuffer
+    var xrayIndexCount: Int = 0
     // last handoff generation consumed, so the 90Hz render loop skips
     // re-uploading the model/overlay streams the ~62.5Hz producer hasn't changed.
     private var lastModelGen = -1
     private var lastOverlayGen = -1
     private var lastBlendGen = -1
+    private var lastXrayGen = -1
     var modelTextureArray: MTLTexture? {
         get { appModel.modelTextureHandoff.gpuArray }
         set { appModel.modelTextureHandoff.gpuArray = newValue }
@@ -483,6 +487,8 @@ actor Renderer {
         modelIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
         overlayVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
         overlayIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
+        xrayVertexBuffer = device.makeBuffer(length: 32, options: [.storageModeShared])!
+        xrayIndexBuffer = device.makeBuffer(length: 4, options: [.storageModeShared])!
 
         // The streamed world starts empty; blocks arrive as deltas via
         // consumeMeshHandoff once the first chunks are meshed (sky-only until then).
@@ -2261,6 +2267,16 @@ actor Renderer {
     }
 
     private func consumeModelHandoff() {
+        let (xgen, xv, xi) = appModel.modelHandoff.readXray()
+        if xgen != lastXrayGen {
+            lastXrayGen = xgen
+            xrayIndexCount = 0
+            if !xi.isEmpty {
+                upload(xv, into: &xrayVertexBuffer)
+                upload(xi, into: &xrayIndexBuffer)
+                xrayIndexCount = xi.count
+            }
+        }
         let (bgen, bv, bi) = appModel.modelHandoff.readBlend()
         if bgen != lastBlendGen {
             lastBlendGen = bgen
@@ -2811,6 +2827,23 @@ actor Renderer {
             renderEncoder.setVertexBytes(&identity, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
         }
 
+        // Ore finder outlines: world-anchored like the models (same pose fix)
+        // but never depth-tested, so they show through the rock around the ore.
+        // Drawn before the tint passes so they dim underwater like everything else.
+        if xrayIndexCount > 0, let mtex = modelTextureArray {
+            renderEncoder.pushDebugGroup("Ore Finder")
+            renderEncoder.setRenderPipelineState(entityPipelineState)
+            renderEncoder.setDepthStencilState(noDepthState)
+            bindModel(renderEncoder, mtex)
+            renderEncoder.setVertexBuffer(xrayVertexBuffer, offset: 0, index: BufferIndex.meshPositions.rawValue)
+            var fix = modelFix
+            renderEncoder.setVertexBytes(&fix, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
+            renderEncoder.drawIndexedPrimitives(type: .triangle, indexCount: xrayIndexCount,
+                                                indexType: .uint32, indexBuffer: xrayIndexBuffer, indexBufferOffset: 0)
+            renderEncoder.setVertexBytes(&identity, length: MemoryLayout<float4x4>.stride, index: BufferIndex.entityFix.rawValue)
+            renderEncoder.popDebugGroup()
+        }
+
         // The spyglass lens view: world and mobs only. The HUD, hands and panels
         // sit a metre from the head, so at 8 degrees they'd fill the lens.
         if worldOnly { renderEncoder.popDebugGroup(); return }
@@ -3048,6 +3081,7 @@ actor Renderer {
             handHudTextVertexBuffer, handHudTextIndexBuffer,
             overlayVertexBuffer, overlayIndexBuffer,
             modelBlendVertexBuffer, modelBlendIndexBuffer,
+            xrayVertexBuffer, xrayIndexBuffer,
             pointerVertexBuffer, pointerIndexBuffer,
         ]
         if #available(visionOS 26.0, *) { perFrame.append(contentsOf: drawable.trackingAreasTextures as [any MTLAllocation]) }

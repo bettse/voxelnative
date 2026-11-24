@@ -43,6 +43,7 @@ struct ContentView: View {
     @State private var physicalMove = MoveSettings.shared.physicalMove
     @State private var hudDistance = ViewSettings.shared.hudDistance
     @State private var hudSpread = ViewSettings.shared.hudSpread
+    @State private var oreFinder = ViewSettings.shared.oreFinder
 
     // Testing mode: a note field for jotting bugs in-headset with the AVP
     // keyboard; notes are appended to Documents/bug-notes.txt so they can be
@@ -474,6 +475,11 @@ struct ContentView: View {
                 .frame(maxWidth: 360)
                 .onChange(of: physicalMove) { _, v in MoveSettings.shared.physicalMove = v }
             Text("Walking around your room moves your character too (never off a ledge). Off: only your view leans.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Toggle("Ore finder", isOn: $oreFinder)
+                .frame(maxWidth: 360)
+                .onChange(of: oreFinder) { _, v in ViewSettings.shared.oreFinder = v }
+            Text("Outlines diamond ore and ancient debris within 30 blocks, through rock. Only ore the server has already sent you counts.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
         .onChange(of: viewBlocks) { _, v in

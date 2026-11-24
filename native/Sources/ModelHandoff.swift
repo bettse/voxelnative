@@ -17,16 +17,22 @@ final class ModelHandoff {
     // after the opaque models, blended, without writing depth.
     private var bv: [Float] = []
     private var bi: [UInt32] = []
+    // See-through stream (the ore finder's outlines): world-anchored like the
+    // model stream, so it gets the same pose fix, but drawn with no depth test
+    // so the rock between you and the ore doesn't hide it.
+    private var xv: [Float] = []
+    private var xi: [UInt32] = []
     // One generation per stream, bumped only when that stream's bytes change,
     // so the renderer (90Hz vs the ~62.5Hz producer) skips re-uploading
     // unchanged geometry, and a walking mob doesn't re-upload an open
     // inventory panel's overlay.
-    private var gen = 0, ogen = 0, bgen = 0
+    private var gen = 0, ogen = 0, bgen = 0, xgen = 0
     /// The player eye (node coords) and yaw the model/blend streams were baked
     /// against, so the renderer can move them to its own, newer pose.
     private var pose = (eye: SIMD3<Float>.zero, yaw: Float(0))
     func post(_ verts: [Float], _ indices: [UInt32], overlayVerts: [Float] = [], overlayIndices: [UInt32] = [],
-              blendVerts: [Float] = [], blendIndices: [UInt32] = [], pose: (eye: SIMD3<Float>, yaw: Float)) {
+              blendVerts: [Float] = [], blendIndices: [UInt32] = [],
+              xrayVerts: [Float] = [], xrayIndices: [UInt32] = [], pose: (eye: SIMD3<Float>, yaw: Float)) {
         lock.lock()
         self.pose = pose
         // Only bump gen when the bytes actually changed, so the 90Hz renderer
@@ -43,11 +49,13 @@ final class ModelHandoff {
         if !same(verts, v) || !same(indices, i) { v = verts; i = indices; gen &+= 1 }
         if !same(overlayVerts, ov) || !same(overlayIndices, oi) { ov = overlayVerts; oi = overlayIndices; ogen &+= 1 }
         if !same(blendVerts, bv) || !same(blendIndices, bi) { bv = blendVerts; bi = blendIndices; bgen &+= 1 }
+        if !same(xrayVerts, xv) || !same(xrayIndices, xi) { xv = xrayVerts; xi = xrayIndices; xgen &+= 1 }
         lock.unlock()
     }
     func read() -> (gen: Int, v: [Float], i: [UInt32], pose: (eye: SIMD3<Float>, yaw: Float)) { lock.lock(); defer { lock.unlock() }; return (gen, v, i, pose) }
     func readOverlay() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (ogen, ov, oi) }
     func readBlend() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (bgen, bv, bi) }
+    func readXray() -> (gen: Int, v: [Float], i: [UInt32]) { lock.lock(); defer { lock.unlock() }; return (xgen, xv, xi) }
 }
 
 /// One full-res model texture, placed into a fixed-size layer of a texture
