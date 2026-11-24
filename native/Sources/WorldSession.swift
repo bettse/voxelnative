@@ -11162,15 +11162,17 @@ final class WorldSession {
     }
 
     /// Wireframe every node the last scan found (nearest oreMaxDrawn), cyan for
-    /// diamond and orange for debris, into the see-through stream. Edges thicken
-    /// with distance so a far one still reads as a few pixels rather than a
-    /// flicker; up close they match the selection box.
+    /// diamond and orange for debris, into the see-through stream. Edge
+    /// thickness grows with distance so the lines keep about the same width on
+    /// screen (a few pixels) near and far: with a fixed floor they were as heavy
+    /// as the black selection box when the ore sat right behind the node you
+    /// were digging, and the two frames fought (Eric, on the headset).
     private func appendOreOutlines(eye: SIMD3<Float>, cosY: Float, sinY: Float, v: inout [Float], idx: inout [UInt32]) {
         guard highlightLayer >= 0, !oreHits.isEmpty else { return }
         let inset: Float = 0.004
         let cyan = Self.packTint(80, 220, 255), orange = Self.packTint(235, 125, 60)
         for h in oreHits.prefix(Self.oreMaxDrawn) {
-            let th = Float(max(0.006, 0.0012 * Double(h.d2).squareRoot()))
+            let th = Float(max(0.0015, 0.0012 * Double(h.d2).squareRoot()))
             let nb = SIMD3<Float>(Float(h.pos.x), Float(h.pos.y), Float(h.pos.z))
             appendEdges(lo: nb - SIMD3(repeating: inset), hi: nb + SIMD3(repeating: 1 + inset), th: th,
                         layer: highlightLayer, tint: h.debris ? orange : cyan, light: 255,
