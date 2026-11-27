@@ -144,6 +144,14 @@ final class AppModel {
     /// they do NOT fire when the immersive space opens (which just backgrounds
     /// the 2D window), so they don't thrash the live session.
     @ObservationIgnored private var lifecycleObserved = false
+    // Exit to menu closes the immersive space before the launcher window is
+    // back, so for an instant the app has no scene and visionOS backgrounds
+    // and foregrounds it. The foreground handler then started a session
+    // nobody asked for: it logged in and streamed the world with no space to
+    // show it, and the next Play found the session already started, so the
+    // launcher sat on "Connecting..." until the player cancelled and tried
+    // again. Only resume a session that was running when we backgrounded.
+    @ObservationIgnored private var sessionRanBeforeBackground = false
     func observeLifecycle() {
         if lifecycleObserved { return }
         lifecycleObserved = true
@@ -162,13 +170,20 @@ final class AppModel {
             bg = app.beginBackgroundTask(withName: "voxel.disconnect") {
                 if bg != .invalid { app.endBackgroundTask(bg); bg = .invalid }
             }
+            self?.sessionRanBeforeBackground = self?.session.isRunning ?? false
             self?.session.stop()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 if bg != .invalid { app.endBackgroundTask(bg); bg = .invalid }
             }
         }
         nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
-            self?.session.start()
+            guard let self else { return }
+            guard self.sessionRanBeforeBackground else {
+                print("[app] foreground with no session to resume"); fflush(stdout)
+                return
+            }
+            self.sessionRanBeforeBackground = false
+            self.session.start()
         }
         // Focus changes, timestamped, so a world the system closed can be lined
         // up with what the player was doing (it resigns active before it closes).

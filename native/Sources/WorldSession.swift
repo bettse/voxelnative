@@ -275,7 +275,9 @@ final class WorldSession {
 
     /// Push the connection phase to the launcher (main actor). Also mirrors a
     /// short problem string for the in-world banner.
+    private var phase: AppModel.ConnPhase = .idle   // last phase posted (session queue)
     private func setPhase(_ phase: AppModel.ConnPhase) {
+        self.phase = phase
         switch phase {
         case .reconnecting(let n): connProblem = deniedReason.map { "\($0): reconnecting\u{2026} (\(n))" } ?? "Reconnecting\u{2026} (\(n))"
         case .failed(let r):       connProblem = "Disconnected: \(r)"
@@ -419,6 +421,8 @@ final class WorldSession {
         SIMD3(1,0,0), SIMD3(-1,0,0), SIMD3(0,1,0), SIMD3(0,-1,0), SIMD3(0,0,1), SIMD3(0,0,-1)
     ]
     private var started = false
+    /// Whether start() has run without a stop() since (main thread).
+    var isRunning: Bool { started }
     private var prevDig = false, prevPlace = false
     // Drop chord: right trigger + right grip together = desktop Q.
     private var dropChordLatched = false        // chord fired; both buttons ignored until both release
@@ -1416,7 +1420,10 @@ final class WorldSession {
         // is the immersive space opening after the launcher already connected
         // (it waits for the login before showing the world): the renderer is
         // new, so it needs the world posted again.
-        if started { queue.async { [weak self] in self?.repostForNewRenderer() }; return }
+        // Re-announce the phase too: the launcher's Connect writes "connecting"
+        // over whatever this session had reached, then waits for a phase change
+        // that an already-streaming session would never send again.
+        if started { queue.async { [weak self] in guard let self else { return }; self.repostForNewRenderer(); self.setPhase(self.phase) }; return }
         started = true
         // Build stamp first: deploy is install-only and a live app keeps running
         // old code, so "which build is this log from?" must be answerable here.
