@@ -355,9 +355,26 @@ actor Renderer {
     private var accessoryTracking: AccessoryTrackingProvider?
     private let accessoryLock = NSLock()
     private nonisolated(unsafe) var accessoryXforms: [String: simd_float4x4] = [:]
+    // Same keys: origin-from-grip for a controller that labels its grip (the
+    // PSVR2 Sense does). ARKit's predefined locations follow the OpenXR spec,
+    // so the grip pose has -Z along the handle toward the thumb, -Y toward
+    // the knuckles and +X out through the back of the hand: the frame a tool
+    // gripped in the fist lives in. The anchor itself is aim-like (-Z out
+    // the ring; the panel ray uses it), which is the wrong axis for a handle.
+    private nonisolated(unsafe) var accessoryGripXforms: [String: simd_float4x4] = [:]
+    private nonisolated(unsafe) var gripLogged: Set<String> = []
     // Key -> when its tracking dropped; the stale pose above stays for accessoryGrace.
     private nonisolated(unsafe) var accessoryLost: [String: TimeInterval] = [:]
     private static let accessoryGrace: TimeInterval = 0.5
+    /// origin-from-grip for an accessory anchor, nil when the accessory has no
+    /// grip label (ARKit then hands back the anchor's own space).
+    private static func gripTransform(of a: AccessoryAnchor) -> simd_float4x4? {
+        let g = a.coordinateSpace(for: .grip, correction: .rendered).ancestorFromSpaceTransformFloat().matrix
+        let o = a.originFromAnchorTransform
+        let same = simd_length(g.columns.0 - o.columns.0) < 1e-4 && simd_length(g.columns.1 - o.columns.1) < 1e-4
+            && simd_length(g.columns.2 - o.columns.2) < 1e-4 && simd_length(g.columns.3 - o.columns.3) < 1e-4
+        return same ? nil : g
+    }
     // The provider the session is running, read per frame (under accessoryLock)
     // to predict controller poses for the frame's display time.
     private nonisolated(unsafe) var runningAccessoryProvider: AccessoryTrackingProvider?
@@ -618,6 +635,19 @@ actor Renderer {
                 let now = CACurrentMediaTime()
                 if a.isTracked {
                     self.accessoryXforms[key] = a.originFromAnchorTransform
+                    let grip = Self.gripTransform(of: a)
+                    if let grip { self.accessoryGripXforms[key] = grip } else { self.accessoryGripXforms.removeValue(forKey: key) }
+                    if !self.gripLogged.contains(key) {
+                        self.gripLogged.insert(key)
+                        if let grip {
+                            // anchor-from-grip, so the log says how the handle sits relative to the aim.
+                            let rel = a.originFromAnchorTransform.inverse * grip
+                            let f: (SIMD4<Float>) -> String = { String(format: "(%.2f %.2f %.2f %.2f)", $0.x, $0.y, $0.z, $0.w) }
+                            print("[acc] \(key) grip relative to anchor: x=\(f(rel.columns.0)) y=\(f(rel.columns.1)) z=\(f(rel.columns.2)) t=\(f(rel.columns.3))"); fflush(stdout)
+                        } else {
+                            print("[acc] \(key) has no grip label; tools follow the aim axis"); fflush(stdout)
+                        }
+                    }
                     if let lost = self.accessoryLost.removeValue(forKey: key) {
                         print("[acc] \(key) tracking back after \(String(format: "%.2f", now - lost)) s"); fflush(stdout)
                     }
@@ -664,6 +694,14 @@ actor Renderer {
         } else {
             accessoryXforms["simRight"] = hand(0.16)
         }
+        // A grip for the fake right controller, so the gripped-tool pose can
+        // be previewed here: the handle tilted 40 degrees back from vertical,
+        // thumb up, like a Sense held pointing forward (OpenXR grip axes).
+        var g = matrix_identity_float4x4
+        g.columns.1 = SIMD4<Float>(0, -0.64, 0.77, 0)
+        g.columns.2 = SIMD4<Float>(0, -0.77, -0.64, 0)
+        g.columns.3 = SIMD4<Float>(0, -0.03, 0.02, 1)
+        accessoryGripXforms["simRight"] = accessoryXforms["simRight"]! * g
         accessoryLock.unlock()
     }
     #endif
@@ -752,15 +790,19 @@ actor Renderer {
     // accessory lock, copied the dict and lowercased every key (perf review #7).
     private var poseFrame: UInt64 = .max
     private var poseLeft: simd_float4x4?, poseRight: simd_float4x4?
+    private var gripLeft: simd_float4x4?, gripRight: simd_float4x4?   // see accessoryGripXforms
+    private func gripPose(left: Bool) -> simd_float4x4? { left ? gripLeft : gripRight }
     private func resolveHandPoses(frameIndex: UInt64, at time: TimeInterval?) {
         guard poseFrame != frameIndex else { return }
         poseFrame = frameIndex
         accessoryLock.lock()
         var acc = accessoryXforms
+        var grips = accessoryGripXforms
         let provider = runningAccessoryProvider
         let now = CACurrentMediaTime()
         for (k, lost) in accessoryLost where now - lost > Self.accessoryGrace {
             acc.removeValue(forKey: k)    // past the grace, fall through to the bare hand
+            grips.removeValue(forKey: k)
         }
         accessoryLock.unlock()
         // Predict each controller to when this frame is shown. The anchorUpdates
@@ -769,16 +811,20 @@ actor Renderer {
         // update arrived late (Eric: the inventory dot "stutters and slows").
         if let provider, let time {
             for a in provider.latestAnchors where a.isTracked {
-                let m = (provider.predictAnchor(for: a, at: time) ?? a).originFromAnchorTransform
-                acc["\(a.accessory.inherentChirality)"] = m
+                let pa = provider.predictAnchor(for: a, at: time) ?? a
+                let key = "\(a.accessory.inherentChirality)"
+                acc[key] = pa.originFromAnchorTransform
+                if grips[key] != nil, let g = Self.gripTransform(of: pa) { grips[key] = g }
             }
         }
         var l: simd_float4x4? = nil, r: simd_float4x4? = nil
+        var gl: simd_float4x4? = nil, gr: simd_float4x4? = nil
         for (k, m) in acc {
             let lk = k.lowercased()
-            if l == nil, lk.contains("left") { l = m }
-            if r == nil, lk.contains("right") { r = m }
+            if l == nil, lk.contains("left") { l = m; gl = grips[k] }
+            if r == nil, lk.contains("right") { r = m; gr = grips[k] }
         }
+        gripLeft = gl; gripRight = gr
         if (l == nil || r == nil), HandTrackingProvider.isSupported, handTracking.state == .running {
             let a = handTracking.latestAnchors
             if l == nil, let h = a.leftHand, h.isTracked { l = h.originFromAnchorTransform }
@@ -1204,16 +1250,35 @@ actor Renderer {
             if hud.digging { swing = 0.5 * Float(sin(now * 2 * 2 * .pi)) }                  // ~2 Hz pitch swing
             if hud.wieldHeld, case .item(let layer, let uv) = w {
                 // Gripped: the icon's handle corner (tool icons are all drawn
-                // handle bottom-left, tip top-right) in the fist, its diagonal
-                // run forward along the controller and tipped up 20 degrees,
-                // the flat of the blade facing sideways like a real sword.
+                // handle bottom-left, tip top-right) in the fist, the flat of
+                // the blade against the palm like a real sword.
                 let size = 0.16 * hud.wieldScale
-                let held = hand * matrix4x4_translation(0.0, dipY, -0.05)                       // in the fist
+                // Icon -> grip axes: diagonal (handle to tip) along -Z, blade
+                // edge (icon -Y) along -Y, flat faces +-X.
+                let iconToGrip = matrix4x4_rotation(radians: .pi / 2, axis: SIMD3(0, 1, 0))     // icon +X -> -Z
+                               * matrix4x4_rotation(radians: -.pi / 4, axis: SIMD3(0, 0, 1))    // diagonal -> icon +X
+                               * matrix4x4_translation(0.35 * size, 0.35 * size, 0)              // handle corner to the origin
+                let held: simd_float4x4
+                if let grip = gripPose(left: false) {
+                    // The controller labels its grip (PSVR2 Sense): OpenXR grip
+                    // pose, -Z along the handle toward the thumb, -Y toward the
+                    // knuckles, +X out the back of the hand. The tool runs up
+                    // the handle, head on the thumb side, edge toward the
+                    // knuckles. The handle corner sits a little below the palm.
+                    held = grip * matrix4x4_rotation(radians: swing, axis: SIMD3(1, 0, 0))
+                         * matrix4x4_translation(0.0, dipY, 0.04)
+                         * iconToGrip
+                } else {
+                    // No grip label (bare hands, other controllers): the old
+                    // pose, run forward along the aim axis and tipped up 20
+                    // degrees. On the Sense this put the axe head up and back
+                    // at the player's face whenever the controller rested ring
+                    // up, with the edge toward them (Eric: "is the axe backwards?").
+                    held = hand * matrix4x4_translation(0.0, dipY, -0.05)                       // in the fist
                          * matrix4x4_rotation(radians: swing, axis: SIMD3(1, 0, 0))
                          * matrix4x4_rotation(radians: 20 * .pi / 180, axis: SIMD3(1, 0, 0))    // tip up
-                         * matrix4x4_rotation(radians: .pi / 2, axis: SIMD3(0, 1, 0))           // icon +X -> forward, flat faces sideways
-                         * matrix4x4_rotation(radians: -.pi / 4, axis: SIMD3(0, 0, 1))          // diagonal -> icon +X
-                         * matrix4x4_translation(0.35 * size, 0.35 * size, 0)                    // handle corner to the origin
+                         * iconToGrip
+                }
                 if let sil = hud.wieldSilhouette {
                     emitHandSilhouette(held, mesh: sil, size: size, layer: layer, uv: uv, light: hud.wieldLight, tint: hud.wieldTint, into: &v, idx: &idx)
                 } else {
