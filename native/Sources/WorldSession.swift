@@ -3449,13 +3449,15 @@ final class WorldSession {
             // on desktop you sink; in VR that drifts you away from the panel
             // and, from the surface, under water. Hold the depth instead.
             let panelUp = inventoryOpen || formspecOpen || keyboardOpen || koganeMenuOpen
-            let vy = player.buoyantVY(dt: dt, submerged: submerged, swimUp: gi.jump && !panelUp, hold: panelUp)
+            let holdUnsent = standingInUnsent(feet0)   // see the land branch
+            let vy = holdUnsent ? 0 : player.buoyantVY(dt: dt, submerged: submerged, swimUp: gi.jump && !panelUp, hold: panelUp)
             // Sweep server knockback here too (like the land branch): you can be
             // pushed by explosions/mobs in water, and — importantly — this decays
             // the impulse. Skipping it left an impulse taken underwater sitting
             // undecayed in _extVel until you surfaced, then firing as a lurch.
             let kb = player.takeExternalDelta(dt: dt)
-            let r = collideMove(feet: feet0, delta: SIMD3(dx + kb.x, vy * dt, dz + kb.y), grounded: false)
+            let r = holdUnsent ? (feet: feet0, hitFloor: false, hitCeil: false)
+                : collideMove(feet: feet0, delta: SIMD3(dx + kb.x, vy * dt, dz + kb.y), grounded: false)
             var newVy = vy
             if r.hitCeil && newVy > 0 { newVy = 0 }
             if r.hitFloor && newVy < 0 { newVy = 0 }
@@ -3467,6 +3469,18 @@ final class WorldSession {
             // horizontal hit steps up rises <= stepHeight (slabs, stairs), so full
             // blocks still need a jump and you hit your head indoors.
             var (feet, vy, grounded) = player.physics()
+            // Luanti (collision.cpp) moves nothing and zeroes the speed when the
+            // sweep touches an "ignore" node, a block the server hasn't sent
+            // yet. Without that, a teleport or portal arrival onto ground the
+            // client hadn't received yet fell straight through it: the sim
+            // landed on a bridge deck the server had placed, dropped 20 nodes
+            // and died in the lava before the deck's block arrived.
+            let holdUnsent = standingInUnsent(feet)
+            if holdUnsent != unsentHold {
+                unsentHold = holdUnsent
+                print(holdUnsent ? "[move] holding: the ground here hasn't arrived yet" : "[move] ground arrived, moving again"); fflush(stdout)
+            }
+            if holdUnsent { vy = 0 }
             // Physical locomotion: your real steps move the character. The head's
             // horizontal offset from the room anchor (PlayerState.roomAnchor) is
             // walked off through collision each tick and the anchor follows by
@@ -3569,7 +3583,8 @@ final class WorldSession {
             }
             let mdx = dx, mdz = dz
             let kb = player.takeExternalDelta(dt: dt)   // server knockback (PLAYER_SPEED), swept against walls
-            let r = collideMove(feet: feet, delta: SIMD3(mdx + kb.x, vy * dt, mdz + kb.y), grounded: grounded, climbing: climbing)
+            let r = holdUnsent ? (feet: feet, hitFloor: false, hitCeil: false)
+                : collideMove(feet: feet, delta: SIMD3(mdx + kb.x, vy * dt, mdz + kb.y), grounded: grounded, climbing: climbing)
             // Autojump (localplayer.cpp handleAutojump), when the setting is on:
             // on the ground, walking, not already jumping or sneaking, and this
             // tick's move came up short (ran into something). If the box one
@@ -11814,6 +11829,15 @@ final class WorldSession {
     }
 
     /// Solid boxes of every node the swept player box could touch.
+    private var unsentHold = false
+    /// The node at the feet or the one under it is in a mapblock the server
+    /// hasn't sent (CONTENT_IGNORE): nothing to stand on or fall through yet.
+    private func standingInUnsent(_ feet: SIMD3<Float>) -> Bool {
+        let n = SIMD3(Int(floor(feet.x)), Int(floor(feet.y)), Int(floor(feet.z)))
+        return client.world.nodeId(n) == WorldMap.CONTENT_IGNORE
+            || client.world.nodeId(n &- SIMD3(0, 1, 0)) == WorldMap.CONTENT_IGNORE
+    }
+
     private func solidBoxes(around box: AABB, climbing: Bool = false) -> [AABB] {
         var out: [AABB] = []
         let lo = SIMD3(Int(floor(box.lo.x)), Int(floor(box.lo.y)), Int(floor(box.lo.z)))
